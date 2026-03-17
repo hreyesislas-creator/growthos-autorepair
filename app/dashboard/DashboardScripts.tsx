@@ -40,9 +40,7 @@ function showPage(id: string, navEl: HTMLElement | null) {
   const tb = pageTopbar[id] ?? { title: id, sub: '' }
   const topbarEl = document.getElementById('topbar-content')
   if (topbarEl) {
-    topbarEl.innerHTML =
-      \`<span class="topbar-title">\${tb.title}</span><span class="topbar-sub">&nbsp;\${tb.sub}</span>\`
-  }
+    topbarEl.innerHTML = `<span class="topbar-title">${tb.title}</span><span class="topbar-sub">&nbsp;${tb.sub}</span>`;  }
 
   // scroll to top
   window.scrollTo(0, 0)
