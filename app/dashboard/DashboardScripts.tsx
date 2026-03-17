@@ -61,15 +61,19 @@ document.querySelectorAll('.status-btn').forEach(btn => {
 
 // Mobile status buttons
 document.querySelectorAll('.mobile-status-btn').forEach(btn => {
-  btn.addEventListener('click', function() {
+  btn.addEventListener('click', function (this: HTMLElement) {
     const row = this.closest('.mobile-status-row');
+    if (!row) return;
+
     row.querySelectorAll('.mobile-status-btn').forEach(b => {
-      b.className = 'mobile-status-btn msb-inactive';
+      (b as HTMLElement).className = 'mobile-status-btn msb-inactive';
     });
-    const type = this.textContent.trim().toLowerCase();
-    if (type.includes('good')) this.className = 'mobile-status-btn msb-good';
-    else if (type.includes('attn')) this.className = 'mobile-status-btn msb-attention';
-    else if (type.includes('urgent')) this.className = 'mobile-status-btn msb-urgent';
+
+    const type = this.textContent?.trim().toLowerCase() || '';
+
+    if (type === 'good') this.className = 'mobile-status-btn msb-good';
+    else if (type === 'attn') this.className = 'mobile-status-btn msb-attn';
+    else if (type === 'urgent') this.className = 'mobile-status-btn msb-urgent';
   });
 });
 
