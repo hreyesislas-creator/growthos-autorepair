@@ -24,7 +24,7 @@ const pageTopbar = {
   'messages':     { title: 'Messages', sub: 'Customer communication center' },
 };
 
-function showPage(id, navEl) {
+function showPage(id: string, navEl: HTMLElement) {
   // hide all pages
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -40,8 +40,7 @@ function showPage(id, navEl) {
   const tb = pageTopbar[id] || { title: id, sub: '' };
   document.getElementById('topbar-content')!.innerHTML = `
   <span class="topbar-title">${tb.title}</span>
-  <span class="topbar-sub">&nbsp;${tb.sub}</span>
-`;
+  <span class="topbar-sub">&nbsp;${tb.sub}</span>`;
 
   // scroll to top
   window.scrollTo(0, 0);
