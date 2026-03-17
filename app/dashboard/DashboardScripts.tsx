@@ -48,10 +48,11 @@ function showPage(id: string, navEl: HTMLElement) {
 
 // Mini interactivity for status buttons
 document.querySelectorAll('.status-btn').forEach(btn => {
-  btn.addEventListener('click', function() {
+  btn.addEventListener('click', function (this: HTMLElement) {
     const row = this.closest('.insp-item-status');
+    if (!row) return;
     row.querySelectorAll('.status-btn').forEach(b => b.className = 'status-btn inactive');
-    const type = this.textContent.trim().toLowerCase();
+    const type = this.textContent?.trim().toLowerCase() || '';
     if (type === 'good') this.className = 'status-btn good';
     else if (type === 'attn') this.className = 'status-btn attention';
     else if (type === 'urgent') this.className = 'status-btn urgent';
