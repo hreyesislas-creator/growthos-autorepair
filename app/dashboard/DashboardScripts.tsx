@@ -10,7 +10,7 @@ export default function DashboardScripts() {
 //  GROWTHOS — NAV CONTROLLER
 // ═══════════════════════════════════════════
 
-const pageTopbar = {
+const pageTopbar: Record<string, { title: string; sub: string }> = {
   'dashboard':    { title: 'Dashboard', sub: 'Monday, Mar 16 · Banning, CA' },
   'jobs':         { title: 'Jobs Pipeline', sub: '9 active jobs today' },
   'customers':    { title: 'Customers CRM', sub: '1,247 total customers' },
