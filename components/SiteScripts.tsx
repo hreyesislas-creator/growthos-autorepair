@@ -65,13 +65,13 @@ export default function SiteScripts({ page }: SiteScriptsProps) {
         dotsWrap.appendChild(d)
       }
 
-      function spGoTo(idx: number) {
+      const spGoTo = (idx: number) => {
         cur = ((idx % TOTAL) + TOTAL) % TOTAL
         ;(track as HTMLElement).style.transform = `translateX(-${cur * 100}%)`
         dotsWrap!.querySelectorAll('.sp-dot').forEach((d, i) =>
           d.classList.toggle('active', i === cur)
         )
-      }
+      };
 
       ;(window as any).spMove = (dir: number) => {
         spGoTo(cur + dir)
