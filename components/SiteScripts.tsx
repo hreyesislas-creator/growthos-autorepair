@@ -71,16 +71,16 @@ export default function SiteScripts({ page }: SiteScriptsProps) {
         dotsWrap!.querySelectorAll('.sp-dot').forEach((d, i) =>
           d.classList.toggle('active', i === cur)
         )
-      };
+      }
+
+      const resetTimer = () => {
+        if (timer) clearInterval(timer)
+        if (!paused) timer = setInterval(() => spGoTo(cur + 1), 4500)
+      }
 
       ;(window as any).spMove = (dir: number) => {
         spGoTo(cur + dir)
         resetTimer()
-      }
-
-      function resetTimer() {
-        if (timer) clearInterval(timer)
-        if (!paused) timer = setInterval(() => spGoTo(cur + 1), 4500)
       }
 
       const outer = track.closest('.sp-outer') as HTMLElement | null
@@ -212,7 +212,7 @@ export default function SiteScripts({ page }: SiteScriptsProps) {
     }
 
     // ── Toast notification ──────────────────────────────────
-    function toast(msg: string, color?: string) {
+    const toast = (msg: string, color?: string) => {
       const existing = document.getElementById('__toast__')
       if (existing) existing.remove()
       const t = document.createElement('div')
