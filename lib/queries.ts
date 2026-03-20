@@ -629,6 +629,34 @@ export async function getBillingEvents(tenantId: string): Promise<BillingEvent[]
 
 // ── Team ──────────────────────────────────────────────────────
 
+/**
+ * Returns the tenant_users row for the currently logged-in Supabase auth user.
+ * Used to pre-populate technician / assigned_user fields with the current user.
+ * The real DB column is `auth_user_id` (same as what tenant.ts queries).
+ */
+export async function getCurrentTenantUser(tenantId: string): Promise<TenantUser | null> {
+  if (!hasValue(tenantId)) return null
+
+  const supabase = await createClient()
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+
+  const { data, error } = await supabase
+    .from('tenant_users')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('auth_user_id', user.id)
+    .single()
+
+  if (error) {
+    console.error('[getCurrentTenantUser]', error.message)
+    return null
+  }
+
+  return data as TenantUser | null
+}
+
 export async function getTeamUsers(tenantId: string): Promise<TenantUser[]> {
   if (!hasValue(tenantId)) return []
 

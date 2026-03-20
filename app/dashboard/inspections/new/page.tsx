@@ -1,5 +1,8 @@
 import { getDashboardTenant } from '@/lib/tenant'
-import { getCustomers, getVehicles, getInspectionTemplates } from '@/lib/queries'
+import {
+  getCustomers, getVehicles, getInspectionTemplates,
+  getTeamUsers, getCurrentTenantUser,
+} from '@/lib/queries'
 import Topbar from '@/components/dashboard/Topbar'
 import InspectionForm from '../InspectionForm'
 
@@ -9,10 +12,12 @@ export default async function NewInspectionPage() {
   const ctx      = await getDashboardTenant()
   const tenantId = ctx?.tenant.id ?? ''
 
-  const [customers, vehicles, templates] = await Promise.all([
+  const [customers, vehicles, templates, teamUsers, currentUser] = await Promise.all([
     getCustomers(tenantId),
     getVehicles(tenantId),
     getInspectionTemplates(tenantId),
+    getTeamUsers(tenantId),
+    getCurrentTenantUser(tenantId),
   ])
 
   return (
@@ -22,6 +27,8 @@ export default async function NewInspectionPage() {
         customers={customers}
         vehicles={vehicles}
         templates={templates}
+        teamUsers={teamUsers}
+        currentTenantUserId={currentUser?.id ?? null}
       />
     </>
   )

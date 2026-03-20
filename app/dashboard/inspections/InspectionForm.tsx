@@ -3,17 +3,30 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createInspection } from './actions'
-import type { Vehicle, Customer, InspectionTemplate } from '@/lib/types'
+import type { Vehicle, Customer, InspectionTemplate, TenantUser } from '@/lib/types'
 
-interface Props {
-  vehicles:  Vehicle[]
-  customers: Customer[]
-  templates: InspectionTemplate[]
+const ROLE_LABELS: Record<string, string> = {
+  owner: 'Owner', admin: 'Admin', advisor: 'Advisor',
+  technician: 'Technician', viewer: 'Viewer',
 }
 
-export default function InspectionForm({ vehicles, customers, templates }: Props) {
+interface Props {
+  vehicles:             Vehicle[]
+  customers:            Customer[]
+  templates:            InspectionTemplate[]
+  teamUsers:            TenantUser[]
+  currentTenantUserId:  string | null
+}
+
+export default function InspectionForm({
+  vehicles,
+  customers,
+  templates,
+  teamUsers,
+  currentTenantUserId,
+}: Props) {
   const router  = useRouter()
-  const [error, setError]     = useState<string | null>(null)
+  const [error,   setError]   = useState<string | null>(null)
   const [pending, setPending] = useState(false)
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -41,6 +54,27 @@ export default function InspectionForm({ vehicles, customers, templates }: Props
           <div className="section-title" style={{ marginBottom: 20 }}>New Inspection</div>
 
           <div className="form-grid">
+
+            {/* Technician — defaults to current user, manual override allowed */}
+            <div className="form-group span-2">
+              <label className="field-label">
+                Technician
+                <span style={{ color: 'var(--text-3)', fontWeight: 400 }}> (defaults to you)</span>
+              </label>
+              <select
+                name="technician_id"
+                className="field-select"
+                defaultValue={currentTenantUserId ?? ''}
+              >
+                <option value="">— Unassigned —</option>
+                {teamUsers.map(u => (
+                  <option key={u.id} value={u.id}>
+                    {u.full_name || u.email}
+                    {u.role ? ` · ${ROLE_LABELS[u.role] ?? u.role}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
 
             {/* Customer */}
             <div className="form-group span-2">
@@ -72,7 +106,10 @@ export default function InspectionForm({ vehicles, customers, templates }: Props
             {/* Template */}
             {templates.length > 0 && (
               <div className="form-group span-2">
-                <label className="field-label">Template <span style={{ color: 'var(--text-3)', fontWeight: 400 }}>(optional)</span></label>
+                <label className="field-label">
+                  Template
+                  <span style={{ color: 'var(--text-3)', fontWeight: 400 }}> (optional)</span>
+                </label>
                 <select name="template_id" className="field-select">
                   <option value="">— No template —</option>
                   {templates.map(t => (
@@ -84,8 +121,16 @@ export default function InspectionForm({ vehicles, customers, templates }: Props
 
             {/* Notes */}
             <div className="form-group span-2">
-              <label className="field-label">Notes <span style={{ color: 'var(--text-3)', fontWeight: 400 }}>(optional)</span></label>
-              <textarea name="notes" className="field-textarea" rows={3} placeholder="Technician notes, customer concerns..." />
+              <label className="field-label">
+                Notes
+                <span style={{ color: 'var(--text-3)', fontWeight: 400 }}> (optional)</span>
+              </label>
+              <textarea
+                name="notes"
+                className="field-textarea"
+                rows={3}
+                placeholder="Technician notes, customer concerns..."
+              />
             </div>
 
           </div>

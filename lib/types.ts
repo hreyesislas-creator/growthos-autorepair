@@ -21,7 +21,10 @@ export interface Tenant {
 export interface TenantUser {
   id: string
   tenant_id: string
+  /** Supabase auth user UUID — DB column is auth_user_id */
   user_id: string
+  /** Alias for the actual DB column name used in queries */
+  auth_user_id?: string
   role: 'owner' | 'admin' | 'advisor' | 'technician' | 'viewer'
   full_name: string
   email: string
@@ -337,7 +340,10 @@ export interface Inspection {
   vehicle_id: string | null
   customer_id: string | null
   template_id: string | null
+  /** User who opened / is responsible for the record (advisor / service writer) */
   assigned_user_id: string | null
+  /** Technician who physically performs the inspection — tenant_users.id */
+  technician_id: string | null
   status: 'draft' | 'in_progress' | 'completed' | 'sent'
   notes: string | null
   completed_at: string | null
