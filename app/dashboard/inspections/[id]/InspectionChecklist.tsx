@@ -1,11 +1,13 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 import type { Inspection, InspectionTemplateItem } from '@/lib/types'
+import { saveInspectionResults } from '../actions'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-/** Mirrors InspectionItem.result — kept in sync so wiring persistence is trivial */
+/** Mirrors InspectionItem.status — 1:1 with DB enum values */
 type ItemResult = 'pass' | 'attention' | 'urgent' | 'not_checked'
 
 interface ItemState {
@@ -18,10 +20,12 @@ interface Section {
   items: InspectionTemplateItem[]
 }
 
+/** Shape of the existing inspection_items rows loaded from DB */
 interface ExistingItem {
   template_item_id: string | null
-  result: ItemResult
-  technician_note: string | null
+  /** DB column is status, not result */
+  status: ItemResult
+  notes: string | null
 }
 
 interface Props {
@@ -33,48 +37,31 @@ interface Props {
 // ── Status button config ───────────────────────────────────────────────────────
 
 const STATUS_OPTIONS: {
-  value:     ItemResult
-  label:     string
-  shortLabel: string
+  value:       ItemResult
+  label:       string
   activeStyle: React.CSSProperties
 }[] = [
   {
     value:       'pass',
     label:       'OK',
-    shortLabel:  'OK',
-    activeStyle: {
-      background: '#16a34a',
-      color:      '#fff',
-      borderColor: '#16a34a',
-    },
+    activeStyle: { background: '#16a34a', color: '#fff', borderColor: '#16a34a' },
   },
   {
     value:       'attention',
     label:       'Warning',
-    shortLabel:  '⚠',
-    activeStyle: {
-      background: '#d97706',
-      color:      '#fff',
-      borderColor: '#d97706',
-    },
+    activeStyle: { background: '#d97706', color: '#fff', borderColor: '#d97706' },
   },
   {
     value:       'urgent',
     label:       'Critical',
-    shortLabel:  '!',
-    activeStyle: {
-      background: '#dc2626',
-      color:      '#fff',
-      borderColor: '#dc2626',
-    },
+    activeStyle: { background: '#dc2626', color: '#fff', borderColor: '#dc2626' },
   },
   {
     value:       'not_checked',
     label:       'N/C',
-    shortLabel:  '—',
     activeStyle: {
-      background: 'var(--surface-3, #e5e7eb)',
-      color:      'var(--text-3)',
+      background:  'var(--surface-3, #e5e7eb)',
+      color:       'var(--text-3)',
       borderColor: 'var(--border)',
     },
   },
@@ -95,6 +82,7 @@ function buildInitialState(
 ): Record<string, ItemState> {
   const state: Record<string, ItemState> = {}
 
+  // Index existing DB rows by template_item_id for O(1) lookup
   const existingMap = new Map<string, ExistingItem>()
   for (const ei of existingItems) {
     if (ei.template_item_id) existingMap.set(ei.template_item_id, ei)
@@ -104,8 +92,9 @@ function buildInitialState(
     for (const item of section.items) {
       const existing = existingMap.get(item.id)
       state[item.id] = {
-        result: existing?.result ?? 'not_checked',
-        note:   existing?.technician_note ?? '',
+        // Use 'status' from DB row (not legacy 'result' field)
+        result: existing?.status ?? 'not_checked',
+        note:   existing?.notes  ?? '',
       }
     }
   }
@@ -120,20 +109,24 @@ export default function InspectionChecklist({
   sections,
   existingItems,
 }: Props) {
+  const router = useRouter()
+
   const [itemState, setItemState] = useState<Record<string, ItemState>>(
     () => buildInitialState(sections, existingItems),
   )
   const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set())
-  const [saving, setSaving] = useState(false)
+  const [saving,     setSaving]     = useState(false)
+  const [saveResult, setSaveResult] = useState<'idle' | 'success' | 'error'>('idle')
+  const [saveError,  setSaveError]  = useState<string | null>(null)
 
-  // ── Counts for the progress bar ──────────────────────────────────────────────
+  // ── Derived counts ────────────────────────────────────────────────────────────
   const counts = useMemo(() => {
-    const result = { pass: 0, attention: 0, urgent: 0, not_checked: 0, total: 0 }
+    const acc = { pass: 0, attention: 0, urgent: 0, not_checked: 0, total: 0 }
     for (const s of Object.values(itemState)) {
-      result[s.result]++
-      result.total++
+      acc[s.result]++
+      acc.total++
     }
-    return result
+    return acc
   }, [itemState])
 
   const checkedCount = counts.total - counts.not_checked
@@ -143,6 +136,7 @@ export default function InspectionChecklist({
 
   // ── Handlers ─────────────────────────────────────────────────────────────────
   function setResult(itemId: string, result: ItemResult) {
+    setSaveResult('idle')   // clear previous success banner on any change
     setItemState(prev => ({
       ...prev,
       [itemId]: { ...prev[itemId], result },
@@ -166,29 +160,29 @@ export default function InspectionChecklist({
 
   async function handleSave() {
     setSaving(true)
-    // TODO: wire to saveInspectionResults server action.
-    // Shape to send:
-    //   inspectionId: inspection.id
-    //   tenantId:     inspection.tenant_id
-    //   items: Object.entries(itemState).map(([templateItemId, s]) => ({
-    //     template_item_id:  templateItemId,
-    //     result:            s.result,
-    //     technician_note:   s.note || null,
-    //   }))
-    //
-    // The action will upsert inspection_items rows and set inspection.status
-    // to 'in_progress' if currently 'draft', or 'completed' if all items checked.
-    console.log('[InspectionChecklist] save payload:', {
-      inspectionId: inspection.id,
-      items: Object.entries(itemState).map(([id, s]) => ({
-        template_item_id: id,
-        result:           s.result,
-        technician_note:  s.note || null,
-      })),
-    })
-    await new Promise(r => setTimeout(r, 600)) // remove when action is wired
+    setSaveResult('idle')
+    setSaveError(null)
+
+    // Build the serializable payload for the server action
+    const payload = Object.entries(itemState).map(([templateItemId, s]) => ({
+      template_item_id: templateItemId,
+      status:           s.result,
+      notes:            s.note.trim() || null,
+    }))
+
+    const result = await saveInspectionResults(inspection.id, payload)
+
     setSaving(false)
-    alert('Results logged to console. Persistence will be wired in next pass.')
+
+    if (result?.error) {
+      setSaveResult('error')
+      setSaveError(result.error)
+      return
+    }
+
+    setSaveResult('success')
+    // Refresh server component data so counts / status header stay in sync
+    router.refresh()
   }
 
   // ── Render ────────────────────────────────────────────────────────────────────
@@ -210,6 +204,40 @@ export default function InspectionChecklist({
   return (
     <div className="dash-content">
 
+      {/* ── Save result banners ───────────────────────────────────────────────── */}
+      {saveResult === 'success' && (
+        <div style={{
+          marginBottom: 16, padding: '12px 16px',
+          background: '#f0fdf4', border: '1px solid #bbf7d0',
+          borderRadius: 'var(--r8, 8px)',
+          display: 'flex', alignItems: 'center', gap: 10,
+        }}>
+          <span style={{ fontSize: 16 }}>✅</span>
+          <div style={{ flex: 1 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#15803d' }}>
+              Results saved.
+            </span>
+            <span style={{ fontSize: 13, color: '#166534', marginLeft: 6 }}>
+              {counts.urgent > 0
+                ? `${counts.urgent} critical item${counts.urgent !== 1 ? 's' : ''} flagged.`
+                : counts.not_checked === 0
+                ? 'Inspection marked completed.'
+                : `${counts.not_checked} item${counts.not_checked !== 1 ? 's' : ''} still unchecked.`}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {saveResult === 'error' && saveError && (
+        <div style={{
+          marginBottom: 16, padding: '12px 16px',
+          background: '#fff0f0', border: '1px solid #fca5a5',
+          borderRadius: 'var(--r8, 8px)', fontSize: 13, color: '#b91c1c',
+        }}>
+          <strong>Save failed:</strong> {saveError}
+        </div>
+      )}
+
       {/* ── Progress bar ──────────────────────────────────────────────────────── */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{
@@ -217,7 +245,7 @@ export default function InspectionChecklist({
           marginBottom: 10,
         }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
-            Progress — {checkedCount} / {counts.total} items checked
+            Progress — {checkedCount} / {counts.total} items reviewed
           </span>
           <div style={{ display: 'flex', gap: 8 }}>
             {counts.pass > 0 && (
@@ -238,7 +266,6 @@ export default function InspectionChecklist({
           </div>
         </div>
 
-        {/* Progress track */}
         <div style={{
           height: 6, background: 'var(--border)',
           borderRadius: 999, overflow: 'hidden',
@@ -247,7 +274,7 @@ export default function InspectionChecklist({
             height: '100%',
             width: `${progressPct}%`,
             background: counts.urgent > 0 ? '#dc2626'
-              : counts.attention > 0    ? '#d97706'
+              : counts.attention > 0      ? '#d97706'
               : '#16a34a',
             borderRadius: 999,
             transition: 'width 0.2s',
@@ -259,7 +286,6 @@ export default function InspectionChecklist({
       {sections.map(section => (
         <div key={section.section_name} className="card" style={{ marginBottom: 12 }}>
 
-          {/* Section header */}
           <div style={{
             fontSize: 12, fontWeight: 700, textTransform: 'uppercase',
             letterSpacing: '0.06em', color: 'var(--text-3)',
@@ -269,10 +295,9 @@ export default function InspectionChecklist({
             {section.section_name}
           </div>
 
-          {/* Items */}
           {section.items.map((item, idx) => {
-            const state   = itemState[item.id] ?? { result: 'not_checked', note: '' }
-            const isLast  = idx === section.items.length - 1
+            const state    = itemState[item.id] ?? { result: 'not_checked', note: '' }
+            const isLast   = idx === section.items.length - 1
             const noteOpen = expandedNotes.has(item.id)
 
             return (
@@ -289,19 +314,22 @@ export default function InspectionChecklist({
                   <div style={{
                     width: 4, flexShrink: 0, alignSelf: 'stretch',
                     borderRadius: 2,
-                    background: item.is_required ? 'var(--blue-light, #3b82f6)' : 'transparent',
+                    background: item.is_required
+                      ? 'var(--blue-light, #3b82f6)'
+                      : 'transparent',
                   }} />
 
                   {/* Label + description */}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{
                       fontSize: 13, fontWeight: 500, color: 'var(--text)',
-                      display: 'flex', alignItems: 'center', gap: 6,
+                      display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
                     }}>
                       {item.label || item.item_name || '(unlabeled item)'}
                       {item.is_required && (
                         <span style={{
-                          fontSize: 10, color: 'var(--blue-light, #3b82f6)',
+                          fontSize: 10,
+                          color:    'var(--blue-light, #3b82f6)',
                           background: 'var(--blue-bg, #eff6ff)',
                           padding: '1px 5px', borderRadius: 4,
                         }}>
@@ -329,19 +357,16 @@ export default function InspectionChecklist({
                           type="button"
                           onClick={() => setResult(item.id, opt.value)}
                           style={{
-                            padding:      '3px 9px',
-                            fontSize:     11,
-                            fontWeight:   isActive ? 700 : 400,
+                            padding:    '3px 9px',
+                            fontSize:   11,
+                            fontWeight: isActive ? 700 : 400,
                             borderRadius: 'var(--r6, 6px)',
-                            border:       '1px solid var(--border)',
-                            cursor:       'pointer',
-                            transition:   'all 0.1s',
+                            border:     '1px solid var(--border)',
+                            cursor:     'pointer',
+                            transition: 'all 0.1s',
                             ...(isActive
                               ? opt.activeStyle
-                              : {
-                                  background: 'transparent',
-                                  color:      'var(--text-3)',
-                                }),
+                              : { background: 'transparent', color: 'var(--text-3)' }),
                           }}
                         >
                           {opt.label}
@@ -360,8 +385,12 @@ export default function InspectionChecklist({
                         borderRadius: 'var(--r6, 6px)',
                         border:     '1px solid var(--border)',
                         cursor:     'pointer',
-                        background: state.note ? 'var(--blue-bg, #eff6ff)' : 'transparent',
-                        color:      state.note ? 'var(--blue-light, #3b82f6)' : 'var(--text-3)',
+                        background: state.note
+                          ? 'var(--blue-bg, #eff6ff)'
+                          : 'transparent',
+                        color: state.note
+                          ? 'var(--blue-light, #3b82f6)'
+                          : 'var(--text-3)',
                       }}
                     >
                       ✎
@@ -369,7 +398,7 @@ export default function InspectionChecklist({
                   </div>
                 </div>
 
-                {/* Expandable note field */}
+                {/* Expandable note */}
                 {noteOpen && (
                   <div style={{ marginTop: 8, paddingLeft: 14 }}>
                     <textarea
@@ -388,7 +417,7 @@ export default function InspectionChecklist({
         </div>
       ))}
 
-      {/* ── Save bar ──────────────────────────────────────────────────────────── */}
+      {/* ── Sticky save bar ───────────────────────────────────────────────────── */}
       <div style={{
         position:   'sticky',
         bottom:     16,
@@ -405,7 +434,7 @@ export default function InspectionChecklist({
           {checkedCount} of {counts.total} items reviewed
           {counts.urgent > 0 && (
             <span style={{ color: '#dc2626', fontWeight: 600, marginLeft: 8 }}>
-              · {counts.urgent} critical item{counts.urgent !== 1 ? 's' : ''}
+              · {counts.urgent} critical
             </span>
           )}
         </div>
@@ -420,10 +449,7 @@ export default function InspectionChecklist({
           {saving ? 'Saving…' : 'Save Results'}
         </button>
 
-        <a
-          href="/dashboard/inspections"
-          className="btn-ghost"
-        >
+        <a href="/dashboard/inspections" className="btn-ghost">
           Cancel
         </a>
       </div>

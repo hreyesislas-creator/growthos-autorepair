@@ -359,21 +359,26 @@ export interface Inspection {
   technician_id: string | null
   status: 'draft' | 'in_progress' | 'completed' | 'sent'
   notes: string | null
+  /** Aggregate counts written by saveInspectionResults */
+  total_items: number | null
+  critical_count: number | null
+  warning_count: number | null
   completed_at: string | null
   created_at: string
   updated_at: string
 }
 
+/** Matches the real inspection_items DB table created for DVI persistence */
 export interface InspectionItem {
   id: string
-  inspection_id: string
   tenant_id: string
+  inspection_id: string
   template_item_id: string | null
-  category: string
-  label: string
-  result: 'pass' | 'attention' | 'urgent' | 'not_checked'
-  technician_note: string | null
-  display_order: number
+  /** Result value — 'pass' | 'attention' | 'urgent' | 'not_checked' */
+  status: 'pass' | 'attention' | 'urgent' | 'not_checked'
+  notes: string | null
+  created_at: string
+  updated_at: string
 }
 
 export interface InspectionItemPhoto {
