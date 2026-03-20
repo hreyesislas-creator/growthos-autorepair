@@ -327,10 +327,23 @@ export interface InspectionTemplateItem {
   id: string
   template_id: string
   tenant_id: string
-  category: string
+  /** Primary grouping key — the section this item belongs to */
+  section_name: string
+  /** Alternate section column (may duplicate section_name) */
+  section?: string | null
+  /** Raw item name from DB — use label for display when available */
+  item_name?: string | null
+  /** Display label shown to the technician */
   label: string
-  display_order: number
+  /** Optional longer description / instruction shown below the label */
+  description?: string | null
+  /** Sort position within its section */
+  sort_order: number
+  /** Legacy alias kept for any older references */
+  display_order?: number
   is_required: boolean
+  /** Legacy alias — use section_name instead */
+  category?: string
 }
 
 export interface Inspection {

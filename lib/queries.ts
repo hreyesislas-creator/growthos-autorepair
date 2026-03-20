@@ -378,23 +378,34 @@ export async function getInspectionTemplates(tenantId: string): Promise<Inspecti
   return (data ?? []) as InspectionTemplate[]
 }
 
-export async function getTemplateItems(templateId: string) {
+export async function getTemplateItems(
+  templateId: string,
+  tenantId?: string,
+): Promise<InspectionTemplateItem[]> {
   if (!hasValue(templateId)) return []
 
   const supabase = await createClient()
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('inspection_template_items')
     .select('*')
     .eq('template_id', templateId)
-    .order('display_order')
+    // Sort: section first, then position within section
+    .order('section_name', { ascending: true })
+    .order('sort_order',   { ascending: true })
+
+  if (tenantId && hasValue(tenantId)) {
+    query = query.eq('tenant_id', tenantId)
+  }
+
+  const { data, error } = await query
 
   if (error) {
     console.error('[getTemplateItems]', error.message)
     return []
   }
 
-  return data ?? []
+  return (data ?? []) as InspectionTemplateItem[]
 }
 
 // ── Communications ────────────────────────────────────────────

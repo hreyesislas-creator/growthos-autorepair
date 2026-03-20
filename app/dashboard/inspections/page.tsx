@@ -2,6 +2,7 @@ import { getDashboardTenant } from '@/lib/tenant'
 import { getInspections, getInspectionTemplates } from '@/lib/queries'
 import Topbar from '@/components/dashboard/Topbar'
 import StatusBadge from '@/components/dashboard/StatusBadge'
+import Link from 'next/link'
 import { format } from 'date-fns'
 
 export const metadata = { title: 'Inspections' }
@@ -44,6 +45,7 @@ export default async function InspectionsPage() {
                   <th>Status</th>
                   <th>Template</th>
                   <th>Completed</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -54,9 +56,18 @@ export default async function InspectionsPage() {
                     </td>
                     <td style={{ fontWeight: 600, color: "var(--text)" }}>{i.vehicle_id ?? "—"}</td>
                     <td><StatusBadge status={i.status} /></td>
-                    <td style={{ fontSize: "12px" }}>{i.template_id ? "Custom template" : "No template"}</td>
+                    <td style={{ fontSize: "12px" }}>{i.template_id ? "Standard" : "No template"}</td>
                     <td style={{ fontSize: "12px", color: "var(--text-3)" }}>
                       {i.completed_at ? format(new Date(i.completed_at), "MMM d") : "—"}
+                    </td>
+                    <td>
+                      <Link
+                        href={`/dashboard/inspections/${i.id}`}
+                        className="btn-ghost"
+                        style={{ padding: '3px 10px', fontSize: '12px' }}
+                      >
+                        View
+                      </Link>
                     </td>
                   </tr>
                 ))}
