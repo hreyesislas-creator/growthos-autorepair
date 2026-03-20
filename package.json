@@ -1,5 +1,5 @@
 {
-  "name": "eetirez-website",
+  "name": "growthos-autorepair",
   "version": "1.0.0",
   "private": true,
   "scripts": {
@@ -11,7 +11,11 @@
   "dependencies": {
     "next": "14.2.5",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "@supabase/supabase-js": "^2.43.5",
+    "@supabase/ssr": "^0.3.0",
+    "date-fns": "^3.6.0",
+    "lucide-react": "^0.400.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",

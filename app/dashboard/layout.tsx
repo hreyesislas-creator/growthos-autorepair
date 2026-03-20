@@ -1,24 +1,61 @@
 import type { Metadata } from 'next'
+import { redirect } from 'next/navigation'
+import { createClient } from '@/lib/supabase/server'
+import { getDashboardTenant } from '@/lib/tenant'
+import Sidebar from '@/components/dashboard/Sidebar'
 import './dashboard.css'
 
 export const metadata: Metadata = {
-  title: 'GrowthOS AutoRepair — Dashboard',
-  description: 'GrowthOS AutoRepair SaaS dashboard for E&E Tires Automotive Center.',
+  title: { default: 'Dashboard — GrowthOS AutoRepair', template: '%s — GrowthOS' },
   robots: { index: false, follow: false },
 }
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+
+  console.log('[dashboard layout] user:', user?.id ?? 'null')
+
+  if (!user) {
+    console.log('[dashboard layout] no user — redirecting to /auth/login')
+    redirect('/auth/login')
+  }
+
+  const ctx = await getDashboardTenant()
+
+  console.log('[dashboard layout] ctx:', ctx ? `tenant=${ctx.tenant.slug}` : 'null')
+
+  if (!ctx) {
+    console.log('[dashboard layout] no ctx — redirecting to /auth/login')
+    redirect('/auth/login')
+  }
+
+  const tenantName = ctx!.profile?.business_name ?? ctx!.tenant.name ?? 'Your Shop'
+  const tenantPlan = ctx!.tenant.plan ?? 'trial'
+
+  const { data: tuData } = await supabase
+    .from('tenant_users')
+    .select('preferred_language')
+    .eq('auth_user_id', user!.id)
+    .single()
+
+  const lang: 'en' | 'es' = (tuData?.preferred_language as 'en' | 'es') ?? 'en'
+
+  console.log('[dashboard layout] rendering — tenant:', tenantName, '| lang:', lang)
+
+  // Nested layouts must NOT render <html>, <head>, or <body>.
+  // Font links live in app/layout.tsx. The lang value is passed to Sidebar
+  // for UI-level language switching; it cannot change the root <html lang>.
   return (
-    <html lang="en">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap"
-          rel="stylesheet"
-        />
-      </head>
-      <body>{children}</body>
-    </html>
+    <div className="dash-shell">
+      <Sidebar
+        tenantName={tenantName}
+        tenantPlan={tenantPlan}
+        initialLang={lang}
+      />
+      <main className="dash-main">
+        {children}
+      </main>
+    </div>
   )
 }

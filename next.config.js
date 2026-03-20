@@ -7,9 +7,13 @@ const nextConfig = {
         hostname: 'eetirez.com',
         pathname: '/wp-content/uploads/**',
       },
+      {
+        protocol: 'https',
+        hostname: '*.supabase.co',
+        pathname: '/storage/v1/object/public/**',
+      },
     ],
   },
-  // Clean URLs
   trailingSlash: false,
 }
 
