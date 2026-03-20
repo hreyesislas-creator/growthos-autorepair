@@ -51,6 +51,7 @@ export async function createVehicleWithCustomer(formData: FormData): Promise<{
         tenant_id:  tenantId,
         first_name: firstName,
         last_name:  lastName,
+        full_name:  [firstName, lastName].filter(Boolean).join(' '),
         phone,
         email:      String(formData.get('new_email') ?? '').trim() || null,
         is_active:  true,

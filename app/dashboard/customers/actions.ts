@@ -11,16 +11,19 @@ export async function createCustomer(
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
 
-  const supabase = await createClient()
+  const supabase  = await createClient()
+  const firstName = String(formData.get('first_name') ?? '').trim()
+  const lastName  = String(formData.get('last_name')  ?? '').trim()
   const { error } = await supabase.from('customers').insert({
     tenant_id:  ctx.tenant.id,
-    first_name: String(formData.get('first_name') ?? '').trim(),
-    last_name:  String(formData.get('last_name')  ?? '').trim(),
-    email:      String(formData.get('email')       ?? '').trim() || null,
-    phone:      String(formData.get('phone')       ?? '').trim() || null,
-    address:    String(formData.get('address')     ?? '').trim() || null,
-    notes:      String(formData.get('notes')       ?? '').trim() || null,
-    source:     String(formData.get('source')      ?? '').trim() || null,
+    first_name: firstName,
+    last_name:  lastName,
+    full_name:  [firstName, lastName].filter(Boolean).join(' '),
+    email:      String(formData.get('email')   ?? '').trim() || null,
+    phone:      String(formData.get('phone')   ?? '').trim() || null,
+    address:    String(formData.get('address') ?? '').trim() || null,
+    notes:      String(formData.get('notes')   ?? '').trim() || null,
+    source:     String(formData.get('source')  ?? '').trim() || null,
     is_active:  true,
   })
 
@@ -61,17 +64,20 @@ export async function createCustomerAndVehicle(formData: FormData): Promise<{
   }
 
   // ── 2. Create customer ─────────────────────────────────────
+  const firstName = String(formData.get('first_name') ?? '').trim()
+  const lastName  = String(formData.get('last_name')  ?? '').trim()
   const { data: newCustomer, error: custErr } = await supabase
     .from('customers')
     .insert({
       tenant_id:  tenantId,
-      first_name: String(formData.get('first_name') ?? '').trim(),
-      last_name:  String(formData.get('last_name')  ?? '').trim(),
-      email:      String(formData.get('email')       ?? '').trim() || null,
+      first_name: firstName,
+      last_name:  lastName,
+      full_name:  [firstName, lastName].filter(Boolean).join(' '),
+      email:      String(formData.get('email')   ?? '').trim() || null,
       phone,
-      address:    String(formData.get('address')     ?? '').trim() || null,
-      notes:      String(formData.get('notes')       ?? '').trim() || null,
-      source:     String(formData.get('source')      ?? '').trim() || null,
+      address:    String(formData.get('address') ?? '').trim() || null,
+      notes:      String(formData.get('notes')   ?? '').trim() || null,
+      source:     String(formData.get('source')  ?? '').trim() || null,
       is_active:  true,
     })
     .select('id')
@@ -132,17 +138,20 @@ export async function updateCustomer(
   const id = String(formData.get('id') ?? '').trim()
   if (!id) return { error: 'Missing customer ID' }
 
-  const supabase = await createClient()
+  const supabase  = await createClient()
+  const firstName = String(formData.get('first_name') ?? '').trim()
+  const lastName  = String(formData.get('last_name')  ?? '').trim()
   const { error } = await supabase
     .from('customers')
     .update({
-      first_name:  String(formData.get('first_name') ?? '').trim(),
-      last_name:   String(formData.get('last_name')  ?? '').trim(),
-      email:       String(formData.get('email')       ?? '').trim() || null,
-      phone:       String(formData.get('phone')       ?? '').trim() || null,
-      address:     String(formData.get('address')     ?? '').trim() || null,
-      notes:       String(formData.get('notes')       ?? '').trim() || null,
-      source:      String(formData.get('source')      ?? '').trim() || null,
+      first_name:  firstName,
+      last_name:   lastName,
+      full_name:   [firstName, lastName].filter(Boolean).join(' '),
+      email:       String(formData.get('email')   ?? '').trim() || null,
+      phone:       String(formData.get('phone')   ?? '').trim() || null,
+      address:     String(formData.get('address') ?? '').trim() || null,
+      notes:       String(formData.get('notes')   ?? '').trim() || null,
+      source:      String(formData.get('source')  ?? '').trim() || null,
       updated_at:  new Date().toISOString(),
     })
     .eq('tenant_id', ctx.tenant.id)
