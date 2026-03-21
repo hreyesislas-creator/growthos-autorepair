@@ -456,8 +456,8 @@ export interface ServiceRecommendation {
   title: string
   description: string | null
   priority: 'low' | 'medium' | 'high' | 'urgent'
-  /** 'open' is the initial state for auto-generated recommendations */
-  status: 'open' | 'pending' | 'approved' | 'declined' | 'completed'
+  /** 'pending' is the initial state for auto-generated recommendations */
+  status: 'pending' | 'accepted' | 'rejected' | 'open' | 'approved' | 'declined' | 'completed'
   estimated_price: number | null
   created_at: string
 }

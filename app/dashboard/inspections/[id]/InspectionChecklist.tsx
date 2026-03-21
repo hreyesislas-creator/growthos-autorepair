@@ -3,70 +3,52 @@
 import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import type { Inspection, InspectionTemplateItem, ServiceRecommendation } from '@/lib/types'
-import { saveInspectionResults } from '../actions'
+import {
+  saveInspectionResults,
+  completeInspection,
+  reopenInspection,
+  updateRecommendationStatus,
+  type RecommendationStatus,
+} from '../actions'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-/** Mirrors InspectionItem.status — 1:1 with DB enum values */
 type ItemResult = 'pass' | 'attention' | 'urgent' | 'not_checked'
 
 interface ItemState {
   result: ItemResult
-  note: string
+  note:   string
 }
 
 interface Section {
   section_name: string
-  items: InspectionTemplateItem[]
+  items:        InspectionTemplateItem[]
 }
 
-/** Shape of the existing inspection_items rows loaded from DB */
 interface ExistingItem {
   template_item_id: string | null
-  /** DB column is status, not result */
-  status: ItemResult
-  notes: string | null
+  status:           ItemResult
+  notes:            string | null
 }
 
 interface Props {
   inspection:             Inspection
   sections:               Section[]
   existingItems:          ExistingItem[]
-  /** Server-fetched recommendations — refreshed by router.refresh() after save */
   initialRecommendations: ServiceRecommendation[]
 }
 
-// ── Status button config ───────────────────────────────────────────────────────
+// ── Config ────────────────────────────────────────────────────────────────────
 
 const STATUS_OPTIONS: {
   value:       ItemResult
   label:       string
   activeStyle: React.CSSProperties
 }[] = [
-  {
-    value:       'pass',
-    label:       'OK',
-    activeStyle: { background: '#16a34a', color: '#fff', borderColor: '#16a34a' },
-  },
-  {
-    value:       'attention',
-    label:       'Warning',
-    activeStyle: { background: '#d97706', color: '#fff', borderColor: '#d97706' },
-  },
-  {
-    value:       'urgent',
-    label:       'Critical',
-    activeStyle: { background: '#dc2626', color: '#fff', borderColor: '#dc2626' },
-  },
-  {
-    value:       'not_checked',
-    label:       'N/C',
-    activeStyle: {
-      background:  'var(--surface-3, #e5e7eb)',
-      color:       'var(--text-3)',
-      borderColor: 'var(--border)',
-    },
-  },
+  { value: 'pass',        label: 'OK',       activeStyle: { background: '#16a34a', color: '#fff', borderColor: '#16a34a' } },
+  { value: 'attention',   label: 'Warning',  activeStyle: { background: '#d97706', color: '#fff', borderColor: '#d97706' } },
+  { value: 'urgent',      label: 'Critical', activeStyle: { background: '#dc2626', color: '#fff', borderColor: '#dc2626' } },
+  { value: 'not_checked', label: 'N/C',      activeStyle: { background: 'var(--surface-3,#e5e7eb)', color: 'var(--text-3)', borderColor: 'var(--border)' } },
 ]
 
 const STATUS_SUMMARY_COLOR: Record<ItemResult, string> = {
@@ -76,10 +58,27 @@ const STATUS_SUMMARY_COLOR: Record<ItemResult, string> = {
   not_checked: 'var(--text-3)',
 }
 
-const PRIORITY_STYLE: Record<string, React.CSSProperties> = {
+// Recommendation decision button config
+const REC_DECISION_OPTIONS: {
+  value:       RecommendationStatus
+  label:       string
+  activeStyle: React.CSSProperties
+}[] = [
+  { value: 'accepted', label: '✓ Accept', activeStyle: { background: '#16a34a', color: '#fff', borderColor: '#16a34a' } },
+  { value: 'rejected', label: '✕ Reject', activeStyle: { background: '#dc2626', color: '#fff', borderColor: '#dc2626' } },
+  { value: 'pending',  label: '· Pending', activeStyle: { background: '#d97706', color: '#fff', borderColor: '#d97706' } },
+]
+
+const REC_STATUS_LABEL: Record<string, { label: string; style: React.CSSProperties }> = {
+  accepted: { label: 'Accepted', style: { background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0' } },
+  rejected: { label: 'Rejected', style: { background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5' } },
+  pending:  { label: 'Pending',  style: { background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a' } },
+  open:     { label: 'Open',     style: { background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' } },
+}
+
+const PRIORITY_BADGE: Record<string, React.CSSProperties> = {
   high:   { background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5' },
   medium: { background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a' },
-  low:    { background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0' },
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -118,30 +117,41 @@ export default function InspectionChecklist({
 }: Props) {
   const router = useRouter()
 
+  // ── Checklist state ────────────────────────────────────────────────────────
   const [itemState, setItemState] = useState<Record<string, ItemState>>(
     () => buildInitialState(sections, existingItems),
   )
   const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set())
-  const [saving,     setSaving]     = useState(false)
-  const [saveResult, setSaveResult] = useState<'idle' | 'success' | 'error'>('idle')
-  const [saveError,  setSaveError]  = useState<string | null>(null)
 
-  // ── Derived counts ────────────────────────────────────────────────────────────
+  // ── Action state ───────────────────────────────────────────────────────────
+  const [saving,      setSaving]      = useState(false)
+  const [completing,  setCompleting]  = useState(false)
+  const [reopening,   setReopening]   = useState(false)
+  const [saveResult,  setSaveResult]  = useState<'idle' | 'success' | 'error'>('idle')
+  const [saveError,   setSaveError]   = useState<string | null>(null)
+
+  // ── Recommendation decision state (optimistic) ─────────────────────────────
+  // Keyed by recommendation.id — initialized from server props, updated optimistically.
+  const [recStatuses, setRecStatuses] = useState<Record<string, RecommendationStatus>>(
+    () => Object.fromEntries(initialRecommendations.map(r => [r.id, r.status as RecommendationStatus]))
+  )
+  const [recErrors, setRecErrors] = useState<Record<string, string>>({})
+
+  // ── Derived values ─────────────────────────────────────────────────────────
+
+  // Read-only when completed — derived directly from prop so it updates on router.refresh()
+  const isReadOnly = inspection.status === 'completed'
+
   const counts = useMemo(() => {
     const acc = { pass: 0, attention: 0, urgent: 0, not_checked: 0, total: 0 }
-    for (const s of Object.values(itemState)) {
-      acc[s.result]++
-      acc.total++
-    }
+    for (const s of Object.values(itemState)) { acc[s.result]++; acc.total++ }
     return acc
   }, [itemState])
 
   const checkedCount = counts.total - counts.not_checked
-  const progressPct  = counts.total > 0
-    ? Math.round((checkedCount / counts.total) * 100)
-    : 0
+  const progressPct  = counts.total > 0 ? Math.round((checkedCount / counts.total) * 100) : 0
 
-  // ── Label lookup (built once from sections) ───────────────────────────────────
+  // Label lookup built once from sections
   const labelMap = useMemo(() => {
     const map = new Map<string, string>()
     for (const section of sections) {
@@ -152,17 +162,20 @@ export default function InspectionChecklist({
     return map
   }, [sections])
 
-  // ── Handlers ─────────────────────────────────────────────────────────────────
+  // ── Checklist handlers ─────────────────────────────────────────────────────
+
   function setResult(itemId: string, result: ItemResult) {
+    if (isReadOnly) return
     setSaveResult('idle')
     setItemState(prev => ({ ...prev, [itemId]: { ...prev[itemId], result } }))
   }
 
   function setNote(itemId: string, note: string) {
+    if (isReadOnly) return
     setItemState(prev => ({ ...prev, [itemId]: { ...prev[itemId], note } }))
   }
 
-  function toggleNoteExpanded(itemId: string) {
+  function toggleNote(itemId: string) {
     setExpandedNotes(prev => {
       const next = new Set(prev)
       next.has(itemId) ? next.delete(itemId) : next.add(itemId)
@@ -170,13 +183,14 @@ export default function InspectionChecklist({
     })
   }
 
+  // ── Save handler ───────────────────────────────────────────────────────────
+
   async function handleSave() {
+    if (isReadOnly) return
     setSaving(true)
     setSaveResult('idle')
     setSaveError(null)
 
-    // Include label so the action can generate recommendation titles without
-    // an extra DB round-trip to look up template item names.
     const payload = Object.entries(itemState).map(([templateItemId, s]) => ({
       template_item_id: templateItemId,
       status:           s.result,
@@ -185,7 +199,6 @@ export default function InspectionChecklist({
     }))
 
     const result = await saveInspectionResults(inspection.id, payload)
-
     setSaving(false)
 
     if (result?.error) {
@@ -195,12 +208,63 @@ export default function InspectionChecklist({
     }
 
     setSaveResult('success')
-    // Refresh server component so recommendations panel + inspection header
-    // reflect the newly saved data without a full page reload.
     router.refresh()
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────────
+  // ── Complete / reopen handlers ─────────────────────────────────────────────
+
+  async function handleComplete() {
+    setCompleting(true)
+    setSaveResult('idle')
+    setSaveError(null)
+
+    const result = await completeInspection(inspection.id)
+    setCompleting(false)
+
+    if (result?.error) {
+      setSaveResult('error')
+      setSaveError(result.error)
+      return
+    }
+
+    router.refresh()
+  }
+
+  async function handleReopen() {
+    setReopening(true)
+    setSaveResult('idle')
+    setSaveError(null)
+
+    const result = await reopenInspection(inspection.id)
+    setReopening(false)
+
+    if (result?.error) {
+      setSaveResult('error')
+      setSaveError(result.error)
+      return
+    }
+
+    router.refresh()
+  }
+
+  // ── Recommendation decision handler (optimistic) ───────────────────────────
+
+  async function handleRecDecision(recId: string, newStatus: RecommendationStatus) {
+    const previous = recStatuses[recId]
+    // Optimistic update
+    setRecStatuses(prev => ({ ...prev, [recId]: newStatus }))
+    setRecErrors(prev => ({ ...prev, [recId]: '' }))
+
+    const result = await updateRecommendationStatus(recId, newStatus)
+
+    if (result?.error) {
+      // Revert on failure
+      setRecStatuses(prev => ({ ...prev, [recId]: previous }))
+      setRecErrors(prev => ({ ...prev, [recId]: result.error }))
+    }
+  }
+
+  // ── Empty state ────────────────────────────────────────────────────────────
 
   if (sections.length === 0) {
     return (
@@ -216,10 +280,36 @@ export default function InspectionChecklist({
     )
   }
 
+  // ── Render ─────────────────────────────────────────────────────────────────
+
   return (
     <div className="dash-content">
 
-      {/* ── Save result banners ───────────────────────────────────────────────── */}
+      {/* ── Completed banner ────────────────────────────────────────────────── */}
+      {isReadOnly && (
+        <div style={{
+          marginBottom: 16, padding: '12px 16px',
+          background: '#f0fdf4', border: '1px solid #bbf7d0',
+          borderRadius: 'var(--r8, 8px)',
+          display: 'flex', alignItems: 'center', gap: 12,
+        }}>
+          <span style={{ fontSize: 18 }}>✅</span>
+          <div style={{ flex: 1, fontSize: 13, fontWeight: 600, color: '#15803d' }}>
+            Inspection completed — checklist is read-only.
+          </div>
+          <button
+            type="button"
+            className="btn-ghost"
+            disabled={reopening}
+            style={{ fontSize: 12, opacity: reopening ? 0.6 : 1 }}
+            onClick={handleReopen}
+          >
+            {reopening ? 'Reopening…' : 'Edit Inspection'}
+          </button>
+        </div>
+      )}
+
+      {/* ── Save result banners ──────────────────────────────────────────────── */}
       {saveResult === 'success' && (
         <div style={{
           marginBottom: 16, padding: '12px 16px',
@@ -228,18 +318,14 @@ export default function InspectionChecklist({
           display: 'flex', alignItems: 'center', gap: 10,
         }}>
           <span style={{ fontSize: 16 }}>✅</span>
-          <div style={{ flex: 1 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: '#15803d' }}>
-              Results saved.
-            </span>
-            <span style={{ fontSize: 13, color: '#166534', marginLeft: 6 }}>
-              {counts.urgent > 0
-                ? `${counts.urgent} critical item${counts.urgent !== 1 ? 's' : ''} flagged — recommendations generated below.`
-                : counts.not_checked === 0
-                ? 'Inspection marked completed.'
-                : `${counts.not_checked} item${counts.not_checked !== 1 ? 's' : ''} still unchecked.`}
-            </span>
-          </div>
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#15803d' }}>
+            Progress saved.
+          </span>
+          <span style={{ fontSize: 13, color: '#166534', marginLeft: 2 }}>
+            {counts.urgent > 0
+              ? `${counts.urgent} critical item${counts.urgent !== 1 ? 's' : ''} flagged.`
+              : `${checkedCount} of ${counts.total} items reviewed.`}
+          </span>
         </div>
       )}
 
@@ -249,60 +335,45 @@ export default function InspectionChecklist({
           background: '#fff0f0', border: '1px solid #fca5a5',
           borderRadius: 'var(--r8, 8px)', fontSize: 13, color: '#b91c1c',
         }}>
-          <strong>Save failed:</strong> {saveError}
+          <strong>Error:</strong> {saveError}
         </div>
       )}
 
-      {/* ── Progress bar ──────────────────────────────────────────────────────── */}
+      {/* ── Progress bar ────────────────────────────────────────────────────── */}
       <div className="card" style={{ marginBottom: 16 }}>
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          marginBottom: 10,
-        }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
             Progress — {checkedCount} / {counts.total} items reviewed
           </span>
           <div style={{ display: 'flex', gap: 8 }}>
             {counts.pass > 0 && (
-              <span style={{ fontSize: 12, color: STATUS_SUMMARY_COLOR.pass, fontWeight: 600 }}>
-                ✓ {counts.pass} OK
-              </span>
+              <span style={{ fontSize: 12, color: STATUS_SUMMARY_COLOR.pass, fontWeight: 600 }}>✓ {counts.pass} OK</span>
             )}
             {counts.attention > 0 && (
-              <span style={{ fontSize: 12, color: STATUS_SUMMARY_COLOR.attention, fontWeight: 600 }}>
-                ⚠ {counts.attention} Warning
-              </span>
+              <span style={{ fontSize: 12, color: STATUS_SUMMARY_COLOR.attention, fontWeight: 600 }}>⚠ {counts.attention} Warning</span>
             )}
             {counts.urgent > 0 && (
-              <span style={{ fontSize: 12, color: STATUS_SUMMARY_COLOR.urgent, fontWeight: 600 }}>
-                ! {counts.urgent} Critical
-              </span>
+              <span style={{ fontSize: 12, color: STATUS_SUMMARY_COLOR.urgent, fontWeight: 600 }}>! {counts.urgent} Critical</span>
             )}
           </div>
         </div>
 
         <div style={{ height: 6, background: 'var(--border)', borderRadius: 999, overflow: 'hidden' }}>
           <div style={{
-            height: '100%',
-            width: `${progressPct}%`,
-            background: counts.urgent > 0 ? '#dc2626'
-              : counts.attention > 0      ? '#d97706'
-              : '#16a34a',
-            borderRadius: 999,
-            transition: 'width 0.2s',
+            height: '100%', width: `${progressPct}%`, borderRadius: 999, transition: 'width 0.2s',
+            background: counts.urgent > 0 ? '#dc2626' : counts.attention > 0 ? '#d97706' : '#16a34a',
           }} />
         </div>
       </div>
 
-      {/* ── Sections ──────────────────────────────────────────────────────────── */}
+      {/* ── Sections ────────────────────────────────────────────────────────── */}
       {sections.map(section => (
         <div key={section.section_name} className="card" style={{ marginBottom: 12 }}>
 
           <div style={{
             fontSize: 12, fontWeight: 700, textTransform: 'uppercase',
             letterSpacing: '0.06em', color: 'var(--text-3)',
-            paddingBottom: 10, borderBottom: '1px solid var(--border-2)',
-            marginBottom: 4,
+            paddingBottom: 10, borderBottom: '1px solid var(--border-2)', marginBottom: 4,
           }}>
             {section.section_name}
           </div>
@@ -315,41 +386,32 @@ export default function InspectionChecklist({
             return (
               <div
                 key={item.id}
-                style={{
-                  padding:      '10px 0',
-                  borderBottom: isLast ? 'none' : '1px solid var(--border-2)',
-                }}
+                style={{ padding: '10px 0', borderBottom: isLast ? 'none' : '1px solid var(--border-2)' }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
 
+                  {/* Required marker */}
                   <div style={{
                     width: 4, flexShrink: 0, alignSelf: 'stretch', borderRadius: 2,
-                    background: item.is_required ? 'var(--blue-light, #3b82f6)' : 'transparent',
+                    background: item.is_required ? 'var(--blue-light,#3b82f6)' : 'transparent',
                   }} />
 
+                  {/* Label */}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{
-                      fontSize: 13, fontWeight: 500, color: 'var(--text)',
-                      display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
-                    }}>
-                      {item.label || item.item_name || '(unlabeled item)'}
+                    <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      {item.label || item.item_name || '(unlabeled)'}
                       {item.is_required && (
-                        <span style={{
-                          fontSize: 10, color: 'var(--blue-light, #3b82f6)',
-                          background: 'var(--blue-bg, #eff6ff)',
-                          padding: '1px 5px', borderRadius: 4,
-                        }}>
+                        <span style={{ fontSize: 10, color: 'var(--blue-light,#3b82f6)', background: 'var(--blue-bg,#eff6ff)', padding: '1px 5px', borderRadius: 4 }}>
                           Required
                         </span>
                       )}
                     </div>
                     {item.description && (
-                      <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 1 }}>
-                        {item.description}
-                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 1 }}>{item.description}</div>
                     )}
                   </div>
 
+                  {/* Status buttons — disabled in read-only mode */}
                   <div style={{ display: 'flex', gap: 4, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                     {STATUS_OPTIONS.map(opt => {
                       const isActive = state.result === opt.value
@@ -358,15 +420,17 @@ export default function InspectionChecklist({
                           key={opt.value}
                           type="button"
                           onClick={() => setResult(item.id, opt.value)}
+                          disabled={isReadOnly}
+                          title={isReadOnly ? 'Inspection is completed' : undefined}
                           style={{
                             padding: '3px 9px', fontSize: 11,
                             fontWeight: isActive ? 700 : 400,
-                            borderRadius: 'var(--r6, 6px)',
+                            borderRadius: 'var(--r6,6px)',
                             border: '1px solid var(--border)',
-                            cursor: 'pointer', transition: 'all 0.1s',
-                            ...(isActive
-                              ? opt.activeStyle
-                              : { background: 'transparent', color: 'var(--text-3)' }),
+                            cursor: isReadOnly ? 'default' : 'pointer',
+                            opacity: isReadOnly && !isActive ? 0.4 : 1,
+                            transition: 'all 0.1s',
+                            ...(isActive ? opt.activeStyle : { background: 'transparent', color: 'var(--text-3)' }),
                           }}
                         >
                           {opt.label}
@@ -374,17 +438,20 @@ export default function InspectionChecklist({
                       )
                     })}
 
+                    {/* Note toggle — always visible, disabled in read-only */}
                     <button
                       type="button"
-                      onClick={() => toggleNoteExpanded(item.id)}
-                      title="Add technician note"
+                      onClick={() => toggleNote(item.id)}
+                      disabled={isReadOnly && !state.note}
+                      title="Technician note"
                       style={{
                         padding: '3px 7px', fontSize: 11,
-                        borderRadius: 'var(--r6, 6px)',
+                        borderRadius: 'var(--r6,6px)',
                         border: '1px solid var(--border)',
-                        cursor: 'pointer',
-                        background: state.note ? 'var(--blue-bg, #eff6ff)' : 'transparent',
-                        color:      state.note ? 'var(--blue-light, #3b82f6)' : 'var(--text-3)',
+                        cursor: isReadOnly ? 'default' : 'pointer',
+                        background: state.note ? 'var(--blue-bg,#eff6ff)' : 'transparent',
+                        color:      state.note ? 'var(--blue-light,#3b82f6)' : 'var(--text-3)',
+                        opacity: isReadOnly && !state.note ? 0.4 : 1,
                       }}
                     >
                       ✎
@@ -392,16 +459,25 @@ export default function InspectionChecklist({
                   </div>
                 </div>
 
+                {/* Note field */}
                 {noteOpen && (
                   <div style={{ marginTop: 8, paddingLeft: 14 }}>
-                    <textarea
-                      rows={2}
-                      className="field-textarea"
-                      placeholder="Technician note (optional)…"
-                      value={state.note}
-                      onChange={e => setNote(item.id, e.target.value)}
-                      style={{ fontSize: 12, width: '100%', resize: 'vertical' }}
-                    />
+                    {isReadOnly ? (
+                      state.note && (
+                        <p style={{ fontSize: 12, color: 'var(--text-3)', margin: 0, fontStyle: 'italic' }}>
+                          {state.note}
+                        </p>
+                      )
+                    ) : (
+                      <textarea
+                        rows={2}
+                        className="field-textarea"
+                        placeholder="Technician note (optional)…"
+                        value={state.note}
+                        onChange={e => setNote(item.id, e.target.value)}
+                        style={{ fontSize: 12, width: '100%', resize: 'vertical' }}
+                      />
+                    )}
                   </div>
                 )}
               </div>
@@ -410,113 +486,181 @@ export default function InspectionChecklist({
         </div>
       ))}
 
-      {/* ── Recommendations panel ─────────────────────────────────────────────── */}
+      {/* ── Recommendations panel ────────────────────────────────────────────── */}
       {initialRecommendations.length > 0 && (
-        <div className="card" style={{ marginBottom: 80 }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            marginBottom: 14,
-          }}>
-            <div className="section-title">
-              Service Recommendations
-            </div>
+        <div className="card" style={{ marginBottom: 96 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+            <div className="section-title">Service Recommendations</div>
             <span style={{
-              fontSize: 11, fontWeight: 600, padding: '2px 8px',
-              borderRadius: 'var(--r6, 6px)',
-              background: initialRecommendations.some(r => r.priority === 'high')
-                ? '#fef2f2' : '#fffbeb',
-              color: initialRecommendations.some(r => r.priority === 'high')
-                ? '#b91c1c' : '#92400e',
+              fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 'var(--r6,6px)',
+              ...(initialRecommendations.some(r => r.priority === 'high')
+                ? { background: '#fef2f2', color: '#b91c1c' }
+                : { background: '#fffbeb', color: '#92400e' }),
             }}>
               {initialRecommendations.length} item{initialRecommendations.length !== 1 ? 's' : ''}
             </span>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {initialRecommendations.map(rec => (
-              <div
-                key={rec.id}
-                style={{
-                  padding: '12px 14px',
-                  borderRadius: 'var(--r8, 8px)',
-                  border: '1px solid var(--border)',
-                  background: 'var(--surface-2)',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                  {/* Priority badge */}
-                  <span style={{
-                    display: 'inline-block',
-                    marginTop: 1,
-                    padding: '2px 7px',
-                    borderRadius: 'var(--r6, 6px)',
-                    fontSize: 10, fontWeight: 700, flexShrink: 0,
-                    textTransform: 'uppercase' as const,
-                    letterSpacing: '0.04em',
-                    ...(PRIORITY_STYLE[rec.priority] ?? PRIORITY_STYLE.medium),
-                  }}>
-                    {rec.priority === 'high' ? '⚠ Critical' : '! Warning'}
-                  </span>
+            {initialRecommendations.map(rec => {
+              const currentStatus = recStatuses[rec.id] ?? rec.status
+              const statusMeta    = REC_STATUS_LABEL[currentStatus] ?? REC_STATUS_LABEL.open
+              const recError      = recErrors[rec.id]
 
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>
-                      {rec.title}
-                    </div>
-                    {rec.description && (
-                      <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
-                        {rec.description}
+              return (
+                <div
+                  key={rec.id}
+                  style={{
+                    padding: '12px 14px', borderRadius: 'var(--r8,8px)',
+                    border: '1px solid var(--border)', background: 'var(--surface-2)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+
+                    {/* Priority badge */}
+                    <span style={{
+                      display: 'inline-block', marginTop: 2, padding: '2px 7px',
+                      borderRadius: 'var(--r6,6px)', fontSize: 10, fontWeight: 700,
+                      textTransform: 'uppercase', letterSpacing: '0.04em', flexShrink: 0,
+                      ...(PRIORITY_BADGE[rec.priority ?? 'medium'] ?? PRIORITY_BADGE.medium),
+                    }}>
+                      {rec.priority === 'high' ? '⚠ Critical' : '! Warning'}
+                    </span>
+
+                    {/* Title + description */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>
+                        {rec.title}
                       </div>
-                    )}
+                      {rec.description && (
+                        <div style={{ fontSize: 12, color: 'var(--text-3)' }}>{rec.description}</div>
+                      )}
+                    </div>
+
+                    {/* Status badge */}
+                    <span style={{
+                      flexShrink: 0, padding: '2px 8px', borderRadius: 'var(--r6,6px)',
+                      fontSize: 11, fontWeight: 600, ...statusMeta.style,
+                    }}>
+                      {statusMeta.label}
+                    </span>
                   </div>
 
-                  {/* Status + price */}
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
-                    <span className="badge badge-gray" style={{ fontSize: 10 }}>
-                      {rec.status}
-                    </span>
+                  {/* Decision buttons */}
+                  <div style={{ marginTop: 10, display: 'flex', gap: 6, paddingLeft: 0 }}>
+                    {REC_DECISION_OPTIONS.map(opt => {
+                      const isActive = currentStatus === opt.value
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => handleRecDecision(rec.id, opt.value)}
+                          style={{
+                            padding: '3px 10px', fontSize: 11, fontWeight: isActive ? 700 : 400,
+                            borderRadius: 'var(--r6,6px)', border: '1px solid var(--border)',
+                            cursor: 'pointer', transition: 'all 0.1s',
+                            ...(isActive ? opt.activeStyle : { background: 'transparent', color: 'var(--text-3)' }),
+                          }}
+                        >
+                          {opt.label}
+                        </button>
+                      )
+                    })}
+
                     {rec.estimated_price != null && (
-                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+                      <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 600, color: 'var(--text)', alignSelf: 'center' }}>
                         ${Number(rec.estimated_price).toFixed(2)}
                       </span>
                     )}
                   </div>
+
+                  {recError && (
+                    <div style={{ marginTop: 6, fontSize: 11, color: '#b91c1c' }}>
+                      Failed to update: {recError}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}
 
-      {/* ── Sticky save bar ───────────────────────────────────────────────────── */}
+      {/* ── Sticky action bar ────────────────────────────────────────────────── */}
       <div style={{
         position: 'sticky', bottom: 16,
-        display: 'flex', alignItems: 'center', gap: 12,
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--r12, 12px)',
-        padding: '12px 16px',
+        display: 'flex', alignItems: 'center', gap: 10,
+        background: 'var(--surface)', border: '1px solid var(--border)',
+        borderRadius: 'var(--r12,12px)', padding: '12px 16px',
         boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
       }}>
-        <div style={{ flex: 1, fontSize: 12, color: 'var(--text-3)' }}>
-          {checkedCount} of {counts.total} items reviewed
-          {counts.urgent > 0 && (
-            <span style={{ color: '#dc2626', fontWeight: 600, marginLeft: 8 }}>
-              · {counts.urgent} critical
-            </span>
-          )}
-        </div>
 
-        <button
-          type="button"
-          className="btn-primary"
-          disabled={saving}
-          style={{ opacity: saving ? 0.6 : 1 }}
-          onClick={handleSave}
-        >
-          {saving ? 'Saving…' : 'Save Results'}
-        </button>
+        {isReadOnly ? (
+          /* ── Completed mode ───────────────────────────────────────────────── */
+          <>
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{
+                fontSize: 11, fontWeight: 700, padding: '3px 10px',
+                borderRadius: 'var(--r6,6px)', background: '#f0fdf4',
+                color: '#15803d', border: '1px solid #bbf7d0',
+              }}>
+                ✓ Completed
+              </span>
+              <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                {counts.total} items · {counts.urgent} critical · {counts.attention} warning
+              </span>
+            </div>
+            <button
+              type="button"
+              className="btn-ghost"
+              disabled={reopening}
+              style={{ fontSize: 12, opacity: reopening ? 0.6 : 1 }}
+              onClick={handleReopen}
+            >
+              {reopening ? 'Reopening…' : 'Edit Inspection'}
+            </button>
+            <a href="/dashboard/inspections" className="btn-ghost" style={{ fontSize: 12 }}>
+              ← Back
+            </a>
+          </>
+        ) : (
+          /* ── Editable mode ────────────────────────────────────────────────── */
+          <>
+            <div style={{ flex: 1, fontSize: 12, color: 'var(--text-3)' }}>
+              {checkedCount} of {counts.total} items reviewed
+              {counts.urgent > 0 && (
+                <span style={{ color: '#dc2626', fontWeight: 600, marginLeft: 8 }}>
+                  · {counts.urgent} critical
+                </span>
+              )}
+            </div>
 
-        <a href="/dashboard/inspections" className="btn-ghost">Cancel</a>
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={saving}
+              style={{ opacity: saving ? 0.6 : 1 }}
+              onClick={handleSave}
+            >
+              {saving ? 'Saving…' : 'Save Results'}
+            </button>
+
+            <button
+              type="button"
+              className="btn-ghost"
+              disabled={completing}
+              style={{ fontSize: 12, opacity: completing ? 0.6 : 1 }}
+              onClick={handleComplete}
+              title={counts.not_checked > 0 ? `${counts.not_checked} items still unchecked` : 'Mark inspection as completed'}
+            >
+              {completing ? 'Completing…' : `Mark Completed${counts.not_checked > 0 ? ` (${counts.not_checked} left)` : ''}`}
+            </button>
+
+            <a href="/dashboard/inspections" className="btn-ghost" style={{ fontSize: 12 }}>
+              Cancel
+            </a>
+          </>
+        )}
       </div>
 
     </div>

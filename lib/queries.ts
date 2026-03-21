@@ -349,7 +349,8 @@ export async function getInspectionById(tenantId: string, id: string) {
       .select('*')
       .eq('tenant_id', tenantId)
       .eq('inspection_id', id)
-      .order('display_order'),
+      // order by created_at — the new inspection_items table has no display_order column
+      .order('created_at', { ascending: true }),
   ])
 
   if (inspRes.error) {

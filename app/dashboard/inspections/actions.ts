@@ -33,6 +33,104 @@ export async function createInspection(
   return null
 }
 
+// ── Inspection lifecycle ──────────────────────────────────────────────────────
+
+/**
+ * Marks an inspection as completed and stamps completed_at.
+ * The checklist becomes read-only in the UI after this.
+ */
+export async function completeInspection(
+  inspectionId: string,
+): Promise<{ error: string } | null> {
+  const ctx = await getDashboardTenant()
+  if (!ctx) return { error: 'Not authorized' }
+
+  const supabase = await createClient()
+
+  const { error } = await supabase
+    .from('inspections')
+    .update({
+      status:       'completed',
+      completed_at: new Date().toISOString(),
+    })
+    .eq('tenant_id', ctx.tenant.id)
+    .eq('id', inspectionId)
+
+  if (error) {
+    console.error('[completeInspection]', error.message)
+    return { error: error.message }
+  }
+
+  return null
+}
+
+/**
+ * Re-opens a completed inspection back to in_progress.
+ * Clears completed_at so the checklist becomes editable again.
+ */
+export async function reopenInspection(
+  inspectionId: string,
+): Promise<{ error: string } | null> {
+  const ctx = await getDashboardTenant()
+  if (!ctx) return { error: 'Not authorized' }
+
+  const supabase = await createClient()
+
+  const { error } = await supabase
+    .from('inspections')
+    .update({
+      status:       'in_progress',
+      completed_at: null,
+    })
+    .eq('tenant_id', ctx.tenant.id)
+    .eq('id', inspectionId)
+
+  if (error) {
+    console.error('[reopenInspection]', error.message)
+    return { error: error.message }
+  }
+
+  return null
+}
+
+// ── Recommendation decisions ──────────────────────────────────────────────────
+
+export type RecommendationStatus =
+  | 'pending'
+  | 'accepted'
+  | 'rejected'
+  | 'open'
+  | 'approved'
+  | 'declined'
+  | 'completed'
+
+/**
+ * Updates a single recommendation's decision status.
+ * Called optimistically from the checklist UI.
+ */
+export async function updateRecommendationStatus(
+  recommendationId: string,
+  status: RecommendationStatus,
+): Promise<{ error: string } | null> {
+  const ctx = await getDashboardTenant()
+  if (!ctx) return { error: 'Not authorized' }
+
+  const supabase = await createClient()
+
+  const { error } = await supabase
+    .from('service_recommendations')
+    .update({ status })
+    .eq('tenant_id', ctx.tenant.id)
+    .eq('id', recommendationId)
+
+  if (error) {
+    console.error('[updateRecommendationStatus]', error.message)
+    return { error: error.message }
+  }
+
+  return null
+}
+
 // ── Save DVI results + auto-generate recommendations ─────────────────────────
 
 export interface InspectionResultItem {
@@ -83,31 +181,37 @@ function deriveDescription(status: 'attention' | 'urgent'): string {
 }
 
 /**
- * Persists DVI checklist results, then auto-generates or removes service
- * recommendations based on each item's status.
+ * Persists DVI checklist results and auto-manages service recommendations.
+ *
+ * "Save Results" is a progress save — it does NOT complete the inspection.
+ * Use completeInspection() to explicitly finalize.
+ *
+ * Recommendation status is preserved on re-save: if a tech already accepted
+ * a recommendation, saving again won't reset it to 'pending'.
  *
  * Flow:
- *  1. Upsert inspection_items  (conflict: inspection_id, template_item_id)
- *  2. Re-fetch inspection_items to get their DB-assigned IDs
- *  3. Fetch the inspection header to get vehicle_id / customer_id
- *  4. For warning/critical items → upsert service_recommendations
- *  5. For OK / N/C items        → delete any existing recommendation
- *  6. Update inspections aggregate counts + status
+ *  1. Guard: skip if inspection is already completed
+ *  2. Upsert inspection_items       (conflict: inspection_id, template_item_id)
+ *  3. Re-fetch inspection_items     to get DB-assigned IDs for the FK
+ *  4. Fetch inspection header       for vehicle_id / customer_id
+ *  5. Fetch existing recommendations to preserve their status on update
+ *  6. INSERT new recommendations    (status = 'pending')
+ *  7. UPDATE existing recommendations (title/description/priority only — preserve status)
+ *  8. DELETE recommendations         for items cleared to OK / N/C
+ *  9. Update inspection aggregates   (total_items, critical_count, warning_count)
+ *     Status is set to 'in_progress' — never auto-completed here.
  *
  * Required DB migrations (run once in Supabase SQL editor):
  *
- *   -- Aggregate columns on inspections
  *   ALTER TABLE inspections
  *     ADD COLUMN IF NOT EXISTS total_items    integer DEFAULT 0,
  *     ADD COLUMN IF NOT EXISTS critical_count integer DEFAULT 0,
  *     ADD COLUMN IF NOT EXISTS warning_count  integer DEFAULT 0;
  *
- *   -- Unique constraint so upsert resolves correctly
  *   ALTER TABLE inspection_items
  *     ADD CONSTRAINT inspection_items_inspection_template_unique
  *     UNIQUE (inspection_id, template_item_id);
  *
- *   -- New columns on service_recommendations
  *   ALTER TABLE service_recommendations
  *     ADD COLUMN IF NOT EXISTS inspection_item_id uuid REFERENCES inspection_items(id) ON DELETE CASCADE,
  *     ADD COLUMN IF NOT EXISTS estimated_price    numeric(10,2);
@@ -130,7 +234,22 @@ export async function saveInspectionResults(
   const supabase = await createClient()
   const tenantId = ctx.tenant.id
 
-  // ── 1. Upsert inspection_items ────────────────────────────────────────────
+  // ── 1. Guard: don't overwrite a completed inspection ─────────────────────
+  const { data: inspCheck } = await supabase
+    .from('inspections')
+    .select('status, vehicle_id, customer_id')
+    .eq('tenant_id', tenantId)
+    .eq('id', inspectionId)
+    .single()
+
+  if (inspCheck?.status === 'completed') {
+    return { error: 'This inspection is completed. Use "Edit Inspection" to reopen it first.' }
+  }
+
+  const vehicleId  = inspCheck?.vehicle_id  ?? null
+  const customerId = inspCheck?.customer_id ?? null
+
+  // ── 2. Upsert inspection_items ────────────────────────────────────────────
   const itemRows = items.map(item => ({
     tenant_id:        tenantId,
     inspection_id:    inspectionId,
@@ -148,99 +267,135 @@ export async function saveInspectionResults(
     return { error: upsertError.message }
   }
 
-  // ── 2. Re-fetch inspection_items to get DB-assigned IDs ───────────────────
-  //    We need inspection_items.id to use as inspection_item_id FK on recs.
+  // ── 3. Re-fetch inspection_items to get DB-assigned IDs ───────────────────
   const templateItemIds = items.map(i => i.template_item_id)
 
-  const { data: savedItems, error: fetchError } = await supabase
+  const { data: savedItems, error: fetchItemsError } = await supabase
     .from('inspection_items')
     .select('id, template_item_id, status')
     .eq('tenant_id', tenantId)
     .eq('inspection_id', inspectionId)
     .in('template_item_id', templateItemIds)
 
-  if (fetchError) {
-    console.error('[saveInspectionResults] fetch items:', fetchError.message)
-    return { error: fetchError.message }
+  if (fetchItemsError) {
+    console.error('[saveInspectionResults] fetch items:', fetchItemsError.message)
+    return { error: fetchItemsError.message }
   }
 
-  // Map template_item_id → { inspection_item_id, status }
-  const savedMap = new Map<string, { id: string; status: string }>(
-    (savedItems ?? []).map(r => [r.template_item_id as string, { id: r.id, status: r.status }])
+  // template_item_id → { id, status }
+  const savedItemMap = new Map<string, { id: string; status: string }>(
+    (savedItems ?? []).map(r => [
+      r.template_item_id as string,
+      { id: r.id as string, status: r.status as string },
+    ])
   )
 
-  // ── 3. Fetch inspection header for vehicle_id / customer_id ───────────────
-  const { data: inspectionRow } = await supabase
-    .from('inspections')
-    .select('vehicle_id, customer_id')
-    .eq('tenant_id', tenantId)
-    .eq('id', inspectionId)
-    .single()
-
-  const vehicleId  = inspectionRow?.vehicle_id  ?? null
-  const customerId = inspectionRow?.customer_id ?? null
-
-  // ── 4 & 5. Generate or remove recommendations per item ────────────────────
-  const recsToUpsert: {
-    tenant_id:          string
-    inspection_id:      string
+  // ── 4. Separate items into flagged (warning/critical) vs cleared ──────────
+  type FlaggedItem = {
     inspection_item_id: string
-    vehicle_id:         string | null
-    customer_id:        string | null
-    title:              string
-    description:        string
-    priority:           'medium' | 'high'
-    status:             'open'
-    estimated_price:    null
-  }[] = []
+    label:              string
+    itemStatus:         'attention' | 'urgent'
+  }
 
-  const itemIdsToDelete: string[] = []
+  const flaggedItems:       FlaggedItem[] = []
+  const clearedItemIds:     string[]      = []
 
   for (const item of items) {
-    const saved = savedMap.get(item.template_item_id)
+    const saved = savedItemMap.get(item.template_item_id)
     if (!saved) continue
 
     if (item.status === 'attention' || item.status === 'urgent') {
-      const label = (item.label ?? item.template_item_id).trim()
-      recsToUpsert.push({
-        tenant_id:          tenantId,
-        inspection_id:      inspectionId,
+      flaggedItems.push({
         inspection_item_id: saved.id,
-        vehicle_id:         vehicleId,
-        customer_id:        customerId,
-        title:              deriveTitle(label),
-        description:        deriveDescription(item.status),
-        priority:           item.status === 'urgent' ? 'high' : 'medium',
-        status:             'open',
-        estimated_price:    null,
+        label:              (item.label ?? item.template_item_id).trim(),
+        itemStatus:         item.status,
       })
     } else {
-      // OK or N/C — remove any existing recommendation for this item
-      itemIdsToDelete.push(saved.id)
+      clearedItemIds.push(saved.id)
     }
   }
 
-  // Upsert recommendations for flagged items
-  if (recsToUpsert.length > 0) {
-    const { error: recUpsertError } = await supabase
+  // ── 5. Fetch existing recommendations to preserve their decision status ───
+  //    We only want to INSERT for new items, UPDATE metadata for existing ones.
+  //    This prevents overwriting 'accepted' → 'pending' on re-save.
+  const flaggedItemIds = flaggedItems.map(f => f.inspection_item_id)
+
+  const existingRecMap = new Map<string, { id: string; status: string }>()
+
+  if (flaggedItemIds.length > 0) {
+    const { data: existingRecs } = await supabase
       .from('service_recommendations')
-      .upsert(recsToUpsert, { onConflict: 'inspection_item_id' })
+      .select('id, inspection_item_id, status')
+      .eq('inspection_id', inspectionId)
+      .in('inspection_item_id', flaggedItemIds)
 
-    if (recUpsertError) {
-      console.error('[saveInspectionResults] upsert recs:', recUpsertError.message)
-      // Non-fatal — don't abort the save, but surface the error
-      return { error: recUpsertError.message }
+    for (const rec of existingRecs ?? []) {
+      if (rec.inspection_item_id) {
+        existingRecMap.set(rec.inspection_item_id as string, {
+          id:     rec.id as string,
+          status: rec.status as string,
+        })
+      }
     }
   }
 
-  // Delete recommendations for cleared items
-  if (itemIdsToDelete.length > 0) {
+  // ── 6. INSERT new recommendations (status = 'pending') ───────────────────
+  const recsToInsert = flaggedItems
+    .filter(f => !existingRecMap.has(f.inspection_item_id))
+    .map(f => ({
+      tenant_id:          tenantId,
+      inspection_id:      inspectionId,
+      inspection_item_id: f.inspection_item_id,
+      vehicle_id:         vehicleId,
+      customer_id:        customerId,
+      title:              deriveTitle(f.label),
+      description:        deriveDescription(f.itemStatus),
+      priority:           f.itemStatus === 'urgent' ? 'high' : 'medium',
+      status:             'pending',
+      estimated_price:    null,
+    }))
+
+  if (recsToInsert.length > 0) {
+    const { error: insertRecsError } = await supabase
+      .from('service_recommendations')
+      .insert(recsToInsert)
+
+    if (insertRecsError) {
+      console.error('[saveInspectionResults] insert recs:', insertRecsError.message)
+      return { error: insertRecsError.message }
+    }
+  }
+
+  // ── 7. UPDATE existing recommendations (preserve status, update metadata) ─
+  const recsToUpdate = flaggedItems.filter(f => existingRecMap.has(f.inspection_item_id))
+
+  for (const f of recsToUpdate) {
+    const existing = existingRecMap.get(f.inspection_item_id)!
+    const { error: updateRecError } = await supabase
+      .from('service_recommendations')
+      .update({
+        title:       deriveTitle(f.label),
+        description: deriveDescription(f.itemStatus),
+        priority:    f.itemStatus === 'urgent' ? 'high' : 'medium',
+        // status intentionally NOT updated — preserve whatever decision was made
+      })
+      .eq('tenant_id', tenantId)
+      .eq('id', existing.id)
+
+    if (updateRecError) {
+      console.error('[saveInspectionResults] update rec:', updateRecError.message)
+      // Non-fatal — continue
+    }
+  }
+
+  // ── 8. DELETE recommendations for cleared items ───────────────────────────
+  if (clearedItemIds.length > 0) {
     const { error: deleteError } = await supabase
       .from('service_recommendations')
       .delete()
       .eq('tenant_id', tenantId)
       .eq('inspection_id', inspectionId)
-      .in('inspection_item_id', itemIdsToDelete)
+      .in('inspection_item_id', clearedItemIds)
 
     if (deleteError) {
       console.error('[saveInspectionResults] delete recs:', deleteError.message)
@@ -248,12 +403,11 @@ export async function saveInspectionResults(
     }
   }
 
-  // ── 6. Update inspection aggregate counts + status ────────────────────────
+  // ── 9. Update inspection aggregates — always in_progress on save ──────────
+  //    Use completeInspection() to explicitly finalize.
   const totalItems    = items.length
   const criticalCount = items.filter(i => i.status === 'urgent').length
   const warningCount  = items.filter(i => i.status === 'attention').length
-  const allChecked    = items.every(i => i.status !== 'not_checked')
-  const newStatus     = allChecked ? 'completed' : 'in_progress'
 
   const { error: updateError } = await supabase
     .from('inspections')
@@ -261,8 +415,7 @@ export async function saveInspectionResults(
       total_items:    totalItems,
       critical_count: criticalCount,
       warning_count:  warningCount,
-      status:         newStatus,
-      ...(allChecked ? { completed_at: new Date().toISOString() } : {}),
+      status:         'in_progress',
     })
     .eq('tenant_id', tenantId)
     .eq('id', inspectionId)
