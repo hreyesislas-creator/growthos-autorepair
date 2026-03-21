@@ -154,19 +154,28 @@ export default function InspectionChecklist({
 
   // ── Sync state from server data ────────────────────────────────────────────
   //
-  // Root cause of the rehydration bug:
+  // Root cause of rehydration bug (original):
   //   useState lazy initializer only runs on mount — never when props change.
-  //   Next.js Router Cache can serve a stale RSC payload (with existingItems=[])
-  //   on back-navigation, causing the component to mount with empty items even
-  //   though the DB has saved data. After router.refresh() the server sends the
-  //   correct items as updated props, but state doesn't reinitialize.
+  //   Next.js Router Cache can serve a stale RSC payload (existingItems=[]) on
+  //   back-navigation, so the component mounts with empty items even when the DB
+  //   has data.  After router.refresh() the server sends correct items as updated
+  //   props, but useState doesn't reinitialize.
   //
-  // Fix: watch existingItemsKey (a content-hash of the prop) and reinitialize
-  //   itemState whenever the SERVER sends different data. This fires on:
-  //     - Initial mount (with populated data after cache-busted navigation)
-  //     - After router.refresh() following a save / complete / reopen
-  //   It does NOT fire during normal user editing because existingItemsKey is
-  //   derived from props, not from local state.
+  // Fix: watch existingItemsKey (content-hash of prop) and reinitialize
+  //   itemState whenever the SERVER sends genuinely new data.  Guard:
+  //   if existingItems is empty we skip — we never want to wipe saved state.
+  //
+  // Root cause of regression (complete/reopen):
+  //   Calling router.refresh() after completeInspection/reopenInspection
+  //   caused the server to re-render.  During the concurrent-render transition
+  //   existingItems briefly appeared empty (or with a different key), firing
+  //   this useEffect and resetting all statuses to not_checked and clearing
+  //   the recommendations panel.
+  //
+  // Fix: complete/reopen are now local-state-only (isCompletedLocal below) —
+  //   they no longer call router.refresh(), so this effect never misfires on
+  //   them.  Only handleSave calls router.refresh(), which is the one case
+  //   where we WANT the effect to fire.
   //
   const existingItemsKey = useMemo(
     () => getExistingItemsKey(existingItems),
@@ -174,6 +183,9 @@ export default function InspectionChecklist({
   )
 
   useEffect(() => {
+    // Never reinitialize from an empty list — DB data always wins over cache
+    if (existingItems.length === 0) return
+
     // Reinitialize checklist state to match whatever the server just sent
     setItemState(buildInitialState(sections, existingItems))
 
@@ -199,11 +211,21 @@ export default function InspectionChecklist({
   )
   const [recErrors, setRecErrors] = useState<Record<string, string>>({})
 
-  // ── Derived values ─────────────────────────────────────────────────────────
+  // ── Completion state (local) ────────────────────────────────────────────────
+  //
+  // We manage the completed/in-progress toggle locally rather than reading from
+  // the inspection prop.  This prevents router.refresh() (called after handleSave)
+  // from momentarily delivering a stale inspection.status and flipping isReadOnly
+  // at the wrong time.  completeInspection/reopenInspection only toggle this flag
+  // and do NOT call router.refresh(), so the checklist and recommendations are
+  // never wiped by those actions.
+  //
+  const [isCompletedLocal, setIsCompletedLocal] = useState<boolean>(
+    () => inspection.status === 'completed',
+  )
+  const isReadOnly = isCompletedLocal
 
-  // isReadOnly is derived directly from the prop so it updates on router.refresh()
-  // without being stale (never copied into state)
-  const isReadOnly = inspection.status === 'completed'
+  // ── Derived values ─────────────────────────────────────────────────────────
 
   const counts = useMemo(() => {
     const acc = { pass: 0, attention: 0, urgent: 0, not_checked: 0, total: 0 }
@@ -290,7 +312,10 @@ export default function InspectionChecklist({
       return
     }
 
-    router.refresh()
+    // Toggle locally — do NOT call router.refresh() here.
+    // router.refresh() would re-render the server component, which can cause
+    // existingItemsKey to change and trigger the useEffect that wipes itemState.
+    setIsCompletedLocal(true)
   }
 
   async function handleReopen() {
@@ -307,7 +332,8 @@ export default function InspectionChecklist({
       return
     }
 
-    router.refresh()
+    // Toggle locally — same reason as handleComplete above.
+    setIsCompletedLocal(false)
   }
 
   // ── Recommendation decision handler (optimistic) ───────────────────────────
