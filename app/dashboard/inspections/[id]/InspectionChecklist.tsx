@@ -143,19 +143,45 @@ function buildInitialState(
 ): Record<string, ItemState> {
   const state: Record<string, ItemState> = {}
 
+  // ── DIAGNOSTIC LOG A ──────────────────────────────────────────────────────
+  console.log('[DVI:buildInitialState] called', {
+    sectionsCount:      sections.length,
+    existingItemsCount: existingItems.length,
+    firstExistingItem:  existingItems[0] ?? null,
+  })
+
   // Index saved DB items by template_item_id for O(1) lookup
   const existingMap = new Map<string, ExistingItem>()
   for (const ei of existingItems) {
     if (ei.template_item_id) existingMap.set(ei.template_item_id, ei)
   }
 
+  // ── DIAGNOSTIC LOG B ──────────────────────────────────────────────────────
+  console.log('[DVI:buildInitialState] existingMap.size:', existingMap.size,
+    '| first map key:', existingMap.keys().next().value ?? '(none)')
+
+  let firstItemLogged = false
   for (const section of sections) {
     for (const item of section.items) {
       const existing = existingMap.get(item.id)
+      const result   = dbToUi(existing?.status)
+
+      // ── DIAGNOSTIC LOG C — first item only ────────────────────────────────
+      if (!firstItemLogged) {
+        console.log('[DVI:buildInitialState] FIRST ITEM lookup', {
+          'item.id':              item.id,
+          'existing found':       !!existing,
+          'existing?.status':     existing?.status,
+          'dbToUi result':        result,
+          'existingMap keys (3)': [...existingMap.keys()].slice(0, 3),
+        })
+        firstItemLogged = true
+      }
+
       state[item.id] = {
         // Translate DB value → UI value so button isActive checks work correctly
-        result: dbToUi(existing?.status),
-        note:   existing?.notes ?? '',
+        result,
+        note: existing?.notes ?? '',
       }
     }
   }
@@ -186,6 +212,13 @@ export default function InspectionChecklist({
   technician,
 }: Props) {
   const router = useRouter()
+
+  // ── DIAGNOSTIC LOG D — every render ──────────────────────────────────────
+  console.log('[DVI:render]', {
+    'existingItems.length': existingItems.length,
+    'firstExisting':        existingItems[0] ?? null,
+    'inspection.status':    inspection.status,
+  })
 
   // ── Checklist state ────────────────────────────────────────────────────────
   const [itemState, setItemState] = useState<Record<string, ItemState>>(
@@ -233,6 +266,13 @@ export default function InspectionChecklist({
   )
 
   useEffect(() => {
+    // ── DIAGNOSTIC LOG E ──────────────────────────────────────────────────
+    console.log('[DVI:useEffect]', {
+      'existingItems.length': existingItems.length,
+      existingItemsKey,
+      'will skip (guard)':    existingItems.length === 0,
+    })
+
     // Never reinitialize from an empty list — DB data always wins over cache
     if (existingItems.length === 0) return
 
@@ -569,6 +609,17 @@ export default function InspectionChecklist({
             const state    = itemState[item.id] ?? { result: 'nc' as ItemResult, note: '' }
             const isLast   = idx === section.items.length - 1
             const noteOpen = expandedNotes.has(item.id)
+
+            // ── DIAGNOSTIC LOG F — first item of first section only ──────────
+            if (idx === 0 && sections[0]?.section_name === section.section_name) {
+              console.log('[DVI:render FIRST ROW]', {
+                'item.id':              item.id,
+                'itemState[item.id]':   itemState[item.id],
+                'state.result':         state.result,
+                'itemState keys (3)':   Object.keys(itemState).slice(0, 3),
+                'itemState total keys': Object.keys(itemState).length,
+              })
+            }
 
             return (
               <div
