@@ -363,10 +363,19 @@ export default function InspectionChecklist({
       return
     }
 
-    // Toggle locally — do NOT call router.refresh() here.
-    // router.refresh() would re-render the server component, which can cause
-    // existingItemsKey to change and trigger the useEffect that wipes itemState.
+    // Toggle isReadOnly immediately via local state so the UI responds
+    // without waiting for the server round-trip.
+    // router.refresh() is called to bust the Next.js Router Cache:
+    //   On the first visit to this page the RSC payload may have been cached
+    //   before any inspection_items were saved (existingItems = []).
+    //   Without a refresh, the stale empty payload stays in cache,
+    //   existingItemsKey never changes from '', the useEffect never fires,
+    //   and every row stays at the nc fallback.
+    // The existingItems.length === 0 guard in the useEffect prevents any
+    // state reset if the server briefly streams an empty list during the
+    // refresh transition.
     setIsCompletedLocal(true)
+    router.refresh()
   }
 
   async function handleReopen() {
@@ -383,8 +392,9 @@ export default function InspectionChecklist({
       return
     }
 
-    // Toggle locally — same reason as handleComplete above.
+    // Same reasoning as handleComplete above.
     setIsCompletedLocal(false)
+    router.refresh()
   }
 
   // ── Recommendation decision handler (optimistic) ───────────────────────────
