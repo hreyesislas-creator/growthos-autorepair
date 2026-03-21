@@ -3,7 +3,7 @@
 // All server-side data fetching functions by domain
 // ============================================================
 
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 import type {
   Appointment,
   AppointmentRow,
@@ -341,14 +341,18 @@ export async function getInspectionById(tenantId: string, id: string) {
     }
   }
 
-  const supabase = await createClient()
+  const supabase      = await createClient()
+  // Use the service-role client for inspection_items so that RLS on that table
+  // never silently filters the rows to [].  Security is already enforced by the
+  // inspections query above — if the inspection doesn't belong to tenantId that
+  // query returns null and the page returns notFound().
+  const adminSupabase = createAdminClient()
 
   const [inspRes, itemsRes] = await Promise.all([
     supabase.from('inspections').select('*').eq('tenant_id', tenantId).eq('id', id).single(),
-    supabase
+    adminSupabase
       .from('inspection_items')
-      .select('*')
-      .eq('tenant_id', tenantId)
+      .select('template_item_id, status, notes')
       .eq('inspection_id', id)
       // order by created_at — the new inspection_items table has no display_order column
       .order('created_at', { ascending: true }),
