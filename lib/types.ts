@@ -453,13 +453,24 @@ export interface ServiceRecommendation {
   inspection_id: string | null
   /** FK to inspection_items.id — set when auto-generated from DVI results */
   inspection_item_id: string | null
+  /** FK to inspection_template_items.id */
+  template_item_id: string | null
   title: string
   description: string | null
   priority: 'low' | 'medium' | 'high' | 'urgent'
   /** 'pending' is the initial state for auto-generated recommendations */
   status: 'pending' | 'accepted' | 'rejected' | 'open' | 'approved' | 'declined' | 'completed'
   estimated_price: number | null
+  /** The checklist item label (e.g. "Brake Pads") — source of the recommendation */
+  item_name: string | null
+  /** DB status of the inspection_item that triggered this recommendation */
+  source_status: 'attention' | 'urgent' | null
+  /** Technician note copied from inspection_items.notes at generation time */
+  technician_notes: string | null
+  /** Section the item belongs to (e.g. "Brakes", "Suspension") */
+  section_name: string | null
   created_at: string
+  updated_at: string | null
 }
 
 // ── Billing types ─────────────────────────────────────────────

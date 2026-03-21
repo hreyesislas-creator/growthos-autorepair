@@ -13,6 +13,7 @@ import {
   completeInspection,
   reopenInspection,
   updateRecommendationStatus,
+  generateRecommendations,
   type RecommendationStatus,
 } from '../actions'
 
@@ -96,9 +97,9 @@ const REC_STATUS_LABEL: Record<string, { label: string; style: React.CSSProperti
   open:     { label: 'Open',     style: { background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' } },
 }
 
-const PRIORITY_BADGE: Record<string, React.CSSProperties> = {
-  high:   { background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5' },
-  medium: { background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a' },
+const SOURCE_STATUS_BADGE: Record<'attention' | 'urgent', { label: string; style: React.CSSProperties }> = {
+  attention: { label: 'Warning',  style: { background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a' } },
+  urgent:    { label: 'Critical', style: { background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5' } },
 }
 
 // ── Status mapping ─────────────────────────────────────────────────────────────
@@ -142,9 +143,6 @@ function buildInitialState(
   existingItems: ExistingItem[],
 ): Record<string, ItemState> {
   const state: Record<string, ItemState> = {}
-
-  // LOG 1 — exact data received by buildInitialState
-  console.log('[DVI] buildInitialState existingItems:', existingItems)
 
   // Index saved DB items by template_item_id for O(1) lookup
   const existingMap = new Map<string, ExistingItem>()
@@ -191,9 +189,6 @@ export default function InspectionChecklist({
 }: Props) {
   const router = useRouter()
 
-  // LOG 2 — existingItems as received from server on every render
-  console.log('[DVI] existingItems from server:', existingItems)
-
   // ── Checklist state ────────────────────────────────────────────────────────
   const [itemState, setItemState] = useState<Record<string, ItemState>>(
     () => buildInitialState(sections, existingItems),
@@ -222,18 +217,6 @@ export default function InspectionChecklist({
   //   itemState whenever the SERVER sends genuinely new data.  Guard:
   //   if existingItems is empty we skip — we never want to wipe saved state.
   //
-  // Root cause of regression (complete/reopen):
-  //   Calling router.refresh() after completeInspection/reopenInspection
-  //   caused the server to re-render.  During the concurrent-render transition
-  //   existingItems briefly appeared empty (or with a different key), firing
-  //   this useEffect and resetting all statuses to not_checked and clearing
-  //   the recommendations panel.
-  //
-  // Fix: complete/reopen are now local-state-only (isCompletedLocal below) —
-  //   they no longer call router.refresh(), so this effect never misfires on
-  //   them.  Only handleSave calls router.refresh(), which is the one case
-  //   where we WANT the effect to fire.
-  //
   const existingItemsKey = useMemo(
     () => getExistingItemsKey(existingItems),
     [existingItems],
@@ -255,17 +238,14 @@ export default function InspectionChecklist({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [existingItemsKey])
 
-  // LOG 3 — itemState after every state change (safe: inside useEffect, after all hooks)
-  useEffect(() => {
-    console.log('[DVI] current itemState:', itemState)
-  }, [itemState])
-
   // ── Action state ───────────────────────────────────────────────────────────
-  const [saving,     setSaving]     = useState(false)
-  const [completing, setCompleting] = useState(false)
-  const [reopening,  setReopening]  = useState(false)
-  const [saveResult, setSaveResult] = useState<'idle' | 'success' | 'error'>('idle')
-  const [saveError,  setSaveError]  = useState<string | null>(null)
+  const [saving,      setSaving]      = useState(false)
+  const [completing,  setCompleting]  = useState(false)
+  const [reopening,   setReopening]   = useState(false)
+  const [generating,  setGenerating]  = useState(false)
+  const [saveResult,  setSaveResult]  = useState<'idle' | 'success' | 'error'>('idle')
+  const [saveError,   setSaveError]   = useState<string | null>(null)
+  const [genError,    setGenError]    = useState<string | null>(null)
 
   // ── Recommendation decision state (optimistic) ─────────────────────────────
   const [recStatuses, setRecStatuses] = useState<Record<string, RecommendationStatus>>(
@@ -375,17 +355,6 @@ export default function InspectionChecklist({
       return
     }
 
-    // Toggle isReadOnly immediately via local state so the UI responds
-    // without waiting for the server round-trip.
-    // router.refresh() is called to bust the Next.js Router Cache:
-    //   On the first visit to this page the RSC payload may have been cached
-    //   before any inspection_items were saved (existingItems = []).
-    //   Without a refresh, the stale empty payload stays in cache,
-    //   existingItemsKey never changes from '', the useEffect never fires,
-    //   and every row stays at the nc fallback.
-    // The existingItems.length === 0 guard in the useEffect prevents any
-    // state reset if the server briefly streams an empty list during the
-    // refresh transition.
     setIsCompletedLocal(true)
     router.refresh()
   }
@@ -404,8 +373,25 @@ export default function InspectionChecklist({
       return
     }
 
-    // Same reasoning as handleComplete above.
     setIsCompletedLocal(false)
+    router.refresh()
+  }
+
+  // ── Generate recommendations handler ──────────────────────────────────────
+
+  async function handleGenerate() {
+    setGenerating(true)
+    setGenError(null)
+
+    const result = await generateRecommendations(inspection.id)
+    setGenerating(false)
+
+    if (result?.error) {
+      setGenError(result.error)
+      return
+    }
+
+    // Refresh so the server sends the newly generated recommendations
     router.refresh()
   }
 
@@ -582,9 +568,6 @@ export default function InspectionChecklist({
             const isLast   = idx === section.items.length - 1
             const noteOpen = expandedNotes.has(item.id)
 
-            // LOG 4 — every row, every render
-            console.log('[DVI] render row', item.id, 'result:', state.result)
-
             return (
               <div
                 key={item.id}
@@ -630,8 +613,6 @@ export default function InspectionChecklist({
                             borderRadius: 'var(--r6,6px)',
                             border: '1px solid var(--border)',
                             cursor: isReadOnly ? 'default' : 'pointer',
-                            // In read-only mode: active (saved) buttons stay fully visible;
-                            // inactive buttons are dimmed so the saved status is clear
                             opacity: isReadOnly && !isActive ? 0.35 : 1,
                             transition: 'all 0.1s',
                             ...(isActive ? opt.activeStyle : { background: 'transparent', color: 'var(--text-3)' }),
@@ -642,7 +623,7 @@ export default function InspectionChecklist({
                       )
                     })}
 
-                    {/* Note toggle — shown when note exists, or always when editable */}
+                    {/* Note toggle */}
                     <button
                       type="button"
                       onClick={() => toggleNote(item.id)}
@@ -663,7 +644,7 @@ export default function InspectionChecklist({
                   </div>
                 </div>
 
-                {/* Note field — textarea when editable, plain text when read-only */}
+                {/* Note field */}
                 {noteOpen && (
                   <div style={{ marginTop: 8, paddingLeft: 14 }}>
                     {isReadOnly ? (
@@ -693,11 +674,18 @@ export default function InspectionChecklist({
         </div>
       ))}
 
-      {/* ── Recommendations panel ─────────────────────────────────────────── */}
-      {initialRecommendations.length > 0 && (
-        <div className="card" style={{ marginBottom: 96 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-            <div className="section-title">Service Recommendations</div>
+      {/* ── Service Recommendations ────────────────────────────────────────── */}
+      <div className="card" style={{ marginBottom: 96 }}>
+
+        {/* Panel header */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          marginBottom: initialRecommendations.length > 0 ? 14 : 0,
+          flexWrap: 'wrap',
+        }}>
+          <div className="section-title" style={{ flex: 1 }}>Service Recommendations</div>
+
+          {initialRecommendations.length > 0 && (
             <span style={{
               fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 'var(--r6,6px)',
               ...(initialRecommendations.some(r => r.priority === 'high')
@@ -706,13 +694,56 @@ export default function InspectionChecklist({
             }}>
               {initialRecommendations.length} item{initialRecommendations.length !== 1 ? 's' : ''}
             </span>
-          </div>
+          )}
 
+          {/* Generate button — always visible */}
+          <button
+            type="button"
+            className="btn-ghost"
+            disabled={generating}
+            onClick={handleGenerate}
+            title="Generate recommendations from current inspection results"
+            style={{ fontSize: 12, opacity: generating ? 0.6 : 1 }}
+          >
+            {generating ? 'Generating…' : '⚙ Generate Recommendations'}
+          </button>
+        </div>
+
+        {/* Generate error */}
+        {genError && (
+          <div style={{
+            marginBottom: 12, padding: '10px 12px',
+            background: '#fff0f0', border: '1px solid #fca5a5',
+            borderRadius: 'var(--r6,6px)', fontSize: 12, color: '#b91c1c',
+          }}>
+            <strong>Could not generate:</strong> {genError}
+          </div>
+        )}
+
+        {/* Empty state */}
+        {initialRecommendations.length === 0 && !generating && (
+          <div style={{
+            padding: '20px 0 4px',
+            textAlign: 'center', fontSize: 13, color: 'var(--text-3)',
+          }}>
+            No recommendations yet.
+            {(counts.warning > 0 || counts.critical > 0) ? (
+              <span> Save the checklist then click <strong>Generate Recommendations</strong>.</span>
+            ) : (
+              <span> Mark items as Warning or Critical, save, then generate.</span>
+            )}
+          </div>
+        )}
+
+        {/* Recommendation rows */}
+        {initialRecommendations.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {initialRecommendations.map(rec => {
               const currentStatus = recStatuses[rec.id] ?? rec.status
               const statusMeta    = REC_STATUS_LABEL[currentStatus] ?? REC_STATUS_LABEL.open
               const recError      = recErrors[rec.id]
+              const srcStatus     = rec.source_status ?? null
+              const srcBadge      = srcStatus ? SOURCE_STATUS_BADGE[srcStatus] : null
 
               return (
                 <div
@@ -722,29 +753,53 @@ export default function InspectionChecklist({
                     border: '1px solid var(--border)', background: 'var(--surface-2)',
                   }}
                 >
+                  {/* Row 1: badges + title + status */}
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
 
-                    {/* Priority badge */}
-                    <span style={{
-                      display: 'inline-block', marginTop: 2, padding: '2px 7px',
-                      borderRadius: 'var(--r6,6px)', fontSize: 10, fontWeight: 700,
-                      textTransform: 'uppercase', letterSpacing: '0.04em', flexShrink: 0,
-                      ...(PRIORITY_BADGE[rec.priority ?? 'medium'] ?? PRIORITY_BADGE.medium),
-                    }}>
-                      {rec.priority === 'high' ? '⚠ Critical' : '! Warning'}
-                    </span>
+                    {/* Source status badge (Warning / Critical) */}
+                    {srcBadge && (
+                      <span style={{
+                        display: 'inline-block', marginTop: 2, padding: '2px 7px',
+                        borderRadius: 'var(--r6,6px)', fontSize: 10, fontWeight: 700,
+                        textTransform: 'uppercase', letterSpacing: '0.04em', flexShrink: 0,
+                        ...srcBadge.style,
+                      }}>
+                        {srcBadge.label}
+                      </span>
+                    )}
 
-                    {/* Title + description */}
+                    {/* Item name + service title + description */}
                     <div style={{ flex: 1, minWidth: 0 }}>
+                      {/* Original checklist item name */}
+                      {rec.item_name && rec.item_name !== rec.title && (
+                        <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 1 }}>
+                          {rec.item_name}
+                        </div>
+                      )}
+                      {/* Derived service title */}
                       <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>
                         {rec.title}
                       </div>
+                      {/* Auto-generated description */}
                       {rec.description && (
                         <div style={{ fontSize: 12, color: 'var(--text-3)' }}>{rec.description}</div>
                       )}
+                      {/* Technician notes */}
+                      {rec.technician_notes && (
+                        <div style={{
+                          marginTop: 5, fontSize: 12,
+                          color: 'var(--text-3)', fontStyle: 'italic',
+                          padding: '4px 8px',
+                          background: 'var(--surface-3,#f8fafc)',
+                          borderRadius: 'var(--r4,4px)',
+                          borderLeft: '2px solid var(--border)',
+                        }}>
+                          Tech note: {rec.technician_notes}
+                        </div>
+                      )}
                     </div>
 
-                    {/* Status badge */}
+                    {/* Decision status badge */}
                     <span style={{
                       flexShrink: 0, padding: '2px 8px', borderRadius: 'var(--r6,6px)',
                       fontSize: 11, fontWeight: 600, ...statusMeta.style,
@@ -753,8 +808,8 @@ export default function InspectionChecklist({
                     </span>
                   </div>
 
-                  {/* Decision buttons */}
-                  <div style={{ marginTop: 10, display: 'flex', gap: 6 }}>
+                  {/* Row 2: decision buttons */}
+                  <div style={{ marginTop: 10, display: 'flex', gap: 6, alignItems: 'center' }}>
                     {REC_DECISION_OPTIONS.map(opt => {
                       const isActive = currentStatus === opt.value
                       return (
@@ -775,8 +830,19 @@ export default function InspectionChecklist({
                     })}
 
                     {rec.estimated_price != null && (
-                      <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 600, color: 'var(--text)', alignSelf: 'center' }}>
+                      <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
                         ${Number(rec.estimated_price).toFixed(2)}
+                      </span>
+                    )}
+
+                    {rec.section_name && (
+                      <span style={{
+                        marginLeft: rec.estimated_price != null ? 8 : 'auto',
+                        fontSize: 11, color: 'var(--text-3)',
+                        padding: '1px 6px', borderRadius: 4,
+                        background: 'var(--surface-3,#f1f5f9)',
+                      }}>
+                        {rec.section_name}
                       </span>
                     )}
                   </div>
@@ -790,8 +856,8 @@ export default function InspectionChecklist({
               )
             })}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* ── Sticky action bar ─────────────────────────────────────────────── */}
       <div style={{
