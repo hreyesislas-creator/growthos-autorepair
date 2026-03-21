@@ -198,10 +198,6 @@ export default function InspectionChecklist({
   const [itemState, setItemState] = useState<Record<string, ItemState>>(
     () => buildInitialState(sections, existingItems),
   )
-
-  // LOG 3 — itemState after useState initialisation (only meaningful on mount;
-  //          subsequent renders show the current in-memory state)
-  console.log('[DVI] initial itemState:', itemState)
   const [expandedNotes, setExpandedNotes] = useState<Set<string>>(() => {
     // Auto-expand notes that already have saved content
     const withNotes = new Set<string>()
@@ -258,6 +254,11 @@ export default function InspectionChecklist({
     ))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [existingItemsKey])
+
+  // LOG 3 — itemState after every state change (safe: inside useEffect, after all hooks)
+  useEffect(() => {
+    console.log('[DVI] current itemState:', itemState)
+  }, [itemState])
 
   // ── Action state ───────────────────────────────────────────────────────────
   const [saving,     setSaving]     = useState(false)
