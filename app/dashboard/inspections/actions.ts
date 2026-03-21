@@ -192,8 +192,8 @@ function deriveTitle(label: string): string {
 
 function deriveDescription(status: 'attention' | 'urgent'): string {
   return status === 'urgent'
-    ? 'Critical issue requiring immediate attention. Do not delay service.'
-    : 'Requires attention. Recommend addressing on next service visit.'
+    ? 'Immediate repair recommended. Continued driving may cause damage or safety risk.'
+    : 'Wear detected. Service recommended soon to prevent further damage.'
 }
 
 // ── Save DVI results + auto-generate recommendations ─────────────────────────

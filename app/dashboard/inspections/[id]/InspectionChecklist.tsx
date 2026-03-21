@@ -97,9 +97,50 @@ const REC_STATUS_LABEL: Record<string, { label: string; style: React.CSSProperti
   open:     { label: 'Open',     style: { background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' } },
 }
 
-const SOURCE_STATUS_BADGE: Record<'attention' | 'urgent', { label: string; style: React.CSSProperties }> = {
-  attention: { label: 'Warning',  style: { background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a' } },
-  urgent:    { label: 'Critical', style: { background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5' } },
+// ── Per-severity card visual config ───────────────────────────────────────────
+// Drives badge, card border/background, and description colour per source_status.
+
+const SEVERITY_CONFIG: Record<'attention' | 'urgent', {
+  badgeLabel:  string
+  badgeStyle:  React.CSSProperties
+  cardStyle:   React.CSSProperties
+  descColor:   string
+  noteBarColor: string
+}> = {
+  attention: {
+    badgeLabel: '! Warning',
+    badgeStyle: {
+      background: '#fef3c7', color: '#92400e',
+      border: '1px solid #fcd34d',
+    },
+    cardStyle: {
+      padding: '12px 14px', borderRadius: 'var(--r8,8px)',
+      border: '1px solid #fde68a',
+      background: '#fffdf4',
+    },
+    descColor:    '#78350f',
+    noteBarColor: '#fcd34d',
+  },
+  urgent: {
+    badgeLabel: '⚠ Critical',
+    badgeStyle: {
+      background: '#dc2626', color: '#fff',
+      border: '1px solid #b91c1c',
+    },
+    cardStyle: {
+      padding: '12px 14px', borderRadius: 'var(--r8,8px)',
+      border: '2px solid #fca5a5',
+      background: '#fff5f5',
+    },
+    descColor:    '#991b1b',
+    noteBarColor: '#fca5a5',
+  },
+}
+
+// Keep the old name as a simple re-export so nothing else breaks
+const SOURCE_STATUS_BADGE = {
+  attention: { label: SEVERITY_CONFIG.attention.badgeLabel, style: SEVERITY_CONFIG.attention.badgeStyle },
+  urgent:    { label: SEVERITY_CONFIG.urgent.badgeLabel,    style: SEVERITY_CONFIG.urgent.badgeStyle    },
 }
 
 // ── Status mapping ─────────────────────────────────────────────────────────────
@@ -735,36 +776,60 @@ export default function InspectionChecklist({
           </div>
         )}
 
-        {/* Recommendation rows */}
+        {/* Recommendation rows — critical items rendered first */}
         {initialRecommendations.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {initialRecommendations.map(rec => {
+            {[...initialRecommendations]
+              .sort((a, b) => {
+                const order = { urgent: 0, attention: 1 }
+                const aOrd = order[(a.source_status ?? 'attention') as keyof typeof order] ?? 1
+                const bOrd = order[(b.source_status ?? 'attention') as keyof typeof order] ?? 1
+                return aOrd - bOrd
+              })
+              .map(rec => {
               const currentStatus = recStatuses[rec.id] ?? rec.status
               const statusMeta    = REC_STATUS_LABEL[currentStatus] ?? REC_STATUS_LABEL.open
               const recError      = recErrors[rec.id]
-              const srcStatus     = rec.source_status ?? null
-              const srcBadge      = srcStatus ? SOURCE_STATUS_BADGE[srcStatus] : null
+              const srcStatus     = (rec.source_status ?? null) as 'attention' | 'urgent' | null
+              const severity      = srcStatus ? SEVERITY_CONFIG[srcStatus] : null
 
               return (
                 <div
                   key={rec.id}
-                  style={{
+                  style={severity?.cardStyle ?? {
                     padding: '12px 14px', borderRadius: 'var(--r8,8px)',
                     border: '1px solid var(--border)', background: 'var(--surface-2)',
                   }}
                 >
-                  {/* Row 1: badges + title + status */}
+                  {/* CRITICAL only: "Immediate Attention Required" header strip */}
+                  {srcStatus === 'urgent' && (
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      marginBottom: 10, paddingBottom: 8,
+                      borderBottom: '1px solid #fca5a5',
+                    }}>
+                      <span style={{ fontSize: 15, lineHeight: 1 }}>🚨</span>
+                      <span style={{
+                        fontSize: 11, fontWeight: 700, color: '#b91c1c',
+                        textTransform: 'uppercase', letterSpacing: '0.06em',
+                      }}>
+                        Immediate Attention Required
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Row 1: badge + title + decision-status */}
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
 
-                    {/* Source status badge (Warning / Critical) */}
-                    {srcBadge && (
+                    {/* Source status badge */}
+                    {severity && (
                       <span style={{
-                        display: 'inline-block', marginTop: 2, padding: '2px 7px',
+                        display: 'inline-block', marginTop: 2, padding: '2px 8px',
                         borderRadius: 'var(--r6,6px)', fontSize: 10, fontWeight: 700,
-                        textTransform: 'uppercase', letterSpacing: '0.04em', flexShrink: 0,
-                        ...srcBadge.style,
+                        textTransform: 'uppercase', letterSpacing: '0.05em', flexShrink: 0,
+                        ...severity.badgeStyle,
                       }}>
-                        {srcBadge.label}
+                        {severity.badgeLabel}
                       </span>
                     )}
 
@@ -772,27 +837,36 @@ export default function InspectionChecklist({
                     <div style={{ flex: 1, minWidth: 0 }}>
                       {/* Original checklist item name */}
                       {rec.item_name && rec.item_name !== rec.title && (
-                        <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 1 }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 2 }}>
                           {rec.item_name}
                         </div>
                       )}
                       {/* Derived service title */}
-                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>
+                      <div style={{
+                        fontSize: 13, fontWeight: 700, marginBottom: 3,
+                        color: srcStatus === 'urgent' ? '#7f1d1d' : 'var(--text)',
+                      }}>
                         {rec.title}
                       </div>
                       {/* Auto-generated description */}
                       {rec.description && (
-                        <div style={{ fontSize: 12, color: 'var(--text-3)' }}>{rec.description}</div>
+                        <div style={{
+                          fontSize: 12,
+                          color: severity?.descColor ?? 'var(--text-3)',
+                          fontWeight: srcStatus === 'urgent' ? 500 : 400,
+                        }}>
+                          {rec.description}
+                        </div>
                       )}
                       {/* Technician notes */}
                       {rec.technician_notes && (
                         <div style={{
-                          marginTop: 5, fontSize: 12,
+                          marginTop: 6, fontSize: 12,
                           color: 'var(--text-3)', fontStyle: 'italic',
                           padding: '4px 8px',
-                          background: 'var(--surface-3,#f8fafc)',
+                          background: srcStatus === 'urgent' ? '#fff1f1' : 'var(--surface-3,#f8fafc)',
                           borderRadius: 'var(--r4,4px)',
-                          borderLeft: '2px solid var(--border)',
+                          borderLeft: `2px solid ${severity?.noteBarColor ?? 'var(--border)'}`,
                         }}>
                           Tech note: {rec.technician_notes}
                         </div>
