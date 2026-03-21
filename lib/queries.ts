@@ -12,6 +12,7 @@ import type {
   Vehicle,
   Inspection,
   InspectionTemplate,
+  InspectionTemplateItem,
   MessageLog,
   MessageTemplate,
   TireBrand,
@@ -690,6 +691,33 @@ export async function getCurrentTenantUser(tenantId: string): Promise<TenantUser
 
   if (error) {
     console.error('[getCurrentTenantUser]', error.message)
+    return null
+  }
+
+  return data as TenantUser | null
+}
+
+/**
+ * Returns a single tenant_users row by its primary key (not auth_user_id).
+ * Used to resolve technician name/email for display on the inspection page.
+ */
+export async function getTenantUserById(
+  tenantId: string,
+  userId: string,
+): Promise<TenantUser | null> {
+  if (!hasValue(tenantId) || !hasValue(userId)) return null
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('tenant_users')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('id', userId)
+    .single()
+
+  if (error) {
+    console.error('[getTenantUserById]', error.message)
     return null
   }
 

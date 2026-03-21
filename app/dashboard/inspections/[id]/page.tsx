@@ -5,6 +5,7 @@ import {
   getTemplateItems,
   getInspectionTemplates,
   getInspectionRecommendations,
+  getTenantUserById,
 } from '@/lib/queries'
 import Topbar from '@/components/dashboard/Topbar'
 import InspectionChecklist from './InspectionChecklist'
@@ -46,7 +47,7 @@ export default async function InspectionDetailPage({
 
   const tenantId = ctx.tenant.id
 
-  // Fetch inspection + existing item results + recommendations in parallel
+  // ── Step 1: Fetch inspection header + existing items + recommendations in parallel
   const [{ inspection, items: existingItems }, recommendations] = await Promise.all([
     getInspectionById(tenantId, params.id),
     getInspectionRecommendations(tenantId, params.id),
@@ -54,8 +55,7 @@ export default async function InspectionDetailPage({
 
   if (!inspection) return notFound()
 
-  // Resolve template: use the inspection's own template_id, or fall back to
-  // the tenant's default template so there is always a checklist to show.
+  // ── Step 2: Resolve template ID
   let templateId = inspection.template_id ?? null
 
   if (!templateId) {
@@ -64,9 +64,13 @@ export default async function InspectionDetailPage({
     templateId = defaultTpl?.id ?? null
   }
 
-  const templateItems = templateId
-    ? await getTemplateItems(templateId, tenantId)
-    : []
+  // ── Step 3: Fetch template items + technician user in parallel
+  const [templateItems, technician] = await Promise.all([
+    templateId ? getTemplateItems(templateId, tenantId) : Promise.resolve([]),
+    inspection.technician_id
+      ? getTenantUserById(tenantId, inspection.technician_id)
+      : Promise.resolve(null),
+  ])
 
   const sections = groupBySection(templateItems)
 
@@ -82,6 +86,7 @@ export default async function InspectionDetailPage({
         sections={sections}
         existingItems={existingItems as any[]}
         initialRecommendations={recommendations}
+        technician={technician}
       />
     </>
   )

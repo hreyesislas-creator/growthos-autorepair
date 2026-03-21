@@ -416,6 +416,7 @@ export async function saveInspectionResults(
       critical_count: criticalCount,
       warning_count:  warningCount,
       status:         'in_progress',
+      updated_at:     new Date().toISOString(),
     })
     .eq('tenant_id', tenantId)
     .eq('id', inspectionId)
