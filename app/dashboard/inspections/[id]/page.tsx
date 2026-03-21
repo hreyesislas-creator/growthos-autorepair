@@ -4,6 +4,7 @@ import {
   getInspectionById,
   getTemplateItems,
   getInspectionTemplates,
+  getInspectionRecommendations,
 } from '@/lib/queries'
 import Topbar from '@/components/dashboard/Topbar'
 import InspectionChecklist from './InspectionChecklist'
@@ -19,11 +20,10 @@ function groupBySection(items: InspectionTemplateItem[]): {
   const map = new Map<string, InspectionTemplateItem[]>()
 
   for (const item of items) {
-    // Prefer section_name; fall back to section, then category, then 'General'
     const key =
       item.section_name?.trim() ||
-      item.section?.trim() ||
-      item.category?.trim() ||
+      item.section?.trim()      ||
+      item.category?.trim()     ||
       'General'
 
     if (!map.has(key)) map.set(key, [])
@@ -46,21 +46,21 @@ export default async function InspectionDetailPage({
 
   const tenantId = ctx.tenant.id
 
-  const { inspection, items: existingItems } = await getInspectionById(
-    tenantId,
-    params.id,
-  )
+  // Fetch inspection + existing item results + recommendations in parallel
+  const [{ inspection, items: existingItems }, recommendations] = await Promise.all([
+    getInspectionById(tenantId, params.id),
+    getInspectionRecommendations(tenantId, params.id),
+  ])
 
   if (!inspection) return notFound()
 
-  // Resolve template: use the inspection's template_id, or fall back to the
-  // tenant's default template so there is always a checklist to show.
+  // Resolve template: use the inspection's own template_id, or fall back to
+  // the tenant's default template so there is always a checklist to show.
   let templateId = inspection.template_id ?? null
 
   if (!templateId) {
     const templates = await getInspectionTemplates(tenantId)
-    const defaultTpl =
-      templates.find(t => t.is_default) ?? templates[0] ?? null
+    const defaultTpl = templates.find(t => t.is_default) ?? templates[0] ?? null
     templateId = defaultTpl?.id ?? null
   }
 
@@ -81,6 +81,7 @@ export default async function InspectionDetailPage({
         inspection={inspection}
         sections={sections}
         existingItems={existingItems as any[]}
+        initialRecommendations={recommendations}
       />
     </>
   )

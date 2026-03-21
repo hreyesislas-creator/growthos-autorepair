@@ -263,6 +263,33 @@ export async function getServiceHistory(tenantId: string, vehicleId: string): Pr
   return (data ?? []) as ServiceHistory[]
 }
 
+/**
+ * Fetches all service recommendations auto-generated for a specific inspection.
+ * Ordered by priority (urgent → high → medium → low) then created_at desc.
+ */
+export async function getInspectionRecommendations(
+  tenantId: string,
+  inspectionId: string,
+): Promise<ServiceRecommendation[]> {
+  if (!hasValue(tenantId) || !hasValue(inspectionId)) return []
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('service_recommendations')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('inspection_id', inspectionId)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('[getInspectionRecommendations]', error.message)
+    return []
+  }
+
+  return (data ?? []) as ServiceRecommendation[]
+}
+
 export async function getRecommendations(tenantId: string, vehicleId: string): Promise<ServiceRecommendation[]> {
   if (!hasValue(tenantId) || !hasValue(vehicleId)) return []
 

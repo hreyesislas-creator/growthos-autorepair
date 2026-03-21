@@ -447,13 +447,18 @@ export interface ServiceHistory {
 export interface ServiceRecommendation {
   id: string
   tenant_id: string
-  vehicle_id: string
+  /** Nullable — inspection-generated recs may not have a vehicle yet */
+  vehicle_id: string | null
   customer_id: string | null
   inspection_id: string | null
+  /** FK to inspection_items.id — set when auto-generated from DVI results */
+  inspection_item_id: string | null
   title: string
   description: string | null
   priority: 'low' | 'medium' | 'high' | 'urgent'
-  status: 'pending' | 'approved' | 'declined' | 'completed'
+  /** 'open' is the initial state for auto-generated recommendations */
+  status: 'open' | 'pending' | 'approved' | 'declined' | 'completed'
+  estimated_price: number | null
   created_at: string
 }
 
