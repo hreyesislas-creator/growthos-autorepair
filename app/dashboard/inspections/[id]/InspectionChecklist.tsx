@@ -101,11 +101,19 @@ const REC_STATUS_LABEL: Record<string, { label: string; style: React.CSSProperti
 // Drives badge, card border/background, and description colour per source_status.
 
 const SEVERITY_CONFIG: Record<'attention' | 'urgent', {
-  badgeLabel:  string
-  badgeStyle:  React.CSSProperties
-  cardStyle:   React.CSSProperties
-  descColor:   string
-  noteBarColor: string
+  badgeLabel:     string
+  badgeStyle:     React.CSSProperties
+  cardStyle:      React.CSSProperties
+  titleColor:     string
+  descColor:      string
+  noteColor:      string
+  noteBarColor:   string
+  /**
+   * Inactive button style per decision value — applied when the button is NOT
+   * the currently-selected status. Lets WARNING cards stay readable on cream.
+   * CRITICAL uses transparent (same as the global default).
+   */
+  buttonInactive: Record<'accepted' | 'rejected' | 'pending', React.CSSProperties>
 }> = {
   attention: {
     badgeLabel: '! Warning',
@@ -115,11 +123,18 @@ const SEVERITY_CONFIG: Record<'attention' | 'urgent', {
     },
     cardStyle: {
       padding: '12px 14px', borderRadius: 'var(--r8,8px)',
-      border: '1px solid #fde68a',
-      background: '#fffdf4',
+      border: '1px solid #f59e0b',
+      background: '#fff7e6',
     },
-    descColor:    '#78350f',
-    noteBarColor: '#fcd34d',
+    titleColor:   '#78350f',
+    descColor:    '#92400e',
+    noteColor:    '#78350f',
+    noteBarColor: '#f59e0b',
+    buttonInactive: {
+      accepted: { background: '#15803d', color: '#fff',     border: '1px solid #14532d' },
+      rejected: { background: '#4b5563', color: '#fff',     border: '1px solid #374151' },
+      pending:  { background: '#fbbf24', color: '#78350f',  border: '1px solid #f59e0b' },
+    },
   },
   urgent: {
     badgeLabel: '⚠ Critical',
@@ -132,8 +147,16 @@ const SEVERITY_CONFIG: Record<'attention' | 'urgent', {
       border: '2px solid #fca5a5',
       background: '#fff5f5',
     },
+    titleColor:   '#7f1d1d',
     descColor:    '#991b1b',
+    noteColor:    'var(--text-3)',
     noteBarColor: '#fca5a5',
+    // CRITICAL buttons keep the global transparent-inactive style
+    buttonInactive: {
+      accepted: { background: 'transparent', color: 'var(--text-3)', border: '1px solid var(--border)' },
+      rejected: { background: 'transparent', color: 'var(--text-3)', border: '1px solid var(--border)' },
+      pending:  { background: 'transparent', color: 'var(--text-3)', border: '1px solid var(--border)' },
+    },
   },
 }
 
@@ -861,7 +884,7 @@ export default function InspectionChecklist({
                       {/* Derived service title */}
                       <div style={{
                         fontSize: 13, fontWeight: 700, marginBottom: 3,
-                        color: srcStatus === 'urgent' ? '#7f1d1d' : 'var(--text)',
+                        color: severity?.titleColor ?? 'var(--text)',
                       }}>
                         {rec.title}
                       </div>
@@ -879,11 +902,11 @@ export default function InspectionChecklist({
                       {rec.technician_notes && (
                         <div style={{
                           marginTop: 6, fontSize: 12,
-                          color: 'var(--text-3)', fontStyle: 'italic',
-                          padding: '4px 8px',
-                          background: srcStatus === 'urgent' ? '#fff1f1' : 'var(--surface-3,#f8fafc)',
+                          fontStyle: 'italic', padding: '4px 8px',
+                          color:       severity?.noteColor    ?? 'var(--text-3)',
+                          background:  srcStatus === 'urgent' ? '#fff1f1' : srcStatus === 'attention' ? '#fef9ec' : 'var(--surface-3,#f8fafc)',
                           borderRadius: 'var(--r4,4px)',
-                          borderLeft: `2px solid ${severity?.noteBarColor ?? 'var(--border)'}`,
+                          borderLeft:  `2px solid ${severity?.noteBarColor ?? 'var(--border)'}`,
                         }}>
                           Tech note: {rec.technician_notes}
                         </div>
@@ -902,17 +925,21 @@ export default function InspectionChecklist({
                   {/* Row 2: decision buttons */}
                   <div style={{ marginTop: 10, display: 'flex', gap: 6, alignItems: 'center' }}>
                     {REC_DECISION_OPTIONS.map(opt => {
-                      const isActive = currentStatus === opt.value
+                      const isActive      = currentStatus === opt.value
+                      const inactiveStyle = severity?.buttonInactive[
+                        opt.value as 'accepted' | 'rejected' | 'pending'
+                      ] ?? { background: 'transparent', color: 'var(--text-3)' }
                       return (
                         <button
                           key={opt.value}
                           type="button"
                           onClick={() => handleRecDecision(rec.id, opt.value)}
                           style={{
-                            padding: '3px 10px', fontSize: 11, fontWeight: isActive ? 700 : 400,
-                            borderRadius: 'var(--r6,6px)', border: '1px solid var(--border)',
+                            padding: '3px 10px', fontSize: 11, fontWeight: isActive ? 700 : 500,
+                            borderRadius: 'var(--r6,6px)',
                             cursor: 'pointer', transition: 'all 0.1s',
-                            ...(isActive ? opt.activeStyle : { background: 'transparent', color: 'var(--text-3)' }),
+                            // Active: global bright activeStyle; Inactive: per-severity override
+                            ...(isActive ? opt.activeStyle : inactiveStyle),
                           }}
                         >
                           {opt.label}
