@@ -781,17 +781,26 @@ export default function InspectionChecklist({
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {[...initialRecommendations]
               .sort((a, b) => {
+                // Resolve severity for sorting: source_status column first,
+                // fall back to priority for rows that predate the DB migration.
+                const toSeverity = (r: ServiceRecommendation): 'urgent' | 'attention' =>
+                  (r.source_status as 'urgent' | 'attention' | null) ??
+                  (r.priority === 'high' || r.priority === 'urgent' ? 'urgent' : 'attention')
                 const order = { urgent: 0, attention: 1 }
-                const aOrd = order[(a.source_status ?? 'attention') as keyof typeof order] ?? 1
-                const bOrd = order[(b.source_status ?? 'attention') as keyof typeof order] ?? 1
-                return aOrd - bOrd
+                return order[toSeverity(a)] - order[toSeverity(b)]
               })
               .map(rec => {
               const currentStatus = recStatuses[rec.id] ?? rec.status
               const statusMeta    = REC_STATUS_LABEL[currentStatus] ?? REC_STATUS_LABEL.open
               const recError      = recErrors[rec.id]
-              const srcStatus     = (rec.source_status ?? null) as 'attention' | 'urgent' | null
-              const severity      = srcStatus ? SEVERITY_CONFIG[srcStatus] : null
+              // source_status is preferred; fall back to priority so styling works
+              // even before the ALTER TABLE migration is applied.
+              const srcStatus = (
+                (rec.source_status as 'attention' | 'urgent' | null) ??
+                (rec.priority === 'high' || rec.priority === 'urgent' ? 'urgent'    :
+                 rec.priority === 'medium'                            ? 'attention' : null)
+              )
+              const severity  = srcStatus ? SEVERITY_CONFIG[srcStatus] : null
 
               return (
                 <div
@@ -814,6 +823,14 @@ export default function InspectionChecklist({
                         textTransform: 'uppercase', letterSpacing: '0.06em',
                       }}>
                         Immediate Attention Required
+                      </span>
+                      {/* ── TEMP DEBUG — remove once confirmed ── */}
+                      <span style={{
+                        marginLeft: 'auto', fontSize: 9, fontWeight: 700,
+                        color: '#fff', background: '#dc2626',
+                        padding: '1px 5px', borderRadius: 3,
+                      }}>
+                        CRITICAL DEBUG ACTIVE
                       </span>
                     </div>
                   )}
