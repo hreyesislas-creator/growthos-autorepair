@@ -372,6 +372,61 @@ export async function getInspectionById(tenantId: string, id: string) {
   }
 }
 
+/**
+ * Fetches all inspection_items rows for the given inspection.
+ *
+ * Uses the service-role (admin) client so that RLS on inspection_items
+ * can never silently filter the result to [].
+ *
+ * Security: tenant-scope is guaranteed by the caller — the inspection row
+ * is always loaded with tenantId first; if it doesn't belong to the tenant
+ * the page returns notFound() before this is called.
+ *
+ * Returns the array directly (never wraps in { data, error }).
+ */
+export async function getInspectionItemsByInspectionId(
+  inspectionId: string,
+): Promise<Array<{
+  id:               string
+  inspection_id:    string
+  template_item_id: string | null
+  status:           string | null
+  notes:            string | null
+  updated_at:       string
+}>> {
+  if (!hasValue(inspectionId)) {
+    console.warn('[getInspectionItemsByInspectionId] called with empty inspectionId')
+    return []
+  }
+
+  // Guard: surface a missing service-role key immediately rather than silently
+  // returning [] because the admin client auth fails.
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    console.error(
+      '[getInspectionItemsByInspectionId] SUPABASE_SERVICE_ROLE_KEY is not set — ' +
+      'the admin client will fail. Add it to .env.local.',
+    )
+  }
+
+  const adminSupabase = createAdminClient()
+
+  const { data, error } = await adminSupabase
+    .from('inspection_items')
+    .select('id, inspection_id, template_item_id, status, notes, updated_at')
+    .eq('inspection_id', inspectionId)
+
+  // ── DEBUG: remove after confirming data flows correctly ──────────────────
+  console.log('[queries] inspection_items rows:', data)
+  if (error) {
+    console.error('[getInspectionItemsByInspectionId] query error:', error.message, error)
+  }
+  // ────────────────────────────────────────────────────────────────────────
+
+  if (error) return []
+
+  return data ?? []
+}
+
 export async function getPendingInspectionCount(tenantId: string): Promise<number> {
   if (!hasValue(tenantId)) return 0
 

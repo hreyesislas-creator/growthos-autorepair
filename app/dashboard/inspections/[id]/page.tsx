@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation'
 import { getDashboardTenant } from '@/lib/tenant'
 import {
   getInspectionById,
+  getInspectionItemsByInspectionId,
   getTemplateItems,
   getInspectionTemplates,
   getInspectionRecommendations,
@@ -47,15 +48,42 @@ export default async function InspectionDetailPage({
 
   const tenantId = ctx.tenant.id
 
-  // ── Step 1: Fetch inspection header + existing items + recommendations in parallel
-  const [{ inspection, items: existingItems }, recommendations] = await Promise.all([
+  // ── DEBUG: confirm which inspection is being loaded ───────────────────────
+  console.log('[PAGE] inspectionId:', params.id)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // ── Step 1: Fetch inspection header, saved items, and recommendations in
+  //            parallel.  Items use the dedicated function so the query path
+  //            is explicit and isolated from getInspectionById.
+  const [{ inspection }, existingItemsRaw, recommendations] = await Promise.all([
     getInspectionById(tenantId, params.id),
+    getInspectionItemsByInspectionId(params.id),
     getInspectionRecommendations(tenantId, params.id),
   ])
 
   if (!inspection) return notFound()
 
-  // ── Step 2: Resolve template ID
+  // ── DEBUG ─────────────────────────────────────────────────────────────────
+  console.log('[PAGE] existingItemsRaw:', existingItemsRaw)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // Map raw DB rows → ExistingItem shape expected by InspectionChecklist.
+  //   template_item_id  → template_item_id  (unchanged)
+  //   status            → status            (DB value: pass | attention | urgent | not_checked)
+  //   notes             → notes             (unchanged)
+  //
+  // The component's dbToUi() translates status → UI result internally.
+  const existingItems = existingItemsRaw.map(row => ({
+    template_item_id: row.template_item_id,
+    status:           row.status,
+    notes:            row.notes,
+  }))
+
+  // ── DEBUG ─────────────────────────────────────────────────────────────────
+  console.log('[PAGE] existingItemsMapped:', existingItems)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // ── Step 2: Resolve template ID ──────────────────────────────────────────
   let templateId = inspection.template_id ?? null
 
   if (!templateId) {
@@ -64,7 +92,7 @@ export default async function InspectionDetailPage({
     templateId = defaultTpl?.id ?? null
   }
 
-  // ── Step 3: Fetch template items + technician user in parallel
+  // ── Step 3: Fetch template items + technician user in parallel ────────────
   const [templateItems, technician] = await Promise.all([
     templateId ? getTemplateItems(templateId, tenantId) : Promise.resolve([]),
     inspection.technician_id
@@ -84,7 +112,7 @@ export default async function InspectionDetailPage({
       <InspectionChecklist
         inspection={inspection}
         sections={sections}
-        existingItems={existingItems as any[]}
+        existingItems={existingItems}
         initialRecommendations={recommendations}
         technician={technician}
       />
