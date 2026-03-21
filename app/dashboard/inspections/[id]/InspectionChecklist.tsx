@@ -18,7 +18,21 @@ import {
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type ItemResult = 'pass' | 'attention' | 'urgent' | 'not_checked'
+/**
+ * UI-side status values — what the buttons display and what itemState stores.
+ * These are intentionally different from the DB column values.
+ * Use dbToUi() / uiToDb() to translate at the boundary.
+ *
+ * DB values  →  UI values
+ * pass       →  ok
+ * attention  →  warning
+ * urgent     →  critical
+ * not_checked→  nc
+ */
+type ItemResult = 'ok' | 'warning' | 'critical' | 'nc'
+
+/** DB column values stored in inspection_items.status */
+type DbStatus = 'pass' | 'attention' | 'urgent' | 'not_checked'
 
 interface ItemState {
   result: ItemResult
@@ -32,7 +46,8 @@ interface Section {
 
 interface ExistingItem {
   template_item_id: string | null
-  status:           ItemResult
+  /** Raw value from DB — may be DbStatus or any legacy string */
+  status:           string | null
   notes:            string | null
 }
 
@@ -51,17 +66,17 @@ const STATUS_OPTIONS: {
   label:       string
   activeStyle: React.CSSProperties
 }[] = [
-  { value: 'pass',        label: 'OK',       activeStyle: { background: '#16a34a', color: '#fff', borderColor: '#16a34a' } },
-  { value: 'attention',   label: 'Warning',  activeStyle: { background: '#d97706', color: '#fff', borderColor: '#d97706' } },
-  { value: 'urgent',      label: 'Critical', activeStyle: { background: '#dc2626', color: '#fff', borderColor: '#dc2626' } },
-  { value: 'not_checked', label: 'N/C',      activeStyle: { background: 'var(--surface-3,#e5e7eb)', color: 'var(--text-3)', borderColor: 'var(--border)' } },
+  { value: 'ok',       label: 'OK',       activeStyle: { background: '#16a34a', color: '#fff', borderColor: '#16a34a' } },
+  { value: 'warning',  label: 'Warning',  activeStyle: { background: '#d97706', color: '#fff', borderColor: '#d97706' } },
+  { value: 'critical', label: 'Critical', activeStyle: { background: '#dc2626', color: '#fff', borderColor: '#dc2626' } },
+  { value: 'nc',       label: 'N/C',      activeStyle: { background: 'var(--surface-3,#e5e7eb)', color: 'var(--text-3)', borderColor: 'var(--border)' } },
 ]
 
 const STATUS_SUMMARY_COLOR: Record<ItemResult, string> = {
-  pass:        '#16a34a',
-  attention:   '#d97706',
-  urgent:      '#dc2626',
-  not_checked: 'var(--text-3)',
+  ok:       '#16a34a',
+  warning:  '#d97706',
+  critical: '#dc2626',
+  nc:       'var(--text-3)',
 }
 
 const REC_DECISION_OPTIONS: {
@@ -86,6 +101,40 @@ const PRIORITY_BADGE: Record<string, React.CSSProperties> = {
   medium: { background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a' },
 }
 
+// ── Status mapping ─────────────────────────────────────────────────────────────
+//
+// The DB stores:   'pass' | 'attention' | 'urgent' | 'not_checked'
+// The UI renders:  'ok'   | 'warning'   | 'critical'| 'nc'
+//
+// These two functions are the only place the translation happens.
+// Every read from DB goes through dbToUi().
+// Every write to DB goes through uiToDb().
+//
+
+function dbToUi(dbStatus: string | null | undefined): ItemResult {
+  switch (dbStatus) {
+    case 'pass':        return 'ok'
+    case 'attention':   return 'warning'
+    case 'urgent':      return 'critical'
+    case 'not_checked': return 'nc'
+    // Defensive: handle any value already in UI form (idempotent)
+    case 'ok':          return 'ok'
+    case 'warning':     return 'warning'
+    case 'critical':    return 'critical'
+    case 'nc':          return 'nc'
+    default:            return 'nc'
+  }
+}
+
+function uiToDb(uiStatus: ItemResult): DbStatus {
+  switch (uiStatus) {
+    case 'ok':       return 'pass'
+    case 'warning':  return 'attention'
+    case 'critical': return 'urgent'
+    case 'nc':       return 'not_checked'
+  }
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function buildInitialState(
@@ -104,8 +153,9 @@ function buildInitialState(
     for (const item of section.items) {
       const existing = existingMap.get(item.id)
       state[item.id] = {
-        result: existing?.status ?? 'not_checked',
-        note:   existing?.notes  ?? '',
+        // Translate DB value → UI value so button isActive checks work correctly
+        result: dbToUi(existing?.status),
+        note:   existing?.notes ?? '',
       }
     }
   }
@@ -228,12 +278,12 @@ export default function InspectionChecklist({
   // ── Derived values ─────────────────────────────────────────────────────────
 
   const counts = useMemo(() => {
-    const acc = { pass: 0, attention: 0, urgent: 0, not_checked: 0, total: 0 }
+    const acc = { ok: 0, warning: 0, critical: 0, nc: 0, total: 0 }
     for (const s of Object.values(itemState)) { acc[s.result]++; acc.total++ }
     return acc
   }, [itemState])
 
-  const checkedCount = counts.total - counts.not_checked
+  const checkedCount = counts.total - counts.nc
   const progressPct  = counts.total > 0 ? Math.round((checkedCount / counts.total) * 100) : 0
 
   // Label lookup built once from sections
@@ -278,7 +328,8 @@ export default function InspectionChecklist({
 
     const payload = Object.entries(itemState).map(([templateItemId, s]) => ({
       template_item_id: templateItemId,
-      status:           s.result,
+      // Translate UI value → DB value before persisting
+      status:           uiToDb(s.result),
       notes:            s.note.trim() || null,
       label:            labelMap.get(templateItemId) ?? '',
     }))
@@ -407,8 +458,8 @@ export default function InspectionChecklist({
           <span style={{ fontSize: 16 }}>✅</span>
           <span style={{ fontSize: 13, fontWeight: 600, color: '#15803d' }}>Progress saved.</span>
           <span style={{ fontSize: 13, color: '#166534', marginLeft: 2 }}>
-            {counts.urgent > 0
-              ? `${counts.urgent} critical item${counts.urgent !== 1 ? 's' : ''} flagged.`
+            {counts.critical > 0
+              ? `${counts.critical} critical item${counts.critical !== 1 ? 's' : ''} flagged.`
               : `${checkedCount} of ${counts.total} items reviewed.`}
           </span>
         </div>
@@ -471,14 +522,14 @@ export default function InspectionChecklist({
             Progress — {checkedCount} / {counts.total} items reviewed
           </span>
           <div style={{ display: 'flex', gap: 8 }}>
-            {counts.pass > 0 && (
-              <span style={{ fontSize: 12, color: STATUS_SUMMARY_COLOR.pass, fontWeight: 600 }}>✓ {counts.pass} OK</span>
+            {counts.ok > 0 && (
+              <span style={{ fontSize: 12, color: STATUS_SUMMARY_COLOR.ok, fontWeight: 600 }}>✓ {counts.ok} OK</span>
             )}
-            {counts.attention > 0 && (
-              <span style={{ fontSize: 12, color: STATUS_SUMMARY_COLOR.attention, fontWeight: 600 }}>⚠ {counts.attention} Warning</span>
+            {counts.warning > 0 && (
+              <span style={{ fontSize: 12, color: STATUS_SUMMARY_COLOR.warning, fontWeight: 600 }}>⚠ {counts.warning} Warning</span>
             )}
-            {counts.urgent > 0 && (
-              <span style={{ fontSize: 12, color: STATUS_SUMMARY_COLOR.urgent, fontWeight: 600 }}>! {counts.urgent} Critical</span>
+            {counts.critical > 0 && (
+              <span style={{ fontSize: 12, color: STATUS_SUMMARY_COLOR.critical, fontWeight: 600 }}>! {counts.critical} Critical</span>
             )}
           </div>
         </div>
@@ -487,7 +538,7 @@ export default function InspectionChecklist({
         <div style={{ height: 6, background: 'var(--border)', borderRadius: 999, overflow: 'hidden' }}>
           <div style={{
             height: '100%', width: `${progressPct}%`, borderRadius: 999, transition: 'width 0.2s',
-            background: counts.urgent > 0 ? '#dc2626' : counts.attention > 0 ? '#d97706' : '#16a34a',
+            background: counts.critical > 0 ? '#dc2626' : counts.warning > 0 ? '#d97706' : '#16a34a',
           }} />
         </div>
       </div>
@@ -505,7 +556,7 @@ export default function InspectionChecklist({
           </div>
 
           {section.items.map((item, idx) => {
-            const state    = itemState[item.id] ?? { result: 'not_checked', note: '' }
+            const state    = itemState[item.id] ?? { result: 'nc' as ItemResult, note: '' }
             const isLast   = idx === section.items.length - 1
             const noteOpen = expandedNotes.has(item.id)
 
@@ -738,7 +789,7 @@ export default function InspectionChecklist({
                 ✓ Completed
               </span>
               <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
-                {counts.total} items · {counts.urgent} critical · {counts.attention} warning
+                {counts.total} items · {counts.critical} critical · {counts.warning} warning
               </span>
             </div>
             <button
@@ -759,9 +810,9 @@ export default function InspectionChecklist({
           <>
             <div style={{ flex: 1, fontSize: 12, color: 'var(--text-3)' }}>
               {checkedCount} of {counts.total} items reviewed
-              {counts.urgent > 0 && (
+              {counts.critical > 0 && (
                 <span style={{ color: '#dc2626', fontWeight: 600, marginLeft: 8 }}>
-                  · {counts.urgent} critical
+                  · {counts.critical} critical
                 </span>
               )}
             </div>
@@ -782,9 +833,9 @@ export default function InspectionChecklist({
               disabled={completing}
               style={{ fontSize: 12, opacity: completing ? 0.6 : 1 }}
               onClick={handleComplete}
-              title={counts.not_checked > 0 ? `${counts.not_checked} items still unchecked` : 'Mark inspection as completed'}
+              title={counts.nc > 0 ? `${counts.nc} items still unchecked` : 'Mark inspection as completed'}
             >
-              {completing ? 'Completing…' : `Mark Completed${counts.not_checked > 0 ? ` (${counts.not_checked} left)` : ''}`}
+              {completing ? 'Completing…' : `Mark Completed${counts.nc > 0 ? ` (${counts.nc} left)` : ''}`}
             </button>
 
             <a href="/dashboard/inspections" className="btn-ghost" style={{ fontSize: 12 }}>
