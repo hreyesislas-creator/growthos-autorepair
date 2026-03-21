@@ -28,6 +28,9 @@ import type {
   ServiceRecommendation,
   SupportTicket,
   Tenant,
+  Estimate,
+  EstimateItem,
+  EstimateWithItems,
 } from '@/lib/types'
 
 const APPOINTMENT_DATE_COLUMN = 'appointment_date'
@@ -818,6 +821,132 @@ export async function getAllTenants(): Promise<Tenant[]> {
   }
 
   return (data ?? []) as Tenant[]
+}
+
+// ── Estimate queries ──────────────────────────────────────────────────────────
+
+/**
+ * Returns the most-recent draft estimate for an inspection, or null.
+ * "One active draft per inspection" is a soft rule enforced here and in
+ * createEstimate() — the DB does not UNIQUE-constrain this intentionally,
+ * to allow future revision history.
+ */
+export async function getEstimateByInspectionId(
+  tenantId: string,
+  inspectionId: string,
+): Promise<Estimate | null> {
+  if (!hasValue(tenantId) || !hasValue(inspectionId)) return null
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('estimates')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('inspection_id', inspectionId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    console.error('[getEstimateByInspectionId]', error.message)
+    return null
+  }
+
+  return (data as Estimate | null) ?? null
+}
+
+/**
+ * Returns a single estimate by ID with all of its line items.
+ * Items are sorted by display_order ascending.
+ */
+export async function getEstimateWithItems(
+  tenantId: string,
+  estimateId: string,
+): Promise<EstimateWithItems | null> {
+  if (!hasValue(tenantId) || !hasValue(estimateId)) return null
+
+  const supabase = await createClient()
+
+  const [estimateRes, itemsRes] = await Promise.all([
+    supabase
+      .from('estimates')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .eq('id', estimateId)
+      .single(),
+    supabase
+      .from('estimate_items')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .eq('estimate_id', estimateId)
+      .order('display_order', { ascending: true }),
+  ])
+
+  if (estimateRes.error) {
+    console.error('[getEstimateWithItems estimate]', estimateRes.error.message)
+    return null
+  }
+
+  if (itemsRes.error) {
+    console.error('[getEstimateWithItems items]', itemsRes.error.message)
+  }
+
+  const estimate = estimateRes.data as Estimate
+  const items    = (itemsRes.data ?? []) as EstimateItem[]
+
+  return { ...estimate, items }
+}
+
+/**
+ * Returns all estimates for a tenant, newest first.
+ * Does not load line items — use getEstimateWithItems() for detail views.
+ */
+export async function getEstimatesByTenant(
+  tenantId: string,
+): Promise<Estimate[]> {
+  if (!hasValue(tenantId)) return []
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('estimates')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('[getEstimatesByTenant]', error.message)
+    return []
+  }
+
+  return (data ?? []) as Estimate[]
+}
+
+/**
+ * Returns all line items for an estimate, sorted by display_order.
+ */
+export async function getEstimateItems(
+  tenantId: string,
+  estimateId: string,
+): Promise<EstimateItem[]> {
+  if (!hasValue(tenantId) || !hasValue(estimateId)) return []
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('estimate_items')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('estimate_id', estimateId)
+    .order('display_order', { ascending: true })
+
+  if (error) {
+    console.error('[getEstimateItems]', error.message)
+    return []
+  }
+
+  return (data ?? []) as EstimateItem[]
 }
 
 export async function getSupportTickets(tenantId?: string): Promise<SupportTicket[]> {

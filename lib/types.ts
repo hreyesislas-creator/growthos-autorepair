@@ -473,6 +473,190 @@ export interface ServiceRecommendation {
   updated_at: string | null
 }
 
+// ── Estimate types ────────────────────────────────────────────
+//
+// One estimate system, three creation modes.
+// All three modes produce the same Estimate + EstimateItem records.
+// The creation_mode field is metadata, not a branch in the data model.
+//
+
+/**
+ * How the estimate was originally populated.
+ *
+ * manual_entry     — advisor/tech fills out the form directly
+ * pdf_import       — uploaded from Tekmetric / Mitchell / similar; parser extracts items
+ * system_generated — future: auto-built from inspection findings + labor API + pricing rules
+ */
+export type EstimateCreationMode =
+  | 'manual_entry'
+  | 'pdf_import'
+  | 'system_generated'
+
+export type EstimateStatus =
+  | 'draft'
+  | 'sent'
+  | 'approved'
+  | 'declined'
+
+/**
+ * How a specific line item was produced within an estimate.
+ *
+ * manual         — typed in directly by the advisor
+ * pdf_import     — extracted from an imported PDF
+ * generated      — created by the system_generated flow
+ * recommendation — converted from a service_recommendations row
+ */
+export type EstimateItemSourceType =
+  | 'manual'
+  | 'pdf_import'
+  | 'generated'
+  | 'recommendation'
+
+export type EstimateItemCategory =
+  | 'labor'
+  | 'part'
+  | 'fee'
+  | 'tax'
+  | 'misc'
+
+export interface Estimate {
+  id:               string
+  tenant_id:        string
+  inspection_id:    string | null
+  customer_id:      string | null
+  vehicle_id:       string | null
+
+  /** Human-readable sequential ID, e.g. "EST-2024-0042". Unique per tenant. */
+  estimate_number:  string
+  creation_mode:    EstimateCreationMode
+  status:           EstimateStatus
+
+  /** Optional per-category subtotals — enables breakdowns in the invoice UI. */
+  subtotal_labor:   number | null
+  subtotal_parts:   number | null
+  subtotal_other:   number | null
+  subtotal:         number
+
+  /**
+   * Tax snapshot design:
+   *   tax_rate   — the rate applied (fraction, e.g. 0.0875 = 8.75%).
+   *                NULL when tax was entered manually without specifying a rate.
+   *   tax_amount — the authoritative dollar amount.
+   *                When tax_rate is set: tax_amount = subtotal * tax_rate (calculated then frozen).
+   *                When tax_rate is null: tax_amount = whatever the advisor typed.
+   * Storing both fields allows the estimate to be reprinted correctly even
+   * after future tax-rule changes.
+   */
+  tax_rate:         number | null
+  tax_amount:       number
+  total:            number
+
+  notes:            string | null   // customer-facing
+  internal_notes:   string | null   // shop-internal only
+
+  /** PDF import: Supabase Storage URL of the uploaded file. */
+  source_file_url:  string | null
+  /** PDF import: parser confidence score 0–100. */
+  parse_confidence: number | null
+  /** True when any item needs advisor review before the estimate can be sent. */
+  requires_review:  boolean
+
+  created_by:       string | null   // auth.users.id
+  created_at:       string
+  updated_at:       string
+}
+
+export interface EstimateItem {
+  id:          string
+  tenant_id:   string
+  estimate_id: string
+
+  /** Set when this item was converted from a recommendation. */
+  service_recommendation_id: string | null
+  /** Set when this item traces back to a specific inspection item. */
+  inspection_item_id:        string | null
+
+  source_type:   EstimateItemSourceType
+  category:      EstimateItemCategory
+
+  title:         string
+  description:   string | null
+  quantity:      number
+  unit_price:    number
+  line_total:    number   // = round(quantity * unit_price, 2)
+  display_order: number
+
+  /**
+   * For PDF-imported items: where in the source document this line was found.
+   * E.g. "page 2 row 7" or the raw extracted string before normalisation.
+   */
+  source_reference: string | null
+  /** True when the parser is uncertain and the advisor must confirm before sending. */
+  needs_review:     boolean
+
+  created_at: string
+  updated_at: string
+}
+
+/** Convenience type — estimate header + all its line items in one object. */
+export interface EstimateWithItems extends Estimate {
+  items: EstimateItem[]
+}
+
+/**
+ * Tracks the source PDF file for pdf_import estimates.
+ * One record per uploaded file; linked to estimates.source_file_url.
+ */
+export interface EstimateSourceFile {
+  id:              string
+  tenant_id:       string
+  estimate_id:     string | null
+  file_name:       string
+  file_url:        string
+  file_size_bytes: number | null
+  mime_type:       string | null
+  parse_status:    'pending' | 'processing' | 'completed' | 'failed'
+  /** Raw JSON extraction output — kept for debugging / re-processing. */
+  parse_result:    Record<string, unknown> | null
+  parse_error:     string | null
+  created_at:      string
+}
+
+// ── Tenant pricing config (future placeholder) ────────────────
+//
+// These fields will live in a `tenant_pricing_configs` table (preferred)
+// or as a `pricing_config` JSONB column on the `tenants` table.
+//
+// Recommended architecture:
+//   - Simple shops: one row per tenant in tenant_pricing_configs
+//   - Multi-location shops: one row per location / shop_id
+//
+// DO NOT add DB columns yet.  The interface below documents the intended
+// shape so the rest of the codebase can reference it without building it.
+//
+export interface TenantPricingConfig {
+  tenant_id:             string
+  /** Default labor rate in USD per hour. */
+  labor_rate_per_hour:   number | null
+  /**
+   * Parts markup multiplier applied to cost price.
+   * E.g. 1.30 = cost × 1.30 = 30% markup.
+   * Future: may be tiered by part category or supplier.
+   */
+  parts_markup:          number | null
+  /**
+   * Default tax rate as a fraction (e.g. 0.0875).
+   * Future: overridden by city/county tax_rules lookup.
+   */
+  default_tax_rate:      number | null
+  /**
+   * Whether estimates require manager approval before being sent.
+   * Future workflow preference.
+   */
+  require_estimate_approval: boolean
+  updated_at:            string
+}
+
 // ── Billing types ─────────────────────────────────────────────
 
 export interface TenantBillingSnapshot {
