@@ -415,12 +415,12 @@ export default function InspectionChecklist({
               fontSize: 12, fontWeight: 700, color: 'var(--blue-light,#3b82f6)',
               flexShrink: 0,
             }}>
-              {technician.full_name.charAt(0).toUpperCase()}
+              {(technician.full_name ?? technician.email ?? 'T').charAt(0).toUpperCase()}
             </span>
             <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.4 }}>
               <span style={{ color: 'var(--text-3)' }}>Technician: </span>
               <strong style={{ color: 'var(--text)', fontWeight: 600 }}>
-                {technician.full_name}
+                {technician.full_name || technician.email || 'Technician'}
               </strong>
               {technician.email && (
                 <span style={{ marginLeft: 6, color: 'var(--text-3)' }}>
