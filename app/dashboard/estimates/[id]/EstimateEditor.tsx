@@ -777,45 +777,26 @@ export default function EstimateEditor({
                 </span>
               </div>
 
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+              {/* Tax rate is set in Shop Settings — read-only here to prevent
+                  per-estimate overrides. Tax amount is auto-calculated only. */}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <label style={{ fontSize: 12, color: 'var(--text-3)', minWidth: 60 }}>Rate %</label>
                 <input
                   type="number"
-                  min="0"
-                  max="100"
-                  step="0.001"
-                  placeholder="e.g. 8.75"
                   value={taxRate}
-                  onChange={e => setTaxRate(e.target.value)}
-                  className="field-input"
-                  style={{ width: 90, fontSize: 12, padding: '4px 8px' }}
-                />
-                <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
-                  {taxRate
-                    ? `→ $${taxAmountNum.toFixed(2)} on $${subtotalParts.toFixed(2)} parts`
-                    : '(no rate)'}
-                </span>
-              </div>
-
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <label style={{ fontSize: 12, color: 'var(--text-3)', minWidth: 60 }}>Amount $</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  placeholder="0.00"
-                  value={taxAmountRaw}
-                  onChange={e => setTaxAmountRaw(e.target.value)}
-                  disabled={taxRate.trim() !== ''}
+                  readOnly
+                  disabled
                   className="field-input"
                   style={{
                     width: 90, fontSize: 12, padding: '4px 8px',
-                    opacity: taxRate.trim() !== '' ? 0.5 : 1,
+                    opacity: 0.6, cursor: 'not-allowed', background: 'var(--surface-2,#f8fafc)',
                   }}
                 />
-                {taxRate.trim() !== '' && (
-                  <span style={{ fontSize: 11, color: 'var(--text-3)' }}>(computed from rate)</span>
-                )}
+                <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                  {taxRate
+                    ? `= $${taxAmountNum.toFixed(2)} on $${subtotalParts.toFixed(2)} parts`
+                    : '(no rate configured)'}
+                </span>
               </div>
             </div>
 
