@@ -37,6 +37,7 @@ interface LocalPart {
   _key:            string   // React key, temp for new parts
   id?:             string   // DB id if persisted
   name:            string
+  part_number:     string   // advisor-entered part / SKU number
   quantity:        number
   unit_cost:       number
   profit_amount:   number
@@ -120,6 +121,7 @@ function dbPartToLocal(part: EstimateItemPart, idx: number): LocalPart {
     _key:            part.id,
     id:              part.id,
     name:            part.name,
+    part_number:     (part as any).part_number ?? '',
     quantity:        Number(part.quantity),
     unit_cost:       Number(part.unit_cost),
     profit_amount:   Number(part.profit_amount),
@@ -206,14 +208,34 @@ export default function EstimateEditor({
   //   2. Labor items with no stored hours → default to 1.0
   //   3. All part rows → recompute sell/total using the estimate's markup %
   //      (guards against stale values if markup changed since last save)
+  //
+  // NOTE: items imported from an inspection / recommendation are stored in the
+  // DB with whatever category the import pipeline used (often 'misc').  They
+  // represent repair/service work and must render in the same labor-job layout
+  // as manually-added labor rows.  We detect them by source_type !== 'manual'
+  // and normalise their category to 'labor' here so isLaborMode fires correctly
+  // in ItemRow.  Items explicitly marked 'fee' or 'misc' are left untouched.
   const [items, setItems] = useState<LocalItem[]>(() => {
     const initMarkup = Number(estimate.parts_markup_percent ?? 0)
     return estimate.items.map((item, idx) => {
       const local = dbItemToLocal(item, idx)
-      if (local.category === 'labor') {
+
+      // An item should use the labor/job layout if it is explicitly 'labor'
+      // OR if it was imported from an inspection / recommendation pipeline
+      // (source_type !== 'manual').  The category stored by the import pipeline
+      // (often 'misc') is NOT a reliable signal — it just reflects the pipeline
+      // default, not the advisor's intent.  source_type is the authoritative
+      // discriminator: anything the advisor did not type themselves is service work.
+      const isServiceItem =
+        local.category === 'labor' ||
+        local.source_type !== 'manual'
+
+      if (isServiceItem) {
+        local.category = 'labor'   // ensures isLaborMode = true in ItemRow
         if (!local.labor_rate  && defaultLaborRate > 0) local.labor_rate  = defaultLaborRate
         if (!local.labor_hours)                         local.labor_hours = 1
       }
+
       return { ...local, parts: local.parts.map(p => computePart(p, initMarkup)) }
     })
   })
@@ -340,7 +362,7 @@ export default function EstimateEditor({
     setItems(prev => prev.map(i => {
       if (i._key !== itemKey) return i
       const newPart = computePart(
-        { _key: newKey(), name: '', quantity: 1, unit_cost: 0, display_order: i.parts.length },
+        { _key: newKey(), name: '', part_number: '', quantity: 1, unit_cost: 0, display_order: i.parts.length },
         partsMarkupPercent,
       )
       return { ...i, parts: [...i.parts, newPart] }
@@ -1020,6 +1042,8 @@ function ItemRow({
     })
   }
 
+  const partsSubtotal = getItemPartsTotal(item.parts)
+
   return (
     <div style={{
       background: 'var(--surface-2,#f8fafc)',
@@ -1028,7 +1052,7 @@ function ItemRow({
       padding: '10px 12px',
     }}>
 
-      {/* Row 1: Job / mode selector + remove button */}
+      {/* ── Row 1: Job / mode selector + remove ─────────────────────────────── */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
         <select
           value={item.service_job_id ?? ''}
@@ -1063,193 +1087,235 @@ function ItemRow({
         </button>
       </div>
 
-      {/* Row 2: Category (manual only) + Title */}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 8 }}>
-        {!isJobMode && (
-          <select
-            value={item.category}
-            onChange={e => {
-              const newCat = e.target.value as Category
-              const patch: Partial<LocalItem> = { category: newCat }
-              // When switching TO labor, seed hours/rate so the advisor
-              // doesn't see "0 hrs × $0 = $0" immediately.
-              if (newCat === 'labor') {
-                if (!item.labor_hours) patch.labor_hours = 1
-                if (!item.labor_rate && defaultLaborRate > 0) patch.labor_rate = defaultLaborRate
-              }
-              onUpdate(patch)
-            }}
-            className="field-input"
-            style={{ width: 90, fontSize: 12, padding: '4px 6px', flexShrink: 0 }}
-          >
-            {CATEGORIES.map(c => (
-              <option key={c.value} value={c.value}>{c.label}</option>
-            ))}
-          </select>
-        )}
+      {isLaborMode ? (
+        // ── Labor / Job layout: two-column (left: editing, right: breakdown) ──
+        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
 
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <input
-            type="text"
-            value={item.title}
-            onChange={e => onUpdate({ title: e.target.value })}
-            placeholder={isJobMode ? 'Job title' : 'Item name'}
-            className="field-input"
-            style={{ fontSize: 13, padding: '4px 8px', width: '100%' }}
-          />
-          {!isJobMode && (
+          {/* LEFT — main editing area */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+
+            {/* Category (manual only) + Title + Description */}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 8 }}>
+              {!isJobMode && (
+                <select
+                  value={item.category}
+                  onChange={e => {
+                    const newCat = e.target.value as Category
+                    const patch: Partial<LocalItem> = { category: newCat }
+                    if (newCat === 'labor') {
+                      if (!item.labor_hours) patch.labor_hours = 1
+                      if (!item.labor_rate && defaultLaborRate > 0) patch.labor_rate = defaultLaborRate
+                    }
+                    onUpdate(patch)
+                  }}
+                  className="field-input"
+                  style={{ width: 90, fontSize: 12, padding: '4px 6px', flexShrink: 0 }}
+                >
+                  {CATEGORIES.map(c => (
+                    <option key={c.value} value={c.value}>{c.label}</option>
+                  ))}
+                </select>
+              )}
+
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <input
+                  type="text"
+                  value={item.title}
+                  onChange={e => onUpdate({ title: e.target.value })}
+                  placeholder={isJobMode ? 'Job title' : 'Item name'}
+                  className="field-input"
+                  style={{ fontSize: 13, padding: '4px 8px', width: '100%' }}
+                />
+                <input
+                  type="text"
+                  value={item.description}
+                  onChange={e => onUpdate({ description: e.target.value })}
+                  placeholder="Description (optional)"
+                  className="field-input"
+                  style={{ fontSize: 11, padding: '3px 8px', width: '100%', color: 'var(--text-3)' }}
+                />
+              </div>
+
+              {item.needs_review && (
+                <span style={{
+                  fontSize: 10, fontWeight: 600, color: '#92400e',
+                  padding: '2px 6px', borderRadius: 3,
+                  background: '#fffbeb', alignSelf: 'center', flexShrink: 0,
+                }}>
+                  Needs Review
+                </span>
+              )}
+            </div>
+
+            {/* Labor hours — advisor enters hours only; rate comes from shop settings */}
+            <div style={{
+              display: 'flex', gap: 8, alignItems: 'center',
+              marginBottom: 8,
+            }}>
+              <label style={{
+                fontSize: 12, fontWeight: 600,
+                color: 'var(--text-2)', whiteSpace: 'nowrap',
+              }}>
+                Labor
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="0.25"
+                value={item.labor_hours}
+                onChange={e => onUpdate({ labor_hours: parseFloat(e.target.value) || 0 })}
+                className="field-input"
+                style={{ width: 70, fontSize: 12, padding: '4px 6px', textAlign: 'right' }}
+              />
+              <span style={{ fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>
+                hrs&nbsp;&nbsp;@&nbsp;${item.labor_rate.toFixed(2)}/hr
+              </span>
+            </div>
+
+            {/* Nested parts */}
+            <PartsSection
+              parts={item.parts}
+              onAdd={onAddPart}
+              onRemove={onRemovePart}
+              onUpdate={onUpdatePart}
+            />
+
+            {/* Line item notes */}
             <input
               type="text"
-              value={item.description}
-              onChange={e => onUpdate({ description: e.target.value })}
-              placeholder="Description (optional)"
+              value={item.item_notes}
+              onChange={e => onUpdate({ item_notes: e.target.value })}
+              placeholder="Line item notes (optional)"
               className="field-input"
-              style={{ fontSize: 11, padding: '3px 8px', width: '100%', color: 'var(--text-3)' }}
+              style={{ fontSize: 11, padding: '3px 8px', width: '100%', color: 'var(--text-3)', marginTop: 8 }}
             />
-          )}
+          </div>
+
+          {/* RIGHT — job cost breakdown panel */}
+          <div style={{
+            minWidth: 164, flexShrink: 0,
+            background: 'var(--surface,#fff)',
+            border: '1px solid var(--border-2)',
+            borderRadius: 6,
+            padding: '10px 12px',
+          }}>
+            <TotalRow label="Labor Cost"     amount={laborTotal} />
+            <TotalRow label="Parts Subtotal" amount={partsSubtotal} />
+            <div style={{
+              borderTop: '1px solid var(--border-2)',
+              marginTop: 6, paddingTop: 6,
+            }}>
+              <TotalRow label="Job Subtotal" amount={lineTotal} bold />
+            </div>
+          </div>
         </div>
 
-        {item.needs_review && (
-          <span style={{
-            fontSize: 10, fontWeight: 600, color: '#92400e',
-            padding: '2px 6px', borderRadius: 3,
-            background: '#fffbeb', alignSelf: 'center', flexShrink: 0,
-          }}>
-            Needs Review
-          </span>
-        )}
-      </div>
-
-      {/* Row 3: Pricing fields */}
-      {isLaborMode ? (
-        // Labor mode: hours × rate = labor total
-        // Used for both job-catalog items AND manual 'labor' category items
-        <div style={{
-          display: 'flex', gap: 10, alignItems: 'center',
-          flexWrap: 'wrap', marginBottom: 8,
-        }}>
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <span style={{ fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>Labor hrs</span>
-            <input
-              type="number"
-              min="0"
-              step="0.25"
-              value={item.labor_hours}
-              onChange={e => onUpdate({ labor_hours: parseFloat(e.target.value) || 0 })}
+      ) : (
+        // ── Non-labor layout: fee / misc — simple qty × price ────────────────
+        <>
+          {/* Category + Title + Description */}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 8 }}>
+            <select
+              value={item.category}
+              onChange={e => {
+                const newCat = e.target.value as Category
+                const patch: Partial<LocalItem> = { category: newCat }
+                if (newCat === 'labor') {
+                  if (!item.labor_hours) patch.labor_hours = 1
+                  if (!item.labor_rate && defaultLaborRate > 0) patch.labor_rate = defaultLaborRate
+                }
+                onUpdate(patch)
+              }}
               className="field-input"
-              style={{ width: 70, fontSize: 12, padding: '4px 6px', textAlign: 'right' }}
-            />
-          </div>
+              style={{ width: 90, fontSize: 12, padding: '4px 6px', flexShrink: 0 }}
+            >
+              {CATEGORIES.map(c => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
+            </select>
 
-          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>×</span>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <input
+                type="text"
+                value={item.title}
+                onChange={e => onUpdate({ title: e.target.value })}
+                placeholder="Item name"
+                className="field-input"
+                style={{ fontSize: 13, padding: '4px 8px', width: '100%' }}
+              />
+              <input
+                type="text"
+                value={item.description}
+                onChange={e => onUpdate({ description: e.target.value })}
+                placeholder="Description (optional)"
+                className="field-input"
+                style={{ fontSize: 11, padding: '3px 8px', width: '100%', color: 'var(--text-3)' }}
+              />
+            </div>
 
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <span style={{ fontSize: 11, color: 'var(--text-3)' }}>$</span>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={item.labor_rate}
-              onChange={e => onUpdate({ labor_rate: parseFloat(e.target.value) || 0 })}
-              className="field-input"
-              style={{ width: 80, fontSize: 12, padding: '4px 6px', textAlign: 'right' }}
-            />
-            <span style={{ fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>/hr</span>
-          </div>
-
-          <div style={{
-            fontFamily: 'var(--font-mono)', fontWeight: 700,
-            fontSize: 13, color: 'var(--text)', marginLeft: 'auto', whiteSpace: 'nowrap',
-          }}>
-            = ${laborTotal.toFixed(2)}
-            {!isJobMode && (
-              <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-3)', marginLeft: 4 }}>
-                labor
+            {item.needs_review && (
+              <span style={{
+                fontSize: 10, fontWeight: 600, color: '#92400e',
+                padding: '2px 6px', borderRadius: 3,
+                background: '#fffbeb', alignSelf: 'center', flexShrink: 0,
+              }}>
+                Needs Review
               </span>
             )}
           </div>
-        </div>
-      ) : (
-        // Manual mode: qty × unit price = total (parts, fees, misc)
-        <div style={{
-          display: 'flex', gap: 10, alignItems: 'center',
-          flexWrap: 'wrap', marginBottom: 8,
-        }}>
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <span style={{ fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>Qty</span>
-            <input
-              type="number"
-              min="0"
-              step="0.001"
-              value={item.quantity}
-              onChange={e => onUpdate({ quantity: parseFloat(e.target.value) || 0 })}
-              className="field-input"
-              style={{ width: 70, fontSize: 12, padding: '4px 6px', textAlign: 'right' }}
-            />
-          </div>
 
-          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>×</span>
-
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <span style={{ fontSize: 11, color: 'var(--text-3)' }}>$</span>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={item.unit_price}
-              onChange={e => onUpdate({ unit_price: parseFloat(e.target.value) || 0 })}
-              className="field-input"
-              style={{ width: 100, fontSize: 12, padding: '4px 6px', textAlign: 'right' }}
-            />
-          </div>
-
+          {/* Qty × unit price */}
           <div style={{
-            fontFamily: 'var(--font-mono)', fontWeight: 700,
-            fontSize: 13, color: 'var(--text)', marginLeft: 'auto', whiteSpace: 'nowrap',
+            display: 'flex', gap: 10, alignItems: 'center',
+            flexWrap: 'wrap', marginBottom: 8,
           }}>
-            ${lineTotal.toFixed(2)}
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <span style={{ fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>Qty</span>
+              <input
+                type="number"
+                min="0"
+                step="0.001"
+                value={item.quantity}
+                onChange={e => onUpdate({ quantity: parseFloat(e.target.value) || 0 })}
+                className="field-input"
+                style={{ width: 70, fontSize: 12, padding: '4px 6px', textAlign: 'right' }}
+              />
+            </div>
+
+            <span style={{ fontSize: 11, color: 'var(--text-3)' }}>×</span>
+
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <span style={{ fontSize: 11, color: 'var(--text-3)' }}>$</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={item.unit_price}
+                onChange={e => onUpdate({ unit_price: parseFloat(e.target.value) || 0 })}
+                className="field-input"
+                style={{ width: 100, fontSize: 12, padding: '4px 6px', textAlign: 'right' }}
+              />
+            </div>
+
+            <div style={{
+              fontFamily: 'var(--font-mono)', fontWeight: 700,
+              fontSize: 13, color: 'var(--text)', marginLeft: 'auto', whiteSpace: 'nowrap',
+            }}>
+              ${lineTotal.toFixed(2)}
+            </div>
           </div>
-        </div>
-      )}
 
-      {/* Parts Section — shown for ALL labor items (both catalog jobs and manual labor) */}
-      {isLaborMode && (
-        <PartsSection
-          parts={item.parts}
-          onAdd={onAddPart}
-          onRemove={onRemovePart}
-          onUpdate={onUpdatePart}
-        />
+          {/* Notes */}
+          <input
+            type="text"
+            value={item.item_notes}
+            onChange={e => onUpdate({ item_notes: e.target.value })}
+            placeholder="Line item notes (optional)"
+            className="field-input"
+            style={{ fontSize: 11, padding: '3px 8px', width: '100%', color: 'var(--text-3)' }}
+          />
+        </>
       )}
-
-      {/* Job subtotal — shown when a labor item has at least one part */}
-      {isLaborMode && item.parts.length > 0 && (
-        <div style={{
-          display: 'flex', justifyContent: 'flex-end', alignItems: 'center',
-          marginTop: 4, paddingTop: 6, borderTop: '1px solid var(--border-2)',
-          gap: 8,
-        }}>
-          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
-            Labor ${laborTotal.toFixed(2)} + Parts ${getItemPartsTotal(item.parts).toFixed(2)}
-          </span>
-          <span style={{
-            fontSize: 13, fontWeight: 700, color: 'var(--text)',
-            fontFamily: 'var(--font-mono)',
-          }}>
-            = ${lineTotal.toFixed(2)}
-          </span>
-        </div>
-      )}
-
-      {/* Row 4: Line item notes */}
-      <input
-        type="text"
-        value={item.item_notes}
-        onChange={e => onUpdate({ item_notes: e.target.value })}
-        placeholder="Line item notes (optional)"
-        className="field-input"
-        style={{ fontSize: 11, padding: '3px 8px', width: '100%', color: 'var(--text-3)', marginTop: 8 }}
-      />
     </div>
   )
 }
@@ -1264,10 +1330,10 @@ interface PartsSectionProps {
 }
 
 function PartsSection({ parts, onAdd, onRemove, onUpdate }: PartsSectionProps) {
-  // Columns: Part Name | Qty | Cost $ | Sell $ (auto) | Total (auto) | ✕
-  // Advisor enters: name, qty, cost.
-  // Sell price and total are auto-calculated from Parts Markup % — not editable.
-  const COLS = '1fr 60px 85px 75px 85px 28px'
+  // Columns: Part Name | Part # | Qty | Part Cost | Sell $ (auto) | Part Subtotal (auto) | ✕
+  // Advisor enters: name, part_number, qty, unit_cost.
+  // Sell price and part subtotal are auto-calculated from Parts Markup % — not editable.
+  const COLS = '1fr 96px 52px 80px 72px 82px 28px'
 
   return (
     <div style={{
@@ -1281,7 +1347,7 @@ function PartsSection({ parts, onAdd, onRemove, onUpdate }: PartsSectionProps) {
           display: 'grid', gridTemplateColumns: COLS,
           gap: 4, marginBottom: 4, padding: '0 2px',
         }}>
-          {['Part Name', 'Qty', 'Cost $', 'Sell $', 'Total', ''].map((h, i) => (
+          {['Part Name', 'Part #', 'Qty', 'Part Cost', 'Sell $', 'Part Subtotal', ''].map((h, i) => (
             <span key={i} style={{
               fontSize: 10, fontWeight: 600, color: 'var(--text-3)',
               textTransform: 'uppercase', letterSpacing: '0.05em',
@@ -1305,6 +1371,16 @@ function PartsSection({ parts, onAdd, onRemove, onUpdate }: PartsSectionProps) {
             value={part.name}
             onChange={e => onUpdate(part._key, { name: e.target.value })}
             placeholder="Part name"
+            className="field-input"
+            style={{ fontSize: 12, padding: '3px 6px' }}
+          />
+
+          {/* Part number / SKU — editable */}
+          <input
+            type="text"
+            value={part.part_number}
+            onChange={e => onUpdate(part._key, { part_number: e.target.value })}
+            placeholder="Part #"
             className="field-input"
             style={{ fontSize: 12, padding: '3px 6px' }}
           />
@@ -1336,12 +1412,11 @@ function PartsSection({ parts, onAdd, onRemove, onUpdate }: PartsSectionProps) {
             fontSize: 12, textAlign: 'right',
             fontFamily: 'var(--font-mono)', color: 'var(--text-2)',
             padding: '3px 4px',
-            title: 'Auto-calculated from Parts Markup %',
           }}>
             ${part.unit_sell_price.toFixed(2)}
           </div>
 
-          {/* Line total — read-only, qty × sell */}
+          {/* Part subtotal — read-only, qty × sell price */}
           <div style={{
             fontSize: 12, fontWeight: 600, textAlign: 'right',
             fontFamily: 'var(--font-mono)', color: 'var(--text)',
@@ -1375,7 +1450,7 @@ function PartsSection({ parts, onAdd, onRemove, onUpdate }: PartsSectionProps) {
           display: 'flex', alignItems: 'center', gap: 4,
         }}
       >
-        <span style={{ fontSize: 14, lineHeight: 1 }}>+</span> Add Part
+        <span style={{ fontSize: 14, lineHeight: 1 }}>+</span> Add Parts
       </button>
     </div>
   )
