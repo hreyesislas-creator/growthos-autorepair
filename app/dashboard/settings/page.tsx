@@ -1,5 +1,7 @@
 import { getDashboardTenant } from '@/lib/tenant'
+import { getTenantPricingConfig } from '@/lib/queries'
 import Topbar from '@/components/dashboard/Topbar'
+import Link from 'next/link'
 import { BusinessProfileForm, WebsiteModulesForm } from './SettingsClient'
 
 export const metadata = { title: 'Settings' }
@@ -8,6 +10,11 @@ export default async function SettingsPage() {
   const ctx      = await getDashboardTenant()
   const profile  = ctx?.profile  ?? null
   const settings = ctx?.settings ?? null
+  const pricing  = ctx?.tenant.id ? await getTenantPricingConfig(ctx.tenant.id) : null
+
+  const taxDisplay = pricing?.default_tax_rate != null
+    ? `${parseFloat((Number(pricing.default_tax_rate) * 100).toFixed(4))}%`
+    : 'Not configured'
 
   return (
     <>
@@ -19,6 +26,28 @@ export default async function SettingsPage() {
 
           <div>
             <WebsiteModulesForm settings={settings} />
+
+            {/* Pricing & Tax link card */}
+            <div className="card" style={{ marginBottom: '14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+                <div>
+                  <div className="section-title" style={{ marginBottom: 4 }}>Pricing &amp; Tax</div>
+                  <p style={{ fontSize: 12, color: 'var(--text-3)', margin: 0 }}>
+                    Default tax rate:{' '}
+                    <strong style={{ color: pricing?.default_tax_rate != null ? 'var(--text)' : 'var(--text-3)' }}>
+                      {taxDisplay}
+                    </strong>
+                  </p>
+                </div>
+                <Link
+                  href="/dashboard/settings/pricing"
+                  className="btn-ghost"
+                  style={{ fontSize: 12, whiteSpace: 'nowrap' }}
+                >
+                  Configure →
+                </Link>
+              </div>
+            </div>
 
             <div className="card">
               <div className="section-title" style={{ marginBottom: '12px' }}>Dashboard Language</div>

@@ -512,7 +512,14 @@ export async function generateRecommendations(
   }
 
   // ── 2. Fetch inspection_items via admin client (bypasses RLS) ─────────────
-  const { data: inspItems, error: itemsError } = await adminSupabase
+  type RawInspItem = {
+    id:               string
+    template_item_id: string | null
+    status:           string | null
+    notes:            string | null
+  }
+
+  const { data: rawInspItems, error: itemsError } = await adminSupabase
     .from('inspection_items')
     .select('id, template_item_id, status, notes')
     .eq('inspection_id', inspectionId)
@@ -522,14 +529,16 @@ export async function generateRecommendations(
     return { error: itemsError.message }
   }
 
-  if (!inspItems || inspItems.length === 0) {
+  if (!rawInspItems || rawInspItems.length === 0) {
     return { error: 'No saved inspection items found. Save the checklist first.' }
   }
 
+  const inspItems = rawInspItems as RawInspItem[]
+
   // ── 3. Fetch template items for label + section_name lookup ───────────────
-  const templateItemIds = (inspItems ?? [])
+  const templateItemIds = inspItems
     .map(i => i.template_item_id)
-    .filter(Boolean) as string[]
+    .filter((id): id is string => id != null)
 
   const templateMap = new Map<string, { label: string; section_name: string | null }>()
 
@@ -547,12 +556,12 @@ export async function generateRecommendations(
   }
 
   // ── 4. Separate flagged vs cleared items ──────────────────────────────────
-  const flaggedItems = (inspItems ?? []).filter(
+  const flaggedItems = inspItems.filter(
     i => i.status === 'attention' || i.status === 'urgent',
   )
-  const clearedItemIds = (inspItems ?? [])
+  const clearedItemIds = inspItems
     .filter(i => i.status === 'pass' || i.status === 'not_checked')
-    .map(i => i.id as string)
+    .map(i => i.id)
 
   // If nothing is flagged, clean up any stale recs and return
   if (flaggedItems.length === 0) {
@@ -567,7 +576,7 @@ export async function generateRecommendations(
   }
 
   // ── 5. Fetch existing recommendations to preserve their status ────────────
-  const flaggedItemIds = flaggedItems.map(i => i.id as string)
+  const flaggedItemIds = flaggedItems.map(i => i.id)
 
   const existingRecMap = new Map<string, { id: string; status: string }>()
 
@@ -590,10 +599,10 @@ export async function generateRecommendations(
 
   // ── 6. INSERT new recommendations ─────────────────────────────────────────
   const recsToInsert = flaggedItems
-    .filter(f => !existingRecMap.has(f.id as string))
+    .filter(f => !existingRecMap.has(f.id))
     .map(f => {
-      const tpl    = templateMap.get(f.template_item_id as string)
-      const label  = tpl?.label ?? (f.template_item_id as string)
+      const tpl    = templateMap.get(f.template_item_id ?? '')
+      const label  = tpl?.label ?? (f.template_item_id ?? f.id)
       const status = f.status as 'attention' | 'urgent'
       return {
         tenant_id:          tenantId,
@@ -627,12 +636,12 @@ export async function generateRecommendations(
   }
 
   // ── 7. UPDATE existing recommendations (preserve status) ─────────────────
-  const recsToUpdate = flaggedItems.filter(f => existingRecMap.has(f.id as string))
+  const recsToUpdate = flaggedItems.filter(f => existingRecMap.has(f.id))
 
   for (const f of recsToUpdate) {
-    const existing = existingRecMap.get(f.id as string)!
-    const tpl      = templateMap.get(f.template_item_id as string)
-    const label    = tpl?.label ?? (f.template_item_id as string)
+    const existing = existingRecMap.get(f.id)!
+    const tpl      = templateMap.get(f.template_item_id ?? '')
+    const label    = tpl?.label ?? (f.template_item_id ?? f.id)
     const status   = f.status as 'attention' | 'urgent'
 
     const { error: updateError } = await supabase

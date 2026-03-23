@@ -30,7 +30,10 @@ import type {
   Tenant,
   Estimate,
   EstimateItem,
+  EstimateItemPart,
   EstimateWithItems,
+  TenantPricingConfig,
+  ServiceJobWithCategory,
 } from '@/lib/types'
 
 const APPOINTMENT_DATE_COLUMN = 'appointment_date'
@@ -857,7 +860,7 @@ export async function getEstimateByInspectionId(
 }
 
 /**
- * Returns a single estimate by ID with all of its line items.
+ * Returns a single estimate by ID with all of its line items and nested parts.
  * Items are sorted by display_order ascending.
  */
 export async function getEstimateWithItems(
@@ -868,7 +871,7 @@ export async function getEstimateWithItems(
 
   const supabase = await createClient()
 
-  const [estimateRes, itemsRes] = await Promise.all([
+  const [estimateRes, itemsRes, partsRes] = await Promise.all([
     supabase
       .from('estimates')
       .select('*')
@@ -877,6 +880,12 @@ export async function getEstimateWithItems(
       .single(),
     supabase
       .from('estimate_items')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .eq('estimate_id', estimateId)
+      .order('display_order', { ascending: true }),
+    supabase
+      .from('estimate_item_parts')
       .select('*')
       .eq('tenant_id', tenantId)
       .eq('estimate_id', estimateId)
@@ -892,8 +901,27 @@ export async function getEstimateWithItems(
     console.error('[getEstimateWithItems items]', itemsRes.error.message)
   }
 
+  // Parts errors are non-fatal — estimate still loads without parts
+  if (partsRes.error) {
+    console.error('[getEstimateWithItems parts]', partsRes.error.message)
+  }
+
   const estimate = estimateRes.data as Estimate
-  const items    = (itemsRes.data ?? []) as EstimateItem[]
+  const rawItems = (itemsRes.data ?? []) as EstimateItem[]
+  const parts    = (partsRes.data ?? []) as EstimateItemPart[]
+
+  // Nest parts under their parent item
+  const partsMap = new Map<string, EstimateItemPart[]>()
+  for (const part of parts) {
+    const bucket = partsMap.get(part.estimate_item_id) ?? []
+    bucket.push(part)
+    partsMap.set(part.estimate_item_id, bucket)
+  }
+
+  const items = rawItems.map(item => ({
+    ...item,
+    parts: partsMap.get(item.id) ?? [],
+  }))
 
   return { ...estimate, items }
 }
@@ -947,6 +975,69 @@ export async function getEstimateItems(
   }
 
   return (data ?? []) as EstimateItem[]
+}
+
+// ── Service jobs catalog ──────────────────────────────────────
+
+/**
+ * Returns all active service jobs joined with their category, sorted by
+ * category sort_order then job name.  Used to populate the job dropdown
+ * in the estimate editor.
+ *
+ * These are global reference rows (no tenant_id).
+ */
+export async function getServiceJobs(): Promise<ServiceJobWithCategory[]> {
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('service_jobs')
+    .select(`
+      *,
+      category:service_categories(id, name, sort_order)
+    `)
+    .eq('is_active', true)
+    .order('category_id')
+    .order('name')
+
+  if (error) {
+    console.error('[getServiceJobs]', error.message)
+    return []
+  }
+
+  // Sort by category sort_order so the dropdown groups appear in the right order
+  const rows = (data ?? []) as ServiceJobWithCategory[]
+  return rows.sort((a, b) => {
+    const catDiff = (a.category?.sort_order ?? 0) - (b.category?.sort_order ?? 0)
+    if (catDiff !== 0) return catDiff
+    return a.name.localeCompare(b.name)
+  })
+}
+
+// ── Tenant pricing config ──────────────────────────────────────
+
+/**
+ * Returns the tenant's pricing configuration, or null if none has been saved yet.
+ * Used by createEstimate() to pre-fill default_tax_rate on new estimates.
+ */
+export async function getTenantPricingConfig(
+  tenantId: string,
+): Promise<TenantPricingConfig | null> {
+  if (!hasValue(tenantId)) return null
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('tenant_pricing_configs')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+
+  if (error) {
+    console.error('[getTenantPricingConfig]', error.message)
+    return null
+  }
+
+  return (data as TenantPricingConfig | null) ?? null
 }
 
 export async function getSupportTickets(tenantId?: string): Promise<SupportTicket[]> {

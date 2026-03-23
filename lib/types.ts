@@ -473,6 +473,36 @@ export interface ServiceRecommendation {
   updated_at: string | null
 }
 
+// ── Service jobs catalog ──────────────────────────────────────
+//
+// Global (no tenant_id) — shared across all tenants.
+// Used to drive the service job dropdown in the estimate editor.
+//
+
+export interface ServiceCategory {
+  id:         string
+  name:       string
+  sort_order: number
+  created_at: string
+}
+
+export interface ServiceJob {
+  id:                  string
+  category_id:         string
+  name:                string
+  description:         string | null
+  /** Typical book time in hours (e.g. 1.5 = 1 hr 30 min). */
+  default_labor_hours: number | null
+  is_active:           boolean
+  created_at:          string
+  updated_at:          string
+}
+
+/** ServiceJob with its parent category joined in. */
+export interface ServiceJobWithCategory extends ServiceJob {
+  category: ServiceCategory
+}
+
 // ── Estimate types ────────────────────────────────────────────
 //
 // One estimate system, three creation modes.
@@ -561,6 +591,14 @@ export interface Estimate {
   /** True when any item needs advisor review before the estimate can be sent. */
   requires_review:  boolean
 
+  /**
+   * Markup % applied to all part costs on this estimate.
+   * Formula: unit_sell_price = unit_cost × (1 + parts_markup_percent / 100)
+   * Tax applies to parts only — labor is never taxed.
+   * Stored as a percent value (e.g. 30.00 = 30%).
+   */
+  parts_markup_percent: number | null
+
   created_by:       string | null   // auth.users.id
   created_at:       string
   updated_at:       string
@@ -575,15 +613,39 @@ export interface EstimateItem {
   service_recommendation_id: string | null
   /** Set when this item traces back to a specific inspection item. */
   inspection_item_id:        string | null
+  /**
+   * Set when selected from the service jobs catalog.
+   * When present, the item uses the labor/parts pricing model instead of
+   * the legacy quantity × unit_price model.
+   */
+  service_job_id:            string | null
 
   source_type:   EstimateItemSourceType
   category:      EstimateItemCategory
 
   title:         string
   description:   string | null
+
+  // ── Legacy pricing model (service_job_id IS NULL) ──────────
   quantity:      number
   unit_price:    number
-  line_total:    number   // = round(quantity * unit_price, 2)
+
+  // ── Job-based pricing model (service_job_id IS NOT NULL) ───
+  /** Hours of labor for this job. */
+  labor_hours:   number | null
+  /** Labor rate in USD/hr at the time the estimate was built. */
+  labor_rate:    number | null
+  /** = round(labor_hours * labor_rate, 2) */
+  labor_total:   number
+  /** Parts and materials cost for this line item. */
+  parts_total:   number
+
+  // ── Shared ─────────────────────────────────────────────────
+  /**
+   * For job-based items: labor_total + parts_total.
+   * For legacy items:    round(quantity * unit_price, 2).
+   */
+  line_total:    number
   display_order: number
 
   /**
@@ -593,9 +655,32 @@ export interface EstimateItem {
   source_reference: string | null
   /** True when the parser is uncertain and the advisor must confirm before sending. */
   needs_review:     boolean
+  /** Per-line tech/advisor note (distinct from estimate-level notes). */
+  notes:            string | null
+
+  /** Populated when loaded via getEstimateWithItems. */
+  parts?: EstimateItemPart[]
 
   created_at: string
   updated_at: string
+}
+
+export interface EstimateItemPart {
+  id:               string
+  tenant_id:        string
+  estimate_id:      string
+  estimate_item_id: string
+  name:             string
+  quantity:         number
+  unit_cost:        number
+  profit_amount:    number
+  /** unit_cost + profit_amount — kept in sync by the app */
+  unit_sell_price:  number
+  /** quantity × unit_sell_price — kept in sync by the app */
+  line_total:       number
+  display_order:    number
+  created_at:       string
+  updated_at:       string
 }
 
 /** Convenience type — estimate header + all its line items in one object. */
@@ -622,39 +707,25 @@ export interface EstimateSourceFile {
   created_at:      string
 }
 
-// ── Tenant pricing config (future placeholder) ────────────────
+// ── Tenant pricing config ─────────────────────────────────────
 //
-// These fields will live in a `tenant_pricing_configs` table (preferred)
-// or as a `pricing_config` JSONB column on the `tenants` table.
-//
-// Recommended architecture:
-//   - Simple shops: one row per tenant in tenant_pricing_configs
-//   - Multi-location shops: one row per location / shop_id
-//
-// DO NOT add DB columns yet.  The interface below documents the intended
-// shape so the rest of the codebase can reference it without building it.
+// One row per tenant in `tenant_pricing_configs`.
+// Used to pre-fill tax_rate and (future) labor / parts defaults on new estimates.
 //
 export interface TenantPricingConfig {
-  tenant_id:             string
-  /** Default labor rate in USD per hour. */
-  labor_rate_per_hour:   number | null
+  id:                  string
+  tenant_id:           string
   /**
-   * Parts markup multiplier applied to cost price.
-   * E.g. 1.30 = cost × 1.30 = 30% markup.
-   * Future: may be tiered by part category or supplier.
+   * Default tax rate as a decimal fraction (e.g. 0.0875 = 8.75%).
+   * NULL means no default — estimates start without a rate pre-filled.
    */
-  parts_markup:          number | null
-  /**
-   * Default tax rate as a fraction (e.g. 0.0875).
-   * Future: overridden by city/county tax_rules lookup.
-   */
-  default_tax_rate:      number | null
-  /**
-   * Whether estimates require manager approval before being sent.
-   * Future workflow preference.
-   */
-  require_estimate_approval: boolean
-  updated_at:            string
+  default_tax_rate:    number | null
+  /** Default labor rate in USD per hour. Reserved for future use. */
+  default_labor_rate:  number | null
+  /** Parts markup as a percentage (e.g. 30.00 = 30%). Reserved for future use. */
+  parts_markup_percent: number | null
+  created_at:          string
+  updated_at:          string
 }
 
 // ── Billing types ─────────────────────────────────────────────

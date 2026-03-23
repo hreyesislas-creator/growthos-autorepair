@@ -12,10 +12,11 @@ import {
   saveInspectionResults,
   completeInspection,
   reopenInspection,
-  updateRecommendationStatus,
   generateRecommendations,
-  type RecommendationStatus,
 } from '../actions'
+import {
+  createEstimateFromInspection,
+} from '@/app/dashboard/estimates/actions'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -80,40 +81,17 @@ const STATUS_SUMMARY_COLOR: Record<ItemResult, string> = {
   nc:       'var(--text-3)',
 }
 
-const REC_DECISION_OPTIONS: {
-  value:       RecommendationStatus
-  label:       string
-  activeStyle: React.CSSProperties
-}[] = [
-  { value: 'accepted', label: '✓ Accept',  activeStyle: { background: '#16a34a', color: '#fff', borderColor: '#16a34a' } },
-  { value: 'rejected', label: '✕ Reject',  activeStyle: { background: '#dc2626', color: '#fff', borderColor: '#dc2626' } },
-  { value: 'pending',  label: '· Pending', activeStyle: { background: '#d97706', color: '#fff', borderColor: '#d97706' } },
-]
-
-const REC_STATUS_LABEL: Record<string, { label: string; style: React.CSSProperties }> = {
-  accepted: { label: 'Accepted', style: { background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0' } },
-  rejected: { label: 'Rejected', style: { background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5' } },
-  pending:  { label: 'Pending',  style: { background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a' } },
-  open:     { label: 'Open',     style: { background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' } },
-}
-
 // ── Per-severity card visual config ───────────────────────────────────────────
 // Drives badge, card border/background, and description colour per source_status.
 
 const SEVERITY_CONFIG: Record<'attention' | 'urgent', {
-  badgeLabel:     string
-  badgeStyle:     React.CSSProperties
-  cardStyle:      React.CSSProperties
-  titleColor:     string
-  descColor:      string
-  noteColor:      string
-  noteBarColor:   string
-  /**
-   * Inactive button style per decision value — applied when the button is NOT
-   * the currently-selected status. Lets WARNING cards stay readable on cream.
-   * CRITICAL uses transparent (same as the global default).
-   */
-  buttonInactive: Record<'accepted' | 'rejected' | 'pending', React.CSSProperties>
+  badgeLabel:  string
+  badgeStyle:  React.CSSProperties
+  cardStyle:   React.CSSProperties
+  titleColor:  string
+  descColor:   string
+  noteColor:   string
+  noteBarColor: string
 }> = {
   attention: {
     badgeLabel: '! Warning',
@@ -130,11 +108,6 @@ const SEVERITY_CONFIG: Record<'attention' | 'urgent', {
     descColor:    '#92400e',
     noteColor:    '#78350f',
     noteBarColor: '#f59e0b',
-    buttonInactive: {
-      accepted: { background: '#15803d', color: '#fff',     border: '1px solid #14532d' },
-      rejected: { background: '#4b5563', color: '#fff',     border: '1px solid #374151' },
-      pending:  { background: '#fbbf24', color: '#78350f',  border: '1px solid #f59e0b' },
-    },
   },
   urgent: {
     badgeLabel: '⚠ Critical',
@@ -151,19 +124,7 @@ const SEVERITY_CONFIG: Record<'attention' | 'urgent', {
     descColor:    '#991b1b',
     noteColor:    'var(--text-3)',
     noteBarColor: '#fca5a5',
-    // CRITICAL buttons keep the global transparent-inactive style
-    buttonInactive: {
-      accepted: { background: 'transparent', color: 'var(--text-3)', border: '1px solid var(--border)' },
-      rejected: { background: 'transparent', color: 'var(--text-3)', border: '1px solid var(--border)' },
-      pending:  { background: 'transparent', color: 'var(--text-3)', border: '1px solid var(--border)' },
-    },
   },
-}
-
-// Keep the old name as a simple re-export so nothing else breaks
-const SOURCE_STATUS_BADGE = {
-  attention: { label: SEVERITY_CONFIG.attention.badgeLabel, style: SEVERITY_CONFIG.attention.badgeStyle },
-  urgent:    { label: SEVERITY_CONFIG.urgent.badgeLabel,    style: SEVERITY_CONFIG.urgent.badgeStyle    },
 }
 
 // ── Status mapping ─────────────────────────────────────────────────────────────
@@ -303,19 +264,16 @@ export default function InspectionChecklist({
   }, [existingItemsKey])
 
   // ── Action state ───────────────────────────────────────────────────────────
-  const [saving,      setSaving]      = useState(false)
-  const [completing,  setCompleting]  = useState(false)
-  const [reopening,   setReopening]   = useState(false)
-  const [generating,  setGenerating]  = useState(false)
-  const [saveResult,  setSaveResult]  = useState<'idle' | 'success' | 'error'>('idle')
-  const [saveError,   setSaveError]   = useState<string | null>(null)
-  const [genError,    setGenError]    = useState<string | null>(null)
+  const [saving,           setSaving]           = useState(false)
+  const [completing,       setCompleting]       = useState(false)
+  const [reopening,        setReopening]        = useState(false)
+  const [generating,       setGenerating]       = useState(false)
+  const [creatingEstimate, setCreatingEstimate] = useState(false)
+  const [estimateError,    setEstimateError]    = useState<string | null>(null)
+  const [saveResult,       setSaveResult]       = useState<'idle' | 'success' | 'error'>('idle')
+  const [saveError,        setSaveError]        = useState<string | null>(null)
+  const [genError,         setGenError]         = useState<string | null>(null)
 
-  // ── Recommendation decision state (optimistic) ─────────────────────────────
-  const [recStatuses, setRecStatuses] = useState<Record<string, RecommendationStatus>>(
-    () => Object.fromEntries(initialRecommendations.map(r => [r.id, r.status as RecommendationStatus]))
-  )
-  const [recErrors, setRecErrors] = useState<Record<string, string>>({})
 
   // ── Completion state (local) ────────────────────────────────────────────────
   //
@@ -459,19 +417,34 @@ export default function InspectionChecklist({
     router.refresh()
   }
 
-  // ── Recommendation decision handler (optimistic) ───────────────────────────
+  // ── Create Estimate handler ────────────────────────────────────────────────
 
-  async function handleRecDecision(recId: string, newStatus: RecommendationStatus) {
-    const previous = recStatuses[recId]
-    setRecStatuses(prev => ({ ...prev, [recId]: newStatus }))
-    setRecErrors(prev => ({ ...prev, [recId]: '' }))
+  async function handleCreateEstimate() {
+    setCreatingEstimate(true)
+    setEstimateError(null)
 
-    const result = await updateRecommendationStatus(recId, newStatus)
+    /**
+     * Single server round-trip:
+     *   1. Creates (or returns existing draft) estimate for this inspection
+     *   2. Queries service_recommendations by inspection_id fresh from the DB
+     *      — does NOT rely on the client-side initialRecommendations prop,
+     *        which can be stale if findings were just generated this session
+     *   3. Inserts any not-yet-imported findings as estimate line items
+     */
+    const result = await createEstimateFromInspection({
+      inspection_id: inspection.id,
+      customer_id:   (inspection as any).customer_id ?? null,
+      vehicle_id:    (inspection as any).vehicle_id  ?? null,
+    })
 
-    if (result?.error) {
-      setRecStatuses(prev => ({ ...prev, [recId]: previous }))
-      setRecErrors(prev => ({ ...prev, [recId]: result.error }))
+    if ('error' in result) {
+      setEstimateError(result.error)
+      setCreatingEstimate(false)
+      return
     }
+
+    setCreatingEstimate(false)
+    router.push(`/dashboard/estimates/${result.data.estimateId}`)
   }
 
   // ── Empty state ────────────────────────────────────────────────────────────
@@ -738,7 +711,10 @@ export default function InspectionChecklist({
         </div>
       ))}
 
-      {/* ── Service Recommendations ────────────────────────────────────────── */}
+      {/* ── Findings (Service Recommendations) ────────────────────────────── */}
+      {/*                                                                       */}
+      {/* Inspection findings are read-only here. The advisor decides what to   */}
+      {/* present to the customer when creating an estimate.                    */}
       <div className="card" style={{ marginBottom: 96 }}>
 
         {/* Panel header */}
@@ -747,7 +723,7 @@ export default function InspectionChecklist({
           marginBottom: initialRecommendations.length > 0 ? 14 : 0,
           flexWrap: 'wrap',
         }}>
-          <div className="section-title" style={{ flex: 1 }}>Service Recommendations</div>
+          <div className="section-title" style={{ flex: 1 }}>Findings</div>
 
           {initialRecommendations.length > 0 && (
             <span style={{
@@ -756,7 +732,7 @@ export default function InspectionChecklist({
                 ? { background: '#fef2f2', color: '#b91c1c' }
                 : { background: '#fffbeb', color: '#92400e' }),
             }}>
-              {initialRecommendations.length} item{initialRecommendations.length !== 1 ? 's' : ''}
+              {initialRecommendations.length} finding{initialRecommendations.length !== 1 ? 's' : ''}
             </span>
           )}
 
@@ -766,10 +742,10 @@ export default function InspectionChecklist({
             className="btn-ghost"
             disabled={generating}
             onClick={handleGenerate}
-            title="Generate recommendations from current inspection results"
+            title="Generate findings from current inspection results"
             style={{ fontSize: 12, opacity: generating ? 0.6 : 1 }}
           >
-            {generating ? 'Generating…' : '⚙ Generate Recommendations'}
+            {generating ? 'Generating…' : '⚙ Generate Findings'}
           </button>
         </div>
 
@@ -784,28 +760,38 @@ export default function InspectionChecklist({
           </div>
         )}
 
+        {/* Advisor notice */}
+        {initialRecommendations.length > 0 && (
+          <div style={{
+            marginBottom: 14, padding: '8px 12px',
+            background: '#eff6ff', border: '1px solid #bfdbfe',
+            borderRadius: 'var(--r6,6px)',
+            fontSize: 12, color: '#1e40af',
+          }}>
+            These findings will be imported into the estimate. The advisor decides what to present to the customer.
+          </div>
+        )}
+
         {/* Empty state */}
         {initialRecommendations.length === 0 && !generating && (
           <div style={{
             padding: '20px 0 4px',
             textAlign: 'center', fontSize: 13, color: 'var(--text-3)',
           }}>
-            No recommendations yet.
+            No findings yet.
             {(counts.warning > 0 || counts.critical > 0) ? (
-              <span> Save the checklist then click <strong>Generate Recommendations</strong>.</span>
+              <span> Save the checklist then click <strong>Generate Findings</strong>.</span>
             ) : (
               <span> Mark items as Warning or Critical, save, then generate.</span>
             )}
           </div>
         )}
 
-        {/* Recommendation rows — critical items rendered first */}
+        {/* Finding rows — critical items rendered first */}
         {initialRecommendations.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {[...initialRecommendations]
               .sort((a, b) => {
-                // Resolve severity for sorting: source_status column first,
-                // fall back to priority for rows that predate the DB migration.
                 const toSeverity = (r: ServiceRecommendation): 'urgent' | 'attention' =>
                   (r.source_status as 'urgent' | 'attention' | null) ??
                   (r.priority === 'high' || r.priority === 'urgent' ? 'urgent' : 'attention')
@@ -813,166 +799,110 @@ export default function InspectionChecklist({
                 return order[toSeverity(a)] - order[toSeverity(b)]
               })
               .map(rec => {
-              const currentStatus = recStatuses[rec.id] ?? rec.status
-              const statusMeta    = REC_STATUS_LABEL[currentStatus] ?? REC_STATUS_LABEL.open
-              const recError      = recErrors[rec.id]
-              // source_status is preferred; fall back to priority so styling works
-              // even before the ALTER TABLE migration is applied.
-              const srcStatus = (
-                (rec.source_status as 'attention' | 'urgent' | null) ??
-                (rec.priority === 'high' || rec.priority === 'urgent' ? 'urgent'    :
-                 rec.priority === 'medium'                            ? 'attention' : null)
-              )
-              const severity  = srcStatus ? SEVERITY_CONFIG[srcStatus] : null
+                const srcStatus = (
+                  (rec.source_status as 'attention' | 'urgent' | null) ??
+                  (rec.priority === 'high' || rec.priority === 'urgent' ? 'urgent'    :
+                   rec.priority === 'medium'                            ? 'attention' : null)
+                )
+                const severity = srcStatus ? SEVERITY_CONFIG[srcStatus] : null
 
-              return (
-                <div
-                  key={rec.id}
-                  style={severity?.cardStyle ?? {
-                    padding: '12px 14px', borderRadius: 'var(--r8,8px)',
-                    border: '1px solid var(--border)', background: 'var(--surface-2)',
-                  }}
-                >
-                  {/* CRITICAL only: "Immediate Attention Required" header strip */}
-                  {srcStatus === 'urgent' && (
-                    <div style={{
-                      display: 'flex', alignItems: 'center', gap: 6,
-                      marginBottom: 10, paddingBottom: 8,
-                      borderBottom: '1px solid #fca5a5',
-                    }}>
-                      <span style={{ fontSize: 15, lineHeight: 1 }}>🚨</span>
-                      <span style={{
-                        fontSize: 11, fontWeight: 700, color: '#b91c1c',
-                        textTransform: 'uppercase', letterSpacing: '0.06em',
-                      }}>
-                        Immediate Attention Required
-                      </span>
-                      {/* ── TEMP DEBUG — remove once confirmed ── */}
-                      <span style={{
-                        marginLeft: 'auto', fontSize: 9, fontWeight: 700,
-                        color: '#fff', background: '#dc2626',
-                        padding: '1px 5px', borderRadius: 3,
-                      }}>
-                        CRITICAL DEBUG ACTIVE
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Row 1: badge + title + decision-status */}
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-
-                    {/* Source status badge */}
-                    {severity && (
-                      <span style={{
-                        display: 'inline-block', marginTop: 2, padding: '2px 8px',
-                        borderRadius: 'var(--r6,6px)', fontSize: 10, fontWeight: 700,
-                        textTransform: 'uppercase', letterSpacing: '0.05em', flexShrink: 0,
-                        ...severity.badgeStyle,
-                      }}>
-                        {severity.badgeLabel}
-                      </span>
-                    )}
-
-                    {/* Item name + service title + description */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      {/* Original checklist item name */}
-                      {rec.item_name && rec.item_name !== rec.title && (
-                        <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 2 }}>
-                          {rec.item_name}
-                        </div>
-                      )}
-                      {/* Derived service title */}
+                return (
+                  <div
+                    key={rec.id}
+                    style={severity?.cardStyle ?? {
+                      padding: '12px 14px', borderRadius: 'var(--r8,8px)',
+                      border: '1px solid var(--border)', background: 'var(--surface-2)',
+                    }}
+                  >
+                    {/* CRITICAL: "Immediate Attention Required" header strip */}
+                    {srcStatus === 'urgent' && (
                       <div style={{
-                        fontSize: 13, fontWeight: 700, marginBottom: 3,
-                        color: severity?.titleColor ?? 'var(--text)',
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        marginBottom: 10, paddingBottom: 8,
+                        borderBottom: '1px solid #fca5a5',
                       }}>
-                        {rec.title}
+                        <span style={{ fontSize: 15, lineHeight: 1 }}>🚨</span>
+                        <span style={{
+                          fontSize: 11, fontWeight: 700, color: '#b91c1c',
+                          textTransform: 'uppercase', letterSpacing: '0.06em',
+                        }}>
+                          Immediate Attention Required
+                        </span>
                       </div>
-                      {/* Auto-generated description */}
-                      {rec.description && (
-                        <div style={{
-                          fontSize: 12,
-                          color: severity?.descColor ?? 'var(--text-3)',
-                          fontWeight: srcStatus === 'urgent' ? 500 : 400,
-                        }}>
-                          {rec.description}
-                        </div>
-                      )}
-                      {/* Technician notes */}
-                      {rec.technician_notes && (
-                        <div style={{
-                          marginTop: 6, fontSize: 12,
-                          fontStyle: 'italic', padding: '4px 8px',
-                          color:       severity?.noteColor    ?? 'var(--text-3)',
-                          background:  srcStatus === 'urgent' ? '#fff1f1' : srcStatus === 'attention' ? '#fef9ec' : 'var(--surface-3,#f8fafc)',
-                          borderRadius: 'var(--r4,4px)',
-                          borderLeft:  `2px solid ${severity?.noteBarColor ?? 'var(--border)'}`,
-                        }}>
-                          Tech note: {rec.technician_notes}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Decision status badge */}
-                    <span style={{
-                      flexShrink: 0, padding: '2px 8px', borderRadius: 'var(--r6,6px)',
-                      fontSize: 11, fontWeight: 600, ...statusMeta.style,
-                    }}>
-                      {statusMeta.label}
-                    </span>
-                  </div>
-
-                  {/* Row 2: decision buttons */}
-                  <div style={{ marginTop: 10, display: 'flex', gap: 6, alignItems: 'center' }}>
-                    {REC_DECISION_OPTIONS.map(opt => {
-                      const isActive      = currentStatus === opt.value
-                      const inactiveStyle = severity?.buttonInactive[
-                        opt.value as 'accepted' | 'rejected' | 'pending'
-                      ] ?? { background: 'transparent', color: 'var(--text-3)' }
-                      return (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          onClick={() => handleRecDecision(rec.id, opt.value)}
-                          style={{
-                            padding: '3px 10px', fontSize: 11, fontWeight: isActive ? 700 : 500,
-                            borderRadius: 'var(--r6,6px)',
-                            cursor: 'pointer', transition: 'all 0.1s',
-                            // Active: global bright activeStyle; Inactive: per-severity override
-                            ...(isActive ? opt.activeStyle : inactiveStyle),
-                          }}
-                        >
-                          {opt.label}
-                        </button>
-                      )
-                    })}
-
-                    {rec.estimated_price != null && (
-                      <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
-                        ${Number(rec.estimated_price).toFixed(2)}
-                      </span>
                     )}
 
-                    {rec.section_name && (
-                      <span style={{
-                        marginLeft: rec.estimated_price != null ? 8 : 'auto',
-                        fontSize: 11, color: 'var(--text-3)',
-                        padding: '1px 6px', borderRadius: 4,
-                        background: 'var(--surface-3,#f1f5f9)',
-                      }}>
-                        {rec.section_name}
-                      </span>
+                    {/* Severity badge + title + description + tech notes */}
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                      {severity && (
+                        <span style={{
+                          display: 'inline-block', marginTop: 2, padding: '2px 8px',
+                          borderRadius: 'var(--r6,6px)', fontSize: 10, fontWeight: 700,
+                          textTransform: 'uppercase', letterSpacing: '0.05em', flexShrink: 0,
+                          ...severity.badgeStyle,
+                        }}>
+                          {severity.badgeLabel}
+                        </span>
+                      )}
+
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        {rec.item_name && rec.item_name !== rec.title && (
+                          <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 2 }}>
+                            {rec.item_name}
+                          </div>
+                        )}
+                        <div style={{
+                          fontSize: 13, fontWeight: 700, marginBottom: 3,
+                          color: severity?.titleColor ?? 'var(--text)',
+                        }}>
+                          {rec.title}
+                        </div>
+                        {rec.description && (
+                          <div style={{
+                            fontSize: 12,
+                            color: severity?.descColor ?? 'var(--text-3)',
+                            fontWeight: srcStatus === 'urgent' ? 500 : 400,
+                          }}>
+                            {rec.description}
+                          </div>
+                        )}
+                        {rec.technician_notes && (
+                          <div style={{
+                            marginTop: 6, fontSize: 12,
+                            fontStyle: 'italic', padding: '4px 8px',
+                            color:        severity?.noteColor    ?? 'var(--text-3)',
+                            background:   srcStatus === 'urgent' ? '#fff1f1' : srcStatus === 'attention' ? '#fef9ec' : 'var(--surface-3,#f8fafc)',
+                            borderRadius: 'var(--r4,4px)',
+                            borderLeft:   `2px solid ${severity?.noteBarColor ?? 'var(--border)'}`,
+                          }}>
+                            Tech note: {rec.technician_notes}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Footer: estimated price + section name */}
+                    {(rec.estimated_price != null || rec.section_name) && (
+                      <div style={{ marginTop: 8, display: 'flex', gap: 6, alignItems: 'center' }}>
+                        {rec.estimated_price != null && (
+                          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+                            ${Number(rec.estimated_price).toFixed(2)}
+                          </span>
+                        )}
+                        {rec.section_name && (
+                          <span style={{
+                            marginLeft: rec.estimated_price != null ? 8 : 'auto',
+                            fontSize: 11, color: 'var(--text-3)',
+                            padding: '1px 6px', borderRadius: 4,
+                            background: 'var(--surface-3,#f1f5f9)',
+                          }}>
+                            {rec.section_name}
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
-
-                  {recError && (
-                    <div style={{ marginTop: 6, fontSize: 11, color: '#b91c1c' }}>
-                      Failed to update: {recError}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
+                )
+              })}
           </div>
         )}
       </div>
@@ -989,7 +919,7 @@ export default function InspectionChecklist({
         {isReadOnly ? (
           /* ── Completed mode ─────────────────────────────────────────────── */
           <>
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <span style={{
                 fontSize: 11, fontWeight: 700, padding: '3px 10px',
                 borderRadius: 'var(--r6,6px)', background: '#f0fdf4',
@@ -1000,7 +930,19 @@ export default function InspectionChecklist({
               <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
                 {counts.total} items · {counts.critical} critical · {counts.warning} warning
               </span>
+              {estimateError && (
+                <span style={{ fontSize: 11, color: '#b91c1c' }}>✕ {estimateError}</span>
+              )}
             </div>
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={creatingEstimate}
+              style={{ fontSize: 12, opacity: creatingEstimate ? 0.6 : 1 }}
+              onClick={handleCreateEstimate}
+            >
+              {creatingEstimate ? 'Creating…' : '📋 Create Estimate'}
+            </button>
             <button
               type="button"
               className="btn-ghost"
@@ -1024,6 +966,9 @@ export default function InspectionChecklist({
                   · {counts.critical} critical
                 </span>
               )}
+              {estimateError && (
+                <span style={{ color: '#b91c1c', marginLeft: 8 }}>✕ {estimateError}</span>
+              )}
             </div>
 
             <button
@@ -1034,6 +979,16 @@ export default function InspectionChecklist({
               onClick={handleSave}
             >
               {saving ? 'Saving…' : 'Save Results'}
+            </button>
+
+            <button
+              type="button"
+              className="btn-ghost"
+              disabled={creatingEstimate}
+              style={{ fontSize: 12, opacity: creatingEstimate ? 0.6 : 1 }}
+              onClick={handleCreateEstimate}
+            >
+              {creatingEstimate ? 'Creating…' : '📋 Create Estimate'}
             </button>
 
             <button
