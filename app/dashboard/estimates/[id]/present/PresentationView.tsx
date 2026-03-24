@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import type { EstimateWithItems, EstimateItem, EstimateItemPart } from '@/lib/types'
+import { sendEstimateByText } from './actions'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -65,10 +66,11 @@ function sumJobSubtotals(items: EstimateItem[]): number {
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface Props {
-  estimate:      EstimateWithItems
-  customerName:  string | null
-  vehicleLabel:  string | null
-  shopName:      string
+  estimate:       EstimateWithItems
+  customerName:   string | null
+  vehicleLabel:   string | null
+  shopName:       string
+  customerPhone:  string | null   // used by Send by Text — null if no phone on file
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -80,6 +82,7 @@ export default function PresentationView({
   customerName,
   vehicleLabel,
   shopName,
+  customerPhone,
 }: Props) {
   const [decisions, setDecisions] = useState<DecisionMap>({})
 
@@ -201,6 +204,14 @@ export default function PresentationView({
         </span>
       </div>
 
+      {/* ── Share bar ─────────────────────────────────────────────────────── */}
+      <ShareBar
+        estimateId={estimate.id}
+        customerName={customerName}
+        customerPhone={customerPhone}
+        shopName={shopName}
+      />
+
       {/* ── Job cards ─────────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         {estimate.items.map(item => (
@@ -271,6 +282,182 @@ export default function PresentationView({
         </button>
       </div>
 
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ShareBar
+//
+// Hydration-safe URL rendering rule:
+//   The PUBLIC PATH (/e/[id]) is rendered as text — it is identical on the
+//   server and the client, so there is ZERO hydration mismatch.
+//
+//   The FULL URL (https://…/e/[id]) is ONLY used inside event handlers and
+//   the server action, never in JSX text.  window.location.origin is accessed
+//   only at click time (always client-side), never during render.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type CopyState  = 'idle' | 'copied'
+type TextState  = 'idle' | 'sending' | 'sent' | 'no_phone' | 'not_wired' | 'error'
+
+interface ShareBarProps {
+  estimateId:    string
+  customerName:  string | null
+  customerPhone: string | null
+  shopName:      string
+}
+
+function ShareBar({ estimateId, customerName, customerPhone, shopName }: ShareBarProps) {
+  const [copyState, setCopyState] = useState<CopyState>('idle')
+  const [textState, setTextState] = useState<TextState>('idle')
+  const [textError, setTextError] = useState<string | null>(null)
+
+  // ── Relative path — safe to render on server and client (no mismatch) ───────
+  const publicPath = `/e/${estimateId}`
+
+  // ── Copy Link ─────────────────────────────────────────────────────────────
+  const handleCopy = useCallback(() => {
+    // window.location.origin is only accessed here (event handler, always client)
+    const fullUrl = window.location.origin + publicPath
+    navigator.clipboard.writeText(fullUrl).then(() => {
+      setCopyState('copied')
+      setTimeout(() => setCopyState('idle'), 2500)
+    }).catch(() => {
+      // Fallback for non-HTTPS / permission denied
+      const el = document.createElement('input')
+      el.value = fullUrl
+      document.body.appendChild(el)
+      el.select()
+      document.execCommand('copy')
+      document.body.removeChild(el)
+      setCopyState('copied')
+      setTimeout(() => setCopyState('idle'), 2500)
+    })
+  }, [publicPath])
+
+  // ── Send by Text ──────────────────────────────────────────────────────────
+  const handleSendText = useCallback(async () => {
+    setTextState('sending')
+    setTextError(null)
+    const result = await sendEstimateByText(estimateId)
+
+    if (result.noPhone)  { setTextState('no_phone');  return }
+    if (result.error)    { setTextState('error'); setTextError(result.error); return }
+    if (result.notWired) { setTextState('not_wired'); return }
+    setTextState('sent')
+    setTimeout(() => setTextState('idle'), 5000)
+  }, [estimateId])
+
+  return (
+    <div style={{
+      background: '#fff',
+      border: '1px solid var(--border-2)',
+      borderRadius: 10,
+      padding: '14px 16px',
+      marginBottom: 20,
+    }}>
+      {/* Row: label + buttons */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        flexWrap: 'wrap',
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', marginBottom: 2 }}>
+            Customer link
+          </div>
+          {/* ── Hydration-safe: relative path only — identical on server + client ── */}
+          <div style={{
+            fontSize: 12,
+            color: 'var(--text-3)',
+            fontFamily: 'var(--font-mono)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}>
+            {publicPath}
+          </div>
+        </div>
+
+        {/* Copy Link button */}
+        <button
+          onClick={handleCopy}
+          style={{
+            flexShrink: 0,
+            padding: '8px 14px',
+            borderRadius: 7,
+            border: '1px solid var(--border-2)',
+            background: copyState === 'copied' ? '#f0fdf4' : '#fff',
+            color:  copyState === 'copied' ? '#15803d' : 'var(--text-2)',
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.15s',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {copyState === 'copied' ? '✓ Copied!' : '📋 Copy Link'}
+        </button>
+
+        {/* Send by Text button */}
+        <button
+          onClick={handleSendText}
+          disabled={textState === 'sending'}
+          style={{
+            flexShrink: 0,
+            padding: '8px 14px',
+            borderRadius: 7,
+            border: '1px solid var(--border-2)',
+            background: textState === 'sent' || textState === 'not_wired'
+              ? '#f0fdf4'
+              : textState === 'error' || textState === 'no_phone'
+              ? '#fef2f2'
+              : '#fff',
+            color: textState === 'sent' || textState === 'not_wired'
+              ? '#15803d'
+              : textState === 'error' || textState === 'no_phone'
+              ? '#dc2626'
+              : 'var(--text-2)',
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: textState === 'sending' ? 'wait' : 'pointer',
+            transition: 'all 0.15s',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {textState === 'sending'   ? '⏳ Sending…'     :
+           textState === 'sent'      ? '✓ Text Sent!'    :
+           textState === 'not_wired' ? '✓ SMS (dev)'     :
+           textState === 'no_phone'  ? '✕ No Phone'      :
+           textState === 'error'     ? '✕ Failed'        :
+                                       '💬 Send by Text'  }
+        </button>
+      </div>
+
+      {/* Contextual feedback */}
+      {textState === 'sent' && customerPhone && (
+        <div style={{ marginTop: 8, fontSize: 12, color: '#15803d' }}>
+          Estimate link sent to {customerPhone}
+        </div>
+      )}
+      {textState === 'not_wired' && (
+        <div style={{ marginTop: 8, fontSize: 12, color: '#92400e' }}>
+          Dev mode — Twilio not configured. Message logged to console.
+          Set <code style={{ fontSize: 11 }}>TWILIO_ACCOUNT_SID</code>, <code style={{ fontSize: 11 }}>TWILIO_AUTH_TOKEN</code>, <code style={{ fontSize: 11 }}>TWILIO_FROM_NUMBER</code> to enable live SMS.
+        </div>
+      )}
+      {textState === 'no_phone' && (
+        <div style={{ marginTop: 8, fontSize: 12, color: '#dc2626' }}>
+          No phone number on file for {customerName ?? 'this customer'}. Add one in the customer profile first.
+        </div>
+      )}
+      {textState === 'error' && textError && (
+        <div style={{ marginTop: 8, fontSize: 12, color: '#dc2626' }}>
+          {textError}
+        </div>
+      )}
     </div>
   )
 }

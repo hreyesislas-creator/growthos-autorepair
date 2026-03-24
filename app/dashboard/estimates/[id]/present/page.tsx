@@ -34,7 +34,7 @@ export default async function EstimatePresentPage({
     estimate.customer_id
       ? supabase
           .from('customers')
-          .select('first_name, last_name')
+          .select('first_name, last_name, phone')
           .eq('tenant_id', tenantId)
           .eq('id', estimate.customer_id)
           .single()
@@ -49,12 +49,13 @@ export default async function EstimatePresentPage({
       : Promise.resolve({ data: null }),
   ])
 
-  const customer = customerRes.data as { first_name: string; last_name: string } | null
+  const customer = customerRes.data as { first_name: string; last_name: string; phone: string | null } | null
   const vehicle  = vehicleRes.data  as { year: number | null; make: string | null; model: string | null } | null
 
-  const customerName = customer
+  const customerName  = customer
     ? `${customer.first_name} ${customer.last_name}`.trim()
     : null
+  const customerPhone = customer?.phone ?? null
 
   const vehicleLabel = vehicle
     ? [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(' ')
@@ -74,6 +75,7 @@ export default async function EstimatePresentPage({
         customerName={customerName}
         vehicleLabel={vehicleLabel}
         shopName={ctx.tenant.name}
+        customerPhone={customerPhone}
       />
     </>
   )
