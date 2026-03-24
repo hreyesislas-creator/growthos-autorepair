@@ -878,7 +878,7 @@ export default function EstimateEditor({
               fontSize: 11, color: '#166534', fontFamily: 'var(--font-mono)',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             }}>
-              {typeof window !== 'undefined' ? `${window.location.origin}/e/${estimate.id}` : `/e/${estimate.id}`}
+              {`/e/${estimate.id}`}
             </div>
           </div>
           <button
