@@ -1064,11 +1064,12 @@ export default function InspectionChecklist({
 //
 // ─────────────────────────────────────────────────────────────────────────────
 
-const ESTIMATE_STATUS_STYLES: Record<string, { bg: string; color: string; border: string }> = {
-  draft:    { bg: '#f8fafc', color: '#475569', border: '#e2e8f0' },
-  sent:     { bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe' },
-  approved: { bg: '#f0fdf4', color: '#15803d', border: '#bbf7d0' },
-  declined: { bg: '#fff7ed', color: '#c2410c', border: '#fed7aa' },
+// Status badge colours — high-contrast fills so text is readable on light backgrounds
+const ESTIMATE_STATUS_STYLES: Record<string, { bg: string; color: string; border: string; label: string }> = {
+  draft:    { bg: '#e2e8f0', color: '#1e293b', border: '#94a3b8', label: 'Pending'   },
+  sent:     { bg: '#dbeafe', color: '#1e40af', border: '#93c5fd', label: 'Presented' },
+  approved: { bg: '#dcfce7', color: '#14532d', border: '#86efac', label: 'Approved'  },
+  declined: { bg: '#fed7aa', color: '#7c2d12', border: '#fb923c', label: 'Rejected'  },
 }
 
 function LinkedEstimateCard({ estimate }: { estimate: LinkedEstimate }) {
@@ -1084,8 +1085,8 @@ function LinkedEstimateCard({ estimate }: { estimate: LinkedEstimate }) {
     <div style={{
       marginBottom: 16,
       padding: '14px 16px',
-      background: '#fff',
-      border: '1px solid var(--border-2)',
+      background: '#f0f7ff',
+      border: '1px solid #bfdbfe',
       borderLeft: '4px solid #2563eb',
       borderRadius: 'var(--r8, 8px)',
       display: 'flex',
@@ -1098,26 +1099,27 @@ function LinkedEstimateCard({ estimate }: { estimate: LinkedEstimate }) {
 
       {/* Info */}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-3)', marginBottom: 3 }}>
+        {/* Label — strong blue so it reads clearly on the light-blue card */}
+        <div style={{ fontSize: 11, fontWeight: 800, color: '#1e40af', letterSpacing: '0.06em', marginBottom: 4 }}>
           ESTIMATE CREATED
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>
+          <span style={{ fontSize: 15, fontWeight: 800, color: '#0f172a' }}>
             {estimate.estimate_number}
           </span>
-          {/* Status badge */}
+          {/* Status badge — filled bg with high-contrast text */}
           <span style={{
             fontSize: 10, fontWeight: 800,
-            padding: '2px 8px', borderRadius: 999,
-            textTransform: 'uppercase', letterSpacing: '0.05em',
+            padding: '2px 9px', borderRadius: 999,
+            textTransform: 'uppercase', letterSpacing: '0.06em',
             background: style.bg,
             color:      style.color,
             border:     `1px solid ${style.border}`,
           }}>
-            {estimate.status}
+            {style.label}
           </span>
           {updatedLabel && (
-            <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+            <span style={{ fontSize: 12, color: '#334155', fontWeight: 500 }}>
               Updated {updatedLabel}
             </span>
           )}
