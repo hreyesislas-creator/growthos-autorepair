@@ -8,6 +8,7 @@ import {
   getInspectionRecommendations,
   getTenantUserById,
 } from '@/lib/queries'
+import { createClient } from '@/lib/supabase/server'
 import Topbar from '@/components/dashboard/Topbar'
 import InspectionChecklist from './InspectionChecklist'
 import type { InspectionTemplateItem } from '@/lib/types'
@@ -52,14 +53,35 @@ export default async function InspectionDetailPage({
   console.log('[PAGE] inspectionId:', params.id)
   // ─────────────────────────────────────────────────────────────────────────
 
-  // ── Step 1: Fetch inspection header, saved items, and recommendations in
-  //            parallel.  Items use the dedicated function so the query path
-  //            is explicit and isolated from getInspectionById.
-  const [{ inspection }, existingItemsRaw, recommendations] = await Promise.all([
+  const supabase = await createClient()
+
+  // ── Step 1: Fetch inspection header, saved items, recommendations, and the
+  //            linked estimate (if one was created from this inspection) in
+  //            parallel.  The estimate query drives the "View Estimate" card.
+  const [{ inspection }, existingItemsRaw, recommendations, linkedEstimateRes] = await Promise.all([
     getInspectionById(tenantId, params.id),
     getInspectionItemsByInspectionId(params.id),
     getInspectionRecommendations(tenantId, params.id),
+    // Find the most-recent estimate linked to this inspection.
+    // createEstimateFromInspection() stores inspection_id on the estimate row
+    // and returns an existing draft on repeat calls — so at most one row exists
+    // per inspection at any given time.
+    supabase
+      .from('estimates')
+      .select('id, estimate_number, status, updated_at')
+      .eq('tenant_id', tenantId)
+      .eq('inspection_id', params.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ])
+
+  const linkedEstimate = (linkedEstimateRes.data ?? null) as {
+    id:              string
+    estimate_number: string
+    status:          string
+    updated_at:      string | null
+  } | null
 
   if (!inspection) return notFound()
 
@@ -115,6 +137,7 @@ export default async function InspectionDetailPage({
         existingItems={existingItems}
         initialRecommendations={recommendations}
         technician={technician}
+        linkedEstimate={linkedEstimate}
       />
     </>
   )

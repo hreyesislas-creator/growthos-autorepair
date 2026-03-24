@@ -53,12 +53,20 @@ interface ExistingItem {
   notes:            string | null
 }
 
+interface LinkedEstimate {
+  id:              string
+  estimate_number: string
+  status:          string
+  updated_at:      string | null
+}
+
 interface Props {
   inspection:             Inspection
   sections:               Section[]
   existingItems:          ExistingItem[]
   initialRecommendations: ServiceRecommendation[]
   technician?:            TenantUser | null
+  linkedEstimate?:        LinkedEstimate | null
 }
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -211,6 +219,7 @@ export default function InspectionChecklist({
   existingItems,
   initialRecommendations,
   technician,
+  linkedEstimate = null,
 }: Props) {
   const router = useRouter()
 
@@ -490,6 +499,11 @@ export default function InspectionChecklist({
             {reopening ? 'Reopening…' : 'Edit Inspection'}
           </button>
         </div>
+      )}
+
+      {/* ── Linked estimate card ──────────────────────────────────────────── */}
+      {linkedEstimate && (
+        <LinkedEstimateCard estimate={linkedEstimate} />
       )}
 
       {/* ── Save result banners ───────────────────────────────────────────── */}
@@ -934,15 +948,34 @@ export default function InspectionChecklist({
                 <span style={{ fontSize: 11, color: '#b91c1c' }}>✕ {estimateError}</span>
               )}
             </div>
-            <button
-              type="button"
-              className="btn-primary"
-              disabled={creatingEstimate}
-              style={{ fontSize: 12, opacity: creatingEstimate ? 0.6 : 1 }}
-              onClick={handleCreateEstimate}
-            >
-              {creatingEstimate ? 'Creating…' : '📋 Create Estimate'}
-            </button>
+            {linkedEstimate ? (
+              <>
+                <a
+                  href={`/dashboard/estimates/${linkedEstimate.id}`}
+                  className="btn-primary"
+                  style={{ fontSize: 12 }}
+                >
+                  📋 View Estimate
+                </a>
+                <a
+                  href={`/dashboard/estimates/${linkedEstimate.id}/present`}
+                  className="btn-ghost"
+                  style={{ fontSize: 12 }}
+                >
+                  Present to Customer ↗
+                </a>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={creatingEstimate}
+                style={{ fontSize: 12, opacity: creatingEstimate ? 0.6 : 1 }}
+                onClick={handleCreateEstimate}
+              >
+                {creatingEstimate ? 'Creating…' : '📋 Create Estimate'}
+              </button>
+            )}
             <button
               type="button"
               className="btn-ghost"
@@ -981,15 +1014,25 @@ export default function InspectionChecklist({
               {saving ? 'Saving…' : 'Save Results'}
             </button>
 
-            <button
-              type="button"
-              className="btn-ghost"
-              disabled={creatingEstimate}
-              style={{ fontSize: 12, opacity: creatingEstimate ? 0.6 : 1 }}
-              onClick={handleCreateEstimate}
-            >
-              {creatingEstimate ? 'Creating…' : '📋 Create Estimate'}
-            </button>
+            {linkedEstimate ? (
+              <a
+                href={`/dashboard/estimates/${linkedEstimate.id}`}
+                className="btn-ghost"
+                style={{ fontSize: 12 }}
+              >
+                📋 View Estimate
+              </a>
+            ) : (
+              <button
+                type="button"
+                className="btn-ghost"
+                disabled={creatingEstimate}
+                style={{ fontSize: 12, opacity: creatingEstimate ? 0.6 : 1 }}
+                onClick={handleCreateEstimate}
+              >
+                {creatingEstimate ? 'Creating…' : '📋 Create Estimate'}
+              </button>
+            )}
 
             <button
               type="button"
@@ -1009,6 +1052,95 @@ export default function InspectionChecklist({
         )}
       </div>
 
+    </div>
+  )
+}
+
+// ── LinkedEstimateCard ─────────────────────────────────────────────────────────
+//
+// Shown at the top of the inspection page when an estimate has already been
+// created from this inspection.  Lets the advisor navigate to it or present it
+// to the customer without going through "Create Estimate" again.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ESTIMATE_STATUS_STYLES: Record<string, { bg: string; color: string; border: string }> = {
+  draft:    { bg: '#f8fafc', color: '#475569', border: '#e2e8f0' },
+  sent:     { bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe' },
+  approved: { bg: '#f0fdf4', color: '#15803d', border: '#bbf7d0' },
+  declined: { bg: '#fff7ed', color: '#c2410c', border: '#fed7aa' },
+}
+
+function LinkedEstimateCard({ estimate }: { estimate: LinkedEstimate }) {
+  const style = ESTIMATE_STATUS_STYLES[estimate.status] ?? ESTIMATE_STATUS_STYLES.draft
+
+  const updatedLabel = estimate.updated_at
+    ? new Date(estimate.updated_at).toLocaleDateString('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric',
+      })
+    : null
+
+  return (
+    <div style={{
+      marginBottom: 16,
+      padding: '14px 16px',
+      background: '#fff',
+      border: '1px solid var(--border-2)',
+      borderLeft: '4px solid #2563eb',
+      borderRadius: 'var(--r8, 8px)',
+      display: 'flex',
+      alignItems: 'center',
+      gap: 14,
+      flexWrap: 'wrap',
+    }}>
+      {/* Icon */}
+      <span style={{ fontSize: 20, flexShrink: 0 }}>📋</span>
+
+      {/* Info */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-3)', marginBottom: 3 }}>
+          ESTIMATE CREATED
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>
+            {estimate.estimate_number}
+          </span>
+          {/* Status badge */}
+          <span style={{
+            fontSize: 10, fontWeight: 800,
+            padding: '2px 8px', borderRadius: 999,
+            textTransform: 'uppercase', letterSpacing: '0.05em',
+            background: style.bg,
+            color:      style.color,
+            border:     `1px solid ${style.border}`,
+          }}>
+            {estimate.status}
+          </span>
+          {updatedLabel && (
+            <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+              Updated {updatedLabel}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
+        <a
+          href={`/dashboard/estimates/${estimate.id}`}
+          className="btn-primary"
+          style={{ fontSize: 12 }}
+        >
+          View Estimate
+        </a>
+        <a
+          href={`/dashboard/estimates/${estimate.id}/present`}
+          className="btn-ghost"
+          style={{ fontSize: 12 }}
+        >
+          Present to Customer ↗
+        </a>
+      </div>
     </div>
   )
 }
