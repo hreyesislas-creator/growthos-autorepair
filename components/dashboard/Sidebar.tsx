@@ -13,6 +13,7 @@ const NAV = [
   { href: '/dashboard/customers',     icon: '👥', key: 'nav_customers'      },
   { href: '/dashboard/vehicles',      icon: '🚗', key: 'nav_vehicles'       },
   { href: '/dashboard/inspections',   icon: '🔍', key: 'nav_inspections'    },
+  { href: '/dashboard/estimates',     icon: '📋', key: 'nav_estimates'      },
   { href: '/dashboard/communications',icon: '💬', key: 'nav_communications' },
 ] as const
 

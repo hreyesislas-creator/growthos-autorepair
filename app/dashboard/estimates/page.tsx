@@ -160,13 +160,23 @@ export default async function EstimatesPage() {
                         {format(new Date(est.updated_at), 'MMM d, yyyy')}
                       </td>
                       <td>
-                        <Link
-                          href={`/dashboard/estimates/${est.id}`}
-                          className="btn-ghost"
-                          style={{ padding: '3px 10px', fontSize: '12px' }}
-                        >
-                          View
-                        </Link>
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          <Link
+                            href={`/dashboard/estimates/${est.id}`}
+                            className="btn-ghost"
+                            style={{ padding: '3px 10px', fontSize: '12px' }}
+                          >
+                            View
+                          </Link>
+                          <Link
+                            href={`/dashboard/estimates/${est.id}/present`}
+                            className="btn-ghost"
+                            style={{ padding: '3px 10px', fontSize: '12px', color: 'var(--text-3)' }}
+                            title="Open customer presentation view"
+                          >
+                            Present ↗
+                          </Link>
+                        </div>
                       </td>
                     </tr>
                   )
