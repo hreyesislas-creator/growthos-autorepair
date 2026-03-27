@@ -627,11 +627,17 @@ export async function createEstimateFromInspection(input: {
   console.log('[createEstimateFromInspection] estimate ready', { estimateId })
 
   // ── Step 2: Fetch ALL findings for this inspection fresh from DB ─────────
-  // Include estimated_price and recommendation_type to pre-fill pricing + category.
+  // Include estimated_price, recommendation_type, inspection_item_id to pre-fill pricing + category.
+  // service_recommendations.inspection_id links directly to inspections.id
+
+  console.log('[createEstimateFromInspection] querying recommendations for inspection', {
+    inspection_id: input.inspection_id,
+    tenant_id: tenantId,
+  })
 
   const { data: recs, error: recsErr } = await supabase
     .from('service_recommendations')
-    .select('id, title, description, recommendation_type, estimated_price, inspection_item_id')
+    .select('id, title, description, recommendation_type, estimated_price, inspection_item_id, item_name, priority, status')
     .eq('tenant_id', tenantId)
     .eq('inspection_id', input.inspection_id)
 
@@ -643,6 +649,8 @@ export async function createEstimateFromInspection(input: {
 
   console.log('[createEstimateFromInspection] recommendations fetched', {
     count: recs?.length ?? 0,
+    inspection_id: input.inspection_id,
+    recommendations: recs?.map(r => ({ id: r.id, title: r.title, item_name: r.item_name })),
   })
 
   if (!recs || recs.length === 0) {
@@ -696,6 +704,7 @@ export async function createEstimateFromInspection(input: {
         line_total:                isLabor ? laborTotal : unitPrice,
         display_order:             idx,
         needs_review:              true,
+        created_at:                now,
         updated_at:                now,
       }
     })
@@ -704,21 +713,31 @@ export async function createEstimateFromInspection(input: {
     total:      recs.length,
     newToImport: rows.length,
     alreadyLinked: alreadyLinked.size,
+    estimateId,
   })
 
   if (rows.length === 0) {
     // All already imported — nothing to do
+    console.log('[createEstimateFromInspection] no new findings to import (all already linked)')
     return { data: { estimateId } }
   }
 
   // ── Step 4: Insert ────────────────────────────────────────────────────────
+  // Log exact payload shape for diagnosis
+  console.log('[createEstimateFromInspection] insert payload sample', {
+    firstRow: rows[0],
+    rowCount: rows.length,
+    allRowIds: rows.map(r => r.service_recommendation_id),
+  })
 
-  const { error: insertErr } = await supabase
+  const { data: insertedData, error: insertErr } = await supabase
     .from('estimate_items')
     .insert(rows)
+    .select('id, service_recommendation_id, estimate_id, title')
 
   if (insertErr) {
     console.error('[createEstimateFromInspection] insert findings failed:', insertErr.message)
+    console.error('[createEstimateFromInspection] insert error details:', insertErr)
     // Return error so the caller shows the advisor a clear message instead of
     // silently opening a blank estimate. The advisor can retry rather than
     // wondering why the items are missing.
@@ -726,7 +745,8 @@ export async function createEstimateFromInspection(input: {
   }
 
   console.log('[createEstimateFromInspection] findings imported successfully', {
-    count: rows.length,
+    count: insertedData?.length ?? 0,
+    insertedIds: insertedData?.map(r => r.id),
   })
 
   // ── Step 5: Recalculate totals ────────────────────────────────────────────

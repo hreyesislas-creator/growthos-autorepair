@@ -14,6 +14,7 @@ const NAV = [
   { href: '/dashboard/vehicles',      icon: '🚗', key: 'nav_vehicles'       },
   { href: '/dashboard/inspections',   icon: '🔍', key: 'nav_inspections'    },
   { href: '/dashboard/estimates',     icon: '📋', key: 'nav_estimates'      },
+  { href: '/dashboard/work-orders',   icon: '🔧', key: 'nav_work_orders'    },
   { href: '/dashboard/communications',icon: '💬', key: 'nav_communications' },
 ] as const
 

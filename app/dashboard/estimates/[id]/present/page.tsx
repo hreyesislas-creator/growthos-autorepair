@@ -3,6 +3,7 @@ import { getDashboardTenant } from '@/lib/tenant'
 import {
   getEstimateWithItems,
   getTenantPricingConfig,
+  getEstimateItemDecisions,
 } from '@/lib/queries'
 import { createClient } from '@/lib/supabase/server'
 import Topbar from '@/components/dashboard/Topbar'
@@ -20,9 +21,10 @@ export default async function EstimatePresentPage({
 
   const tenantId = ctx.tenant.id
 
-  const [estimate, pricingConfig] = await Promise.all([
+  const [estimate, pricingConfig, initialDecisions] = await Promise.all([
     getEstimateWithItems(tenantId, params.id),
     getTenantPricingConfig(tenantId),
+    getEstimateItemDecisions(tenantId, params.id),
   ])
 
   if (!estimate) return notFound()
@@ -72,10 +74,12 @@ export default async function EstimatePresentPage({
       />
       <PresentationView
         estimate={estimate}
+        estimateId={params.id}
         customerName={customerName}
         vehicleLabel={vehicleLabel}
         shopName={ctx.tenant.name}
         customerPhone={customerPhone}
+        initialDecisions={initialDecisions}
       />
     </>
   )

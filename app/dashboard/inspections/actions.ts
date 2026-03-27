@@ -4,6 +4,11 @@ import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { getDashboardTenant } from '@/lib/tenant'
 import type { ServiceRecommendation } from '@/lib/types'
 
+// ── Archive result shape (shared by all three archive actions) ────────────────
+// null  = success
+// { error: string } = blocked or server failure — caller shows message in modal
+export type ArchiveResult = { error: string } | null
+
 // ── Create inspection ─────────────────────────────────────────────────────────
 
 export async function createInspection(
@@ -39,6 +44,18 @@ export async function createInspection(
 /**
  * Marks an inspection as completed and stamps completed_at.
  * The checklist becomes read-only in the UI after this.
+ *
+ * CRITICAL: Also generates service_recommendations for all Critical/Warning items.
+ * This is the entry point for converting inspection findings into repair recommendations
+ * that will later be imported into estimates.
+ *
+ * Flow:
+ *   1. Mark inspection as completed
+ *   2. Fetch all inspection_items for this inspection
+ *   3. Filter for Critical (urgent) and Warning (attention) items
+ *   4. Fetch inspection header for customer_id, vehicle_id
+ *   5. Create service_recommendations for each flagged item
+ *   6. If any inserts fail, log but don't block completion
  */
 export async function completeInspection(
   inspectionId: string,
@@ -47,19 +64,129 @@ export async function completeInspection(
   if (!ctx) return { error: 'Not authorized' }
 
   const supabase = await createClient()
+  const tenantId = ctx.tenant.id
 
-  const { error } = await supabase
+  console.log('[completeInspection] starting', { inspectionId, tenantId })
+
+  // ── Step 1: Mark inspection as completed ──────────────────────────────────
+  const now = new Date().toISOString()
+  const { error: completeErr } = await supabase
     .from('inspections')
     .update({
       status:       'completed',
-      completed_at: new Date().toISOString(),
+      completed_at: now,
     })
-    .eq('tenant_id', ctx.tenant.id)
+    .eq('tenant_id', tenantId)
     .eq('id', inspectionId)
 
-  if (error) {
-    console.error('[completeInspection]', error.message)
-    return { error: error.message }
+  if (completeErr) {
+    console.error('[completeInspection] mark completed failed:', completeErr.message)
+    return { error: completeErr.message }
+  }
+
+  console.log('[completeInspection] marked as completed')
+
+  // ── Step 2: Fetch inspection header for context ──────────────────────────
+  const { data: inspection, error: inspErr } = await supabase
+    .from('inspections')
+    .select('id, tenant_id, customer_id, vehicle_id')
+    .eq('id', inspectionId)
+    .single()
+
+  if (inspErr || !inspection) {
+    console.error('[completeInspection] fetch inspection failed:', inspErr?.message)
+    // Don't fail completion — just skip recommendations
+    return null
+  }
+
+  // ── Step 3: Fetch all inspection_items for this inspection ────────────────
+  const { data: items, error: itemsErr } = await supabase
+    .from('inspection_items')
+    .select('id, template_item_id, status, notes')
+    .eq('inspection_id', inspectionId)
+
+  if (itemsErr) {
+    console.error('[completeInspection] fetch inspection_items failed:', itemsErr.message)
+    // Don't fail completion — just skip recommendations
+    return null
+  }
+
+  const allItems = items ?? []
+  console.log('[completeInspection] inspection_items fetched', { count: allItems.length })
+
+  // ── Step 4: Filter for Critical (urgent) and Warning (attention) items ────
+  // DB values: 'pass' | 'attention' | 'urgent' | 'not_checked'
+  // We create recommendations for: 'attention' (Warning) and 'urgent' (Critical)
+  const flaggedItems = allItems.filter(
+    item => item.status === 'attention' || item.status === 'urgent'
+  )
+
+  console.log('[completeInspection] flagged items found', {
+    critical: allItems.filter(i => i.status === 'urgent').length,
+    warning:  allItems.filter(i => i.status === 'attention').length,
+    total: flaggedItems.length,
+  })
+
+  if (flaggedItems.length === 0) {
+    console.log('[completeInspection] no flagged items, skipping recommendation creation')
+    return null
+  }
+
+  // ── Step 5: Build service_recommendations rows ───────────────────────────
+  // Fetch template items to get labels/names for recommendation titles
+  const { data: templateItems, error: tplErr } = await supabase
+    .from('inspection_template_items')
+    .select('id, item_name, label, section_name')
+
+  const templateMap = new Map<string, any>()
+  if (!tplErr && templateItems) {
+    for (const tpl of templateItems) {
+      templateMap.set(tpl.id, tpl)
+    }
+  }
+
+  const recommendations = flaggedItems.map(item => {
+    const tpl = templateMap.get(item.template_item_id ?? '')
+    const itemName = tpl?.item_name || tpl?.label || `Item ${item.id}`
+
+    return {
+      tenant_id:        tenantId,
+      inspection_id:    inspectionId,
+      inspection_item_id: item.id,
+      customer_id:      inspection.customer_id ?? null,
+      vehicle_id:       inspection.vehicle_id ?? null,
+      title:            itemName,  // Use template label as title
+      description:      item.notes ?? null,  // Use technician notes as description
+      recommendation_type: 'service',
+      status:           'pending',
+      priority:         item.status === 'urgent' ? 'high' : 'medium',  // urgent → high, attention → medium
+      created_at:       now,
+      updated_at:       now,
+    }
+  })
+
+  console.log('[completeInspection] recommendation rows built', {
+    count: recommendations.length,
+    sample: recommendations[0],
+  })
+
+  // ── Step 6: Insert service_recommendations ───────────────────────────────
+  if (recommendations.length > 0) {
+    const { error: recErr, data: recData } = await supabase
+      .from('service_recommendations')
+      .insert(recommendations)
+      .select('id, inspection_item_id, title')
+
+    if (recErr) {
+      console.error('[completeInspection] create recommendations failed:', recErr.message)
+      // Non-fatal — inspection is already marked completed
+      // Advisor can manually create recommendations if needed
+    } else {
+      console.log('[completeInspection] recommendations created successfully', {
+        count: recData?.length ?? 0,
+        ids: recData?.map(r => r.id) ?? [],
+      })
+    }
   }
 
   return null
@@ -68,6 +195,10 @@ export async function completeInspection(
 /**
  * Re-opens a completed inspection back to in_progress.
  * Clears completed_at so the checklist becomes editable again.
+ *
+ * When reopening, we also archive (soft-delete) the service_recommendations
+ * that were auto-generated on completion, so they can be regenerated when
+ * the inspection is completed again.
  */
 export async function reopenInspection(
   inspectionId: string,
@@ -76,19 +207,69 @@ export async function reopenInspection(
   if (!ctx) return { error: 'Not authorized' }
 
   const supabase = await createClient()
+  const tenantId = ctx.tenant.id
 
-  const { error } = await supabase
+  console.log('[reopenInspection] starting', { inspectionId, tenantId })
+
+  // ── Step 1: Mark inspection as in_progress ───────────────────────────────
+  const { error: reopenErr } = await supabase
     .from('inspections')
     .update({
       status:       'in_progress',
       completed_at: null,
     })
-    .eq('tenant_id', ctx.tenant.id)
+    .eq('tenant_id', tenantId)
     .eq('id', inspectionId)
 
-  if (error) {
-    console.error('[reopenInspection]', error.message)
-    return { error: error.message }
+  if (reopenErr) {
+    console.error('[reopenInspection] reopen failed:', reopenErr.message)
+    return { error: reopenErr.message }
+  }
+
+  console.log('[reopenInspection] marked as in_progress')
+
+  // ── Step 2: Delete recommendations that were auto-generated ────────────────
+  // This allows them to be regenerated when the inspection is completed again.
+  // We only delete recommendations that have NO linked estimate_items yet,
+  // to avoid breaking estimates that may have already imported them.
+  const { data: recsToDel, error: fetchErr } = await supabase
+    .from('service_recommendations')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .eq('inspection_id', inspectionId)
+
+  if (fetchErr) {
+    console.error('[reopenInspection] fetch recommendations failed:', fetchErr.message)
+    // Non-fatal — just log and continue
+  } else if (recsToDel && recsToDel.length > 0) {
+    // Check which recommendations have NO estimate_items linked to them yet
+    const { data: linkedRecs, error: linkErr } = await supabase
+      .from('estimate_items')
+      .select('service_recommendation_id')
+      .in('service_recommendation_id', recsToDel.map(r => r.id))
+      .eq('tenant_id', tenantId)
+
+    const linkedIds = new Set((linkedRecs ?? []).map(r => r.service_recommendation_id))
+    const unlinkedIds = recsToDel.map(r => r.id).filter(id => !linkedIds.has(id))
+
+    if (unlinkedIds.length > 0) {
+      const { error: delErr } = await supabase
+        .from('service_recommendations')
+        .delete()
+        .eq('tenant_id', tenantId)
+        .in('id', unlinkedIds)
+
+      if (delErr) {
+        console.error('[reopenInspection] delete recommendations failed:', delErr.message)
+      } else {
+        console.log('[reopenInspection] recommendations deleted', {
+          deleted: unlinkedIds.length,
+          protected: linkedIds.size,  // Already imported into estimates, can't delete
+        })
+      }
+    } else {
+      console.log('[reopenInspection] all recommendations already linked to estimates, skipping delete')
+    }
   }
 
   return null
@@ -679,6 +860,90 @@ export async function generateRecommendations(
       console.error('[generateRecommendations] delete recs:', deleteError.message)
       // Non-fatal
     }
+  }
+
+  return null
+}
+
+// ── archiveInspection ─────────────────────────────────────────────────────────
+
+/**
+ * Soft-archives an inspection record.
+ *
+ * Blocker: if the inspection has at least one linked active (non-archived)
+ * estimate, the archive is blocked. The estimate must be voided first.
+ *
+ * Validation: if reason === 'other', note is required.
+ *
+ * Returns null on success, { error } on any blocker or failure.
+ */
+export async function archiveInspection(
+  inspectionId: string,
+  reason:       string,
+  note?:        string,
+): Promise<ArchiveResult> {
+  const ctx = await getDashboardTenant()
+  if (!ctx) return { error: 'Not authenticated' }
+
+  // ── Validate reason / note constraint ───────────────────────────────────
+  if (!reason?.trim()) {
+    return { error: 'A reason is required to archive an inspection.' }
+  }
+  if (reason === 'other' && !note?.trim()) {
+    return { error: 'A note is required when the reason is "Other".' }
+  }
+
+  const tenantId   = ctx.tenant.id
+  const supabase   = await createClient()
+  const adminClient = createAdminClient()
+
+  // ── Resolve current auth user for audit column ───────────────────────────
+  const { data: { user } } = await supabase.auth.getUser()
+  const archivedBy = user?.id ?? null
+
+  // ── Blocker: check for linked active estimates ───────────────────────────
+  // An active estimate depends on this inspection. The estimate must be
+  // voided (archived) before the inspection can be archived.
+  const { data: linkedEstimate, error: linkErr } = await adminClient
+    .from('estimates')
+    .select('id, estimate_number')
+    .eq('tenant_id', tenantId)
+    .eq('inspection_id', inspectionId)
+    .eq('is_archived', false)
+    .limit(1)
+    .maybeSingle()
+
+  if (linkErr) {
+    console.error('[archiveInspection] blocker check:', linkErr.message)
+    return { error: `Could not verify linked estimates: ${linkErr.message}` }
+  }
+
+  if (linkedEstimate) {
+    const label = linkedEstimate.estimate_number || linkedEstimate.id
+    return {
+      error: `Cannot archive: this inspection is linked to active estimate ${label}. Void the estimate first.`,
+    }
+  }
+
+  // ── Archive the inspection ───────────────────────────────────────────────
+  const now = new Date().toISOString()
+
+  const { error: updateErr } = await adminClient
+    .from('inspections')
+    .update({
+      is_archived:    true,
+      archived_at:    now,
+      archived_by:    archivedBy,
+      archive_reason: reason.trim(),
+      archive_note:   note?.trim() || null,
+      updated_at:     now,
+    })
+    .eq('id', inspectionId)
+    .eq('tenant_id', tenantId)   // tenant isolation: silently no-ops if mismatch
+
+  if (updateErr) {
+    console.error('[archiveInspection] update:', updateErr.message)
+    return { error: `Failed to archive inspection: ${updateErr.message}` }
   }
 
   return null

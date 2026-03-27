@@ -13,10 +13,13 @@ import {
   completeInspection,
   reopenInspection,
   generateRecommendations,
+  archiveInspection,
 } from '../actions'
 import {
   createEstimateFromInspection,
 } from '@/app/dashboard/estimates/actions'
+import ArchiveConfirmModal from '@/components/dashboard/ArchiveConfirmModal'
+import type { ReasonOption } from '@/components/dashboard/ArchiveConfirmModal'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -80,6 +83,15 @@ const STATUS_OPTIONS: {
   { value: 'warning',  label: 'Warning',  activeStyle: { background: '#d97706', color: '#fff', borderColor: '#d97706' } },
   { value: 'critical', label: 'Critical', activeStyle: { background: '#dc2626', color: '#fff', borderColor: '#dc2626' } },
   { value: 'nc',       label: 'N/C',      activeStyle: { background: 'var(--surface-3,#e5e7eb)', color: 'var(--text-3)', borderColor: 'var(--border)' } },
+]
+
+// ── Archive reason options ────────────────────────────────────────────────────
+
+const ARCHIVE_REASONS: ReasonOption[] = [
+  { value: 'duplicate',        label: 'Duplicate inspection'  },
+  { value: 'created_in_error', label: 'Created in error'      },
+  { value: 'customer_no_show', label: 'Customer no-show'      },
+  { value: 'other',            label: 'Other (see note)'      },
 ]
 
 const STATUS_SUMMARY_COLOR: Record<ItemResult, string> = {
@@ -283,6 +295,13 @@ export default function InspectionChecklist({
   const [saveError,        setSaveError]        = useState<string | null>(null)
   const [genError,         setGenError]         = useState<string | null>(null)
 
+  // ── Archive modal state ─────────────────────────────────────────────────────
+  const [archiveOpen,    setArchiveOpen]    = useState(false)
+  const [archiveSubmit,  setArchiveSubmit]  = useState(false)
+  const [archiveError,   setArchiveError]   = useState<string | null>(null)
+  const [archiveTier,    setArchiveTier]    = useState<'standard' | 'strong_warning' | 'hard_block'>('standard')
+  const [archiveWarning, setArchiveWarning] = useState('')
+
 
   // ── Completion state (local) ────────────────────────────────────────────────
   //
@@ -406,6 +425,38 @@ export default function InspectionChecklist({
 
     setIsCompletedLocal(false)
     router.refresh()
+  }
+
+  // ── Archive handlers ───────────────────────────────────────────────────────
+
+  function openArchiveModal() {
+    setArchiveError(null)
+    // Inspections do not have an "approved" equivalent — always standard tier.
+    // The linked-estimate blocker is returned by the server action as an error.
+    setArchiveTier('standard')
+    setArchiveWarning(
+      'This inspection will be removed from your active lists. ' +
+      'It can still be viewed by an admin. ' +
+      'Note: if a linked estimate exists the archive will be blocked.',
+    )
+    setArchiveOpen(true)
+  }
+
+  async function handleArchiveConfirm(reason: string, note: string) {
+    setArchiveSubmit(true)
+    setArchiveError(null)
+
+    const result = await archiveInspection(inspection.id, reason, note || undefined)
+
+    if (result === null) {
+      // Success — close modal and navigate away
+      setArchiveOpen(false)
+      router.push('/dashboard/inspections')
+    } else {
+      // Server returned a blocker or error — show inline in modal
+      setArchiveError(result.error)
+      setArchiveSubmit(false)
+    }
   }
 
   // ── Generate recommendations handler ──────────────────────────────────────
@@ -988,6 +1039,15 @@ export default function InspectionChecklist({
             <a href="/dashboard/inspections" className="btn-ghost" style={{ fontSize: 12 }}>
               ← Back
             </a>
+            {/* Archive — always available, destructive */}
+            <button
+              type="button"
+              className="btn-danger"
+              style={{ fontSize: 12 }}
+              onClick={openArchiveModal}
+            >
+              Archive
+            </button>
           </>
         ) : (
           /* ── Editable mode ──────────────────────────────────────────────── */
@@ -1048,9 +1108,33 @@ export default function InspectionChecklist({
             <a href="/dashboard/inspections" className="btn-ghost" style={{ fontSize: 12 }}>
               Cancel
             </a>
+            {/* Archive — always available, destructive */}
+            <button
+              type="button"
+              className="btn-danger"
+              style={{ fontSize: 12 }}
+              onClick={openArchiveModal}
+            >
+              Archive
+            </button>
           </>
         )}
       </div>
+
+      {/* ── Archive confirmation modal ─────────────────────────────────────── */}
+      <ArchiveConfirmModal
+        isOpen={archiveOpen}
+        onClose={() => { setArchiveOpen(false); setArchiveError(null) }}
+        entityType="inspection"
+        entityLabel={inspection.id.slice(0, 8) + '…'}
+        actionLabel="Archive"
+        warningTier={archiveTier}
+        warningText={archiveWarning}
+        reasonOptions={ARCHIVE_REASONS}
+        onConfirm={handleArchiveConfirm}
+        isSubmitting={archiveSubmit}
+        errorMessage={archiveError}
+      />
 
     </div>
   )

@@ -5,23 +5,26 @@ import Link from 'next/link'
 import type { EstimateListRow } from './page'
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Status mapping
+// Display status styles
 //
-// DB values (draft | sent | approved | declined) are NOT changed.
-// The map translates them to business-friendly labels for this UI only.
-// All other code (editor, presentation view, actions) continues using the
-// original DB values unchanged.
+// Keys are the `displayStatus` values derived by deriveDisplayStatus() in
+// page.tsx — NOT raw DB status values.
+//
+// The status filter dropdown (and its filter logic) still uses the raw DB
+// `status` field so existing filter behaviour is unchanged.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const STATUS_MAP: Record<string, { label: string; bg: string; color: string }> = {
-  draft:    { label: 'Pending',   bg: '#e2e8f0', color: '#1e293b' },
-  sent:     { label: 'Presented', bg: '#dbeafe', color: '#1e40af' },
-  approved: { label: 'Approved',  bg: '#dcfce7', color: '#14532d' },
-  declined: { label: 'Rejected',  bg: '#fed7aa', color: '#7c2d12' },
+const DISPLAY_STATUS_STYLES: Record<string, { bg: string; color: string }> = {
+  'Pending':             { bg: '#e2e8f0', color: '#1e293b' },
+  'Presented':           { bg: '#dbeafe', color: '#1e40af' },
+  'Customer Responding': { bg: '#fef9c3', color: '#854d0e' },
+  'Partially Approved':  { bg: '#fed7aa', color: '#7c2d12' },
+  'Approved':            { bg: '#dcfce7', color: '#14532d' },
+  'Declined':            { bg: '#fee2e2', color: '#991b1b' },
 }
 
-function statusInfo(status: string) {
-  return STATUS_MAP[status] ?? { label: status, bg: '#f1f5f9', color: '#475569' }
+function displayStatusStyle(displayStatus: string): { bg: string; color: string } {
+  return DISPLAY_STATUS_STYLES[displayStatus] ?? { bg: '#f1f5f9', color: '#475569' }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -152,7 +155,7 @@ export default function EstimatesList({ estimates }: Props) {
             </thead>
             <tbody>
               {filtered.map(est => {
-                const s = statusInfo(est.status)
+                const s = displayStatusStyle(est.displayStatus)
                 const modeLabel = CREATION_MODE_LABELS[est.creation_mode]
 
                 const updatedLabel = new Date(est.updated_at).toLocaleDateString('en-US', {
@@ -183,7 +186,7 @@ export default function EstimatesList({ estimates }: Props) {
                       </div>
                     </td>
 
-                    {/* Status badge — business-friendly label, high-contrast */}
+                    {/* Status badge — derived display label, high-contrast */}
                     <td>
                       <span style={{
                         display: 'inline-block',
@@ -192,7 +195,7 @@ export default function EstimatesList({ estimates }: Props) {
                         background: s.bg, color: s.color,
                         whiteSpace: 'nowrap',
                       }}>
-                        {s.label}
+                        {est.displayStatus}
                       </span>
                     </td>
 

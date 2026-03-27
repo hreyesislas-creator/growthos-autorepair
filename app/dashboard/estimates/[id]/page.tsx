@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation'
 import { getDashboardTenant } from '@/lib/tenant'
 import {
   getEstimateWithItems,
+  getEstimateItemDecisions,
   getServiceJobs,
   getTenantPricingConfig,
 } from '@/lib/queries'
@@ -21,11 +22,23 @@ export default async function EstimateDetailPage({
 
   const tenantId = ctx.tenant.id
 
-  const [estimate, serviceJobs, pricingConfig] = await Promise.all([
+  console.log('[EstimateDetailPage] loading estimate', {
+    estimateId: params.id,
+    tenantId,
+  })
+
+  const [estimate, serviceJobs, pricingConfig, initialDecisions] = await Promise.all([
     getEstimateWithItems(tenantId, params.id),
     getServiceJobs(),
     getTenantPricingConfig(tenantId),
+    getEstimateItemDecisions(tenantId, params.id),
   ])
+
+  console.log('[EstimateDetailPage] estimate loaded', {
+    estimateId: estimate?.id,
+    itemCount: estimate?.items?.length ?? 0,
+    items: estimate?.items?.map(i => ({ id: i.id, title: i.title })) ?? [],
+  })
 
   if (!estimate) return notFound()
 
@@ -79,6 +92,7 @@ export default async function EstimateDetailPage({
         inspectionId={estimate.inspection_id}
         serviceJobs={serviceJobs}
         defaultLaborRate={defaultLaborRate}
+        initialDecisions={initialDecisions}
       />
     </>
   )

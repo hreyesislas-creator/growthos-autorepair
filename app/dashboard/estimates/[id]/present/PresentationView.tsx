@@ -1,8 +1,15 @@
 'use client'
 
-import { useState, useMemo, useEffect, useCallback } from 'react'
-import type { EstimateWithItems, EstimateItem, EstimateItemPart } from '@/lib/types'
-import { sendEstimateByText } from './actions'
+import { useState, useMemo, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
+import type { EstimateWithItems, EstimateItem, EstimateItemPart, EstimateItemDecision } from '@/lib/types'
+import {
+  sendEstimateByText,
+  approveEstimateItem,
+  declineEstimateItem,
+  undecideEstimateItem,
+  createWorkOrderFromApprovedItems,
+} from './actions'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -66,11 +73,13 @@ function sumJobSubtotals(items: EstimateItem[]): number {
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface Props {
-  estimate:       EstimateWithItems
-  customerName:   string | null
-  vehicleLabel:   string | null
-  shopName:       string
-  customerPhone:  string | null   // used by Send by Text — null if no phone on file
+  estimate:          EstimateWithItems
+  estimateId:        string          // used for Edit Estimate link + server actions
+  customerName:      string | null
+  vehicleLabel:      string | null
+  shopName:          string
+  customerPhone:     string | null   // used by Send by Text — null if no phone on file
+  initialDecisions:  EstimateItemDecision[]  // pre-loaded from DB by page.tsx
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -79,25 +88,113 @@ interface Props {
 
 export default function PresentationView({
   estimate,
+  estimateId,
   customerName,
   vehicleLabel,
   shopName,
   customerPhone,
+  initialDecisions,
 }: Props) {
-  const [decisions, setDecisions] = useState<DecisionMap>({})
+  // ── Decisions — initialised from DB, then managed locally ─────────────────
+  const [decisions, setDecisions] = useState<DecisionMap>(() => {
+    const map: DecisionMap = {}
+    for (const d of initialDecisions) {
+      map[d.estimate_item_id] = d.decision   // 'approved' | 'declined'
+    }
+    return map
+  })
 
-  const approve = (id: string) =>
+  // itemIds currently being saved to the server (optimistic-update guard)
+  const [saving,     setSaving]     = useState<Set<string>>(new Set())
+  // per-item save error messages (cleared on next attempt for that item)
+  const [saveErrors, setSaveErrors] = useState<Record<string, string>>({})
+
+  // ── Work Order creation state ──────────────────────────────────────────────
+  const [creatingWorkOrder, setCreatingWorkOrder] = useState(false)
+  const [woError, setWoError] = useState<string | null>(null)
+
+  // ── Optimistic-update helpers ──────────────────────────────────────────────
+
+  const approve = useCallback(async (id: string) => {
+    // Snapshot before the optimistic update so we can restore on failure.
+    // If the advisor was on 'declined' and flipped to 'approved', a server
+    // error should roll back to 'declined', not to pending.
+    const previous = decisions[id] ?? null
+
     setDecisions(prev => ({ ...prev, [id]: 'approved' }))
+    setSaving(prev => new Set(prev).add(id))
+    setSaveErrors(prev => { const n = { ...prev }; delete n[id]; return n })
 
-  const decline = (id: string) =>
+    const err = await approveEstimateItem(estimateId, id)
+
+    setSaving(prev => { const n = new Set(prev); n.delete(id); return n })
+    if (err) {
+      // Restore to previous state (null = pending, 'declined' = was declined)
+      setDecisions(prev => {
+        const n = { ...prev }
+        if (previous === null) delete n[id]
+        else n[id] = previous
+        return n
+      })
+      setSaveErrors(prev => ({ ...prev, [id]: err.error }))
+    }
+  }, [estimateId, decisions])
+
+  const decline = useCallback(async (id: string) => {
+    // Same snapshot-and-restore pattern as approve.
+    const previous = decisions[id] ?? null
+
     setDecisions(prev => ({ ...prev, [id]: 'declined' }))
+    setSaving(prev => new Set(prev).add(id))
+    setSaveErrors(prev => { const n = { ...prev }; delete n[id]; return n })
 
-  const undecide = (id: string) =>
-    setDecisions(prev => {
-      const next = { ...prev }
-      delete next[id]
-      return next
-    })
+    const err = await declineEstimateItem(estimateId, id)
+
+    setSaving(prev => { const n = new Set(prev); n.delete(id); return n })
+    if (err) {
+      setDecisions(prev => {
+        const n = { ...prev }
+        if (previous === null) delete n[id]
+        else n[id] = previous
+        return n
+      })
+      setSaveErrors(prev => ({ ...prev, [id]: err.error }))
+    }
+  }, [estimateId, decisions])
+
+  const undecide = useCallback(async (id: string) => {
+    const previous = decisions[id] ?? null   // snapshot — should be 'approved' or 'declined'
+
+    setDecisions(prev => { const n = { ...prev }; delete n[id]; return n })
+    setSaving(prev => new Set(prev).add(id))
+    setSaveErrors(prev => { const n = { ...prev }; delete n[id]; return n })
+
+    const err = await undecideEstimateItem(estimateId, id)
+
+    setSaving(prev => { const n = new Set(prev); n.delete(id); return n })
+    if (err) {
+      // Restore to previous decision (approved or declined)
+      if (previous !== null) setDecisions(prev => ({ ...prev, [id]: previous }))
+      setSaveErrors(prev => ({ ...prev, [id]: err.error }))
+    }
+  }, [estimateId, decisions])
+
+  // ── Create Work Order handler ──────────────────────────────────────────────
+  const handleCreateWorkOrder = useCallback(async () => {
+    setCreatingWorkOrder(true)
+    setWoError(null)
+
+    const result = await createWorkOrderFromApprovedItems(estimateId)
+
+    if ('error' in result) {
+      setWoError(result.error)
+      setCreatingWorkOrder(false)
+      return
+    }
+
+    // Success — redirect to the new work order page
+    router.push(`/dashboard/work-orders/${result.data.workOrderId}`)
+  }, [estimateId, router])
 
   // ── Decision buckets ────────────────────────────────────────────────────────
   const approvedItems  = useMemo(() => estimate.items.filter(i => decisions[i.id] === 'approved'),  [estimate.items, decisions])
@@ -149,24 +246,53 @@ export default function PresentationView({
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
           <div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)', marginBottom: 2 }}>
+            <div style={{ fontSize: 20, fontWeight: 700, color: '#0f172a', marginBottom: 2 }}>
               {shopName}
             </div>
-            <div style={{ fontSize: 13, color: 'var(--text-3)' }}>
+            <div style={{ fontSize: 13, color: '#4B5563' }}>
               Service Estimate · {estimate.estimate_number}
             </div>
           </div>
           <div style={{ textAlign: 'right' }}>
             {customerName && (
-              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>
                 {customerName}
               </div>
             )}
             {vehicleLabel && (
-              <div style={{ fontSize: 13, color: 'var(--text-3)' }}>{vehicleLabel}</div>
+              <div style={{ fontSize: 13, color: '#4B5563' }}>{vehicleLabel}</div>
             )}
-            <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{estimateDate}</div>
+            <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>{estimateDate}</div>
           </div>
+        </div>
+
+        {/* ── Advisor action buttons ─────────────────────────────────────── */}
+        <div style={{
+          marginTop: 14,
+          display: 'flex',
+          gap: 8,
+          justifyContent: 'flex-end',
+          flexWrap: 'wrap',
+        }}>
+          <a
+            href={`/dashboard/estimates/${estimateId}`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              fontSize: 13,
+              fontWeight: 600,
+              padding: '7px 14px',
+              borderRadius: 7,
+              border: '1px solid #cbd5e1',
+              background: '#fff',
+              color: '#1e293b',
+              textDecoration: 'none',
+              transition: 'background 0.1s',
+            }}
+          >
+            ✏️ Edit Estimate
+          </a>
         </div>
 
         {estimate.notes && (
@@ -176,8 +302,8 @@ export default function PresentationView({
             background: 'var(--surface-2,#f8fafc)',
             borderRadius: 6,
             fontSize: 13,
-            color: 'var(--text-2)',
-            borderLeft: '3px solid var(--border-2)',
+            color: '#374151',
+            borderLeft: '3px solid #D1D5DB',
           }}>
             {estimate.notes}
           </div>
@@ -222,6 +348,8 @@ export default function PresentationView({
             onApprove={() => approve(item.id)}
             onDecline={() => decline(item.id)}
             onUndecide={() => undecide(item.id)}
+            isSaving={saving.has(item.id)}
+            saveError={saveErrors[item.id] ?? null}
           />
         ))}
       </div>
@@ -252,34 +380,63 @@ export default function PresentationView({
         alignItems: 'center',
         gap: 12,
         flexWrap: 'wrap',
+        flexDirection: 'column',
       }}>
-        {!allDecided && (
-          <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
-            {remainingItems.length} job{remainingItems.length !== 1 ? 's' : ''} still need a decision
-          </span>
+        {woError && (
+          <div style={{
+            fontSize: 13,
+            color: '#dc2626',
+            background: '#fef2f2',
+            border: '1px solid #fecaca',
+            padding: '10px 12px',
+            borderRadius: 6,
+            width: '100%',
+            textAlign: 'center',
+          }}>
+            {woError}
+          </div>
         )}
-        <button
-          disabled
-          title="Work Order creation coming soon — approve jobs above first"
-          style={{
-            padding: '10px 22px',
-            borderRadius: 8,
-            border: 'none',
-            background: allDecided && approvedItems.length > 0
-              ? 'var(--accent,#2563eb)'
-              : '#e2e8f0',
-            color: allDecided && approvedItems.length > 0 ? '#fff' : '#94a3b8',
-            fontWeight: 600,
-            fontSize: 14,
-            cursor: 'not-allowed',
-            opacity: allDecided && approvedItems.length > 0 ? 0.85 : 1,
-          }}
-        >
-          Send Approved to Work Order
-          <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, opacity: 0.75 }}>
-            (coming soon)
-          </span>
-        </button>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          justifyContent: 'flex-end',
+          width: '100%',
+          flexWrap: 'wrap',
+        }}>
+          {!allDecided && (
+            <span style={{ fontSize: 12, color: '#64748b' }}>
+              {remainingItems.length} job{remainingItems.length !== 1 ? 's' : ''} still need a decision
+            </span>
+          )}
+          <button
+            disabled={creatingWorkOrder || !allDecided || approvedItems.length === 0}
+            onClick={handleCreateWorkOrder}
+            title={
+              !allDecided
+                ? 'Approve or decline all jobs first'
+                : approvedItems.length === 0
+                  ? 'Approve at least one job'
+                  : 'Create a work order from approved jobs'
+            }
+            style={{
+              padding: '10px 22px',
+              borderRadius: 8,
+              border: 'none',
+              background: allDecided && approvedItems.length > 0
+                ? 'var(--accent,#2563eb)'
+                : '#e2e8f0',
+              color: allDecided && approvedItems.length > 0 ? '#fff' : '#94a3b8',
+              fontWeight: 600,
+              fontSize: 14,
+              cursor: (allDecided && approvedItems.length > 0 && !creatingWorkOrder) ? 'pointer' : 'not-allowed',
+              opacity: allDecided && approvedItems.length > 0 ? 0.85 : 0.6,
+              transition: 'all 0.2s',
+            }}
+          >
+            {creatingWorkOrder ? '⏳ Creating...' : '✓ Send Approved to Work Order'}
+          </button>
+        </div>
       </div>
 
     </div>
@@ -365,13 +522,13 @@ function ShareBar({ estimateId, customerName, customerPhone, shopName }: ShareBa
         flexWrap: 'wrap',
       }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', marginBottom: 2 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 2 }}>
             Customer link
           </div>
           {/* ── Hydration-safe: relative path only — identical on server + client ── */}
           <div style={{
             fontSize: 12,
-            color: 'var(--text-3)',
+            color: '#6B7280',
             fontFamily: 'var(--font-mono)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -390,7 +547,7 @@ function ShareBar({ estimateId, customerName, customerPhone, shopName }: ShareBa
             borderRadius: 7,
             border: '1px solid var(--border-2)',
             background: copyState === 'copied' ? '#f0fdf4' : '#fff',
-            color:  copyState === 'copied' ? '#15803d' : 'var(--text-2)',
+            color:  copyState === 'copied' ? '#15803d' : '#1e293b',
             fontSize: 13,
             fontWeight: 600,
             cursor: 'pointer',
@@ -419,7 +576,7 @@ function ShareBar({ estimateId, customerName, customerPhone, shopName }: ShareBa
               ? '#15803d'
               : textState === 'error' || textState === 'no_phone'
               ? '#dc2626'
-              : 'var(--text-2)',
+              : '#1e293b',
             fontSize: 13,
             fontWeight: 600,
             cursor: textState === 'sending' ? 'wait' : 'pointer',
@@ -472,9 +629,11 @@ interface JobCardProps {
   onApprove:  () => void
   onDecline:  () => void
   onUndecide: () => void
+  isSaving:   boolean
+  saveError:  string | null
 }
 
-function JobCard({ item, decision, onApprove, onDecline, onUndecide }: JobCardProps) {
+function JobCard({ item, decision, onApprove, onDecline, onUndecide, isSaving, saveError }: JobCardProps) {
   const laborCost    = round2((item.labor_hours ?? 0) * (item.labor_rate ?? 0))
   const partsSubtotal = getPartsSubtotal(item)
   const jobSubtotal  = getJobSubtotal(item)
@@ -514,7 +673,7 @@ function JobCard({ item, decision, onApprove, onDecline, onUndecide }: JobCardPr
       }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>
+            <span style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>
               {item.title || 'Repair Job'}
             </span>
             {item.needs_review && (
@@ -527,7 +686,7 @@ function JobCard({ item, decision, onApprove, onDecline, onUndecide }: JobCardPr
             )}
           </div>
           {item.description && (
-            <div style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 3 }}>
+            <div style={{ fontSize: 13, color: '#374151', marginTop: 3 }}>
               {item.description}
             </div>
           )}
@@ -537,21 +696,27 @@ function JobCard({ item, decision, onApprove, onDecline, onUndecide }: JobCardPr
         {decision && (
           <button
             onClick={onUndecide}
-            title="Click to undo decision"
+            disabled={isSaving}
+            title={isSaving ? 'Saving…' : 'Click to undo decision'}
             style={{
               flexShrink: 0,
               padding: '4px 10px',
               borderRadius: 20,
               border: 'none',
-              cursor: 'pointer',
+              cursor: isSaving ? 'wait' : 'pointer',
               fontSize: 12,
               fontWeight: 700,
+              opacity: isSaving ? 0.6 : 1,
               background: decision === 'approved' ? '#dcfce7' : '#fee2e2',
               color:      decision === 'approved' ? '#15803d' : '#dc2626',
             }}
           >
-            {decision === 'approved' ? '✓ Approved' : '✗ Declined'}
-            <span style={{ marginLeft: 4, opacity: 0.5, fontSize: 10 }}>undo</span>
+            {isSaving
+              ? '…'
+              : decision === 'approved' ? '✓ Approved' : '✗ Declined'}
+            {!isSaving && (
+              <span style={{ marginLeft: 4, opacity: 0.5, fontSize: 10 }}>undo</span>
+            )}
           </button>
         )}
       </div>
@@ -567,17 +732,17 @@ function JobCard({ item, decision, onApprove, onDecline, onUndecide }: JobCardPr
           background: 'var(--surface-2,#f8fafc)',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 12, color: 'var(--text-3)' }}>🔧</span>
-            <span style={{ fontSize: 13, color: 'var(--text-2)' }}>
+            <span style={{ fontSize: 12, color: '#64748b' }}>🔧</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
               Labor&nbsp;&nbsp;
-              <span style={{ color: 'var(--text-3)', fontSize: 12 }}>
+              <span style={{ color: '#4B5563', fontSize: 12, fontWeight: 400 }}>
                 {item.labor_hours} hrs @ ${Number(item.labor_rate ?? 0).toFixed(2)}/hr
               </span>
             </span>
           </div>
           <span style={{
-            fontFamily: 'var(--font-mono)', fontWeight: 600,
-            fontSize: 13, color: 'var(--text)',
+            fontFamily: 'var(--font-mono)', fontWeight: 700,
+            fontSize: 13, color: '#111827',
           }}>
             ${laborCost.toFixed(2)}
           </span>
@@ -602,14 +767,14 @@ function JobCard({ item, decision, onApprove, onDecline, onUndecide }: JobCardPr
           ? '#fee2e2'
           : 'var(--surface-2,#f8fafc)',
       }}>
-        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>
           Job Total
         </span>
         <span style={{
           fontFamily: 'var(--font-mono)',
           fontSize: 15,
           fontWeight: 800,
-          color: decision === 'approved' ? '#15803d' : 'var(--text)',
+          color: decision === 'approved' ? '#15803d' : '#111827',
         }}>
           ${jobSubtotal.toFixed(2)}
         </span>
@@ -625,6 +790,7 @@ function JobCard({ item, decision, onApprove, onDecline, onUndecide }: JobCardPr
         }}>
           <button
             onClick={onApprove}
+            disabled={isSaving}
             style={{
               flex: 1,
               padding: '10px 0',
@@ -634,16 +800,18 @@ function JobCard({ item, decision, onApprove, onDecline, onUndecide }: JobCardPr
               color: '#15803d',
               fontWeight: 700,
               fontSize: 14,
-              cursor: 'pointer',
+              cursor: isSaving ? 'wait' : 'pointer',
+              opacity: isSaving ? 0.55 : 1,
               transition: 'background 0.1s',
             }}
-            onMouseEnter={e => (e.currentTarget.style.background = '#f0fdf4')}
+            onMouseEnter={e => { if (!isSaving) e.currentTarget.style.background = '#f0fdf4' }}
             onMouseLeave={e => (e.currentTarget.style.background = '#fff')}
           >
-            ✓ Approve
+            {isSaving ? '…' : '✓ Approve'}
           </button>
           <button
             onClick={onDecline}
+            disabled={isSaving}
             style={{
               flex: 1,
               padding: '10px 0',
@@ -653,14 +821,32 @@ function JobCard({ item, decision, onApprove, onDecline, onUndecide }: JobCardPr
               color: '#dc2626',
               fontWeight: 700,
               fontSize: 14,
-              cursor: 'pointer',
+              cursor: isSaving ? 'wait' : 'pointer',
+              opacity: isSaving ? 0.55 : 1,
               transition: 'background 0.1s',
             }}
-            onMouseEnter={e => (e.currentTarget.style.background = '#fff7f7')}
+            onMouseEnter={e => { if (!isSaving) e.currentTarget.style.background = '#fff7f7' }}
             onMouseLeave={e => (e.currentTarget.style.background = '#fff')}
           >
-            ✗ Decline
+            {isSaving ? '…' : '✗ Decline'}
           </button>
+        </div>
+      )}
+
+      {/* ── Save error ───────────────────────────────────────────────────── */}
+      {saveError && (
+        <div style={{
+          padding: '8px 18px',
+          borderTop: '1px solid var(--border-2)',
+          background: 'var(--surface-2,#f8fafc)',
+          fontSize: 12,
+          color: '#dc2626',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+        }}>
+          <span style={{ flexShrink: 0 }}>⚠</span>
+          <span>Could not save — {saveError}. Try again.</span>
         </div>
       )}
     </div>
@@ -683,7 +869,7 @@ function PartsList({
       borderTop: '1px solid var(--border-2)',
       padding: '8px 18px 2px',
     }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
         Parts &amp; Materials
       </div>
 
@@ -696,9 +882,9 @@ function PartsList({
           gap: 8,
         }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <span style={{ fontSize: 13, color: 'var(--text-2)' }}>{part.name}</span>
+            <span style={{ fontSize: 13, fontWeight: 500, color: '#111827' }}>{part.name}</span>
             <span style={{
-              fontSize: 11, color: 'var(--text-3)',
+              fontSize: 11, color: '#6B7280',
               marginLeft: 6,
             }}>
               ×{part.quantity}
@@ -707,7 +893,8 @@ function PartsList({
           <span style={{
             fontFamily: 'var(--font-mono)',
             fontSize: 13,
-            color: 'var(--text-2)',
+            fontWeight: 600,
+            color: '#111827',
             flexShrink: 0,
           }}>
             ${Number(part.line_total).toFixed(2)}
@@ -724,12 +911,12 @@ function PartsList({
           borderTop: '1px dashed var(--border-2)',
           marginTop: 2,
         }}>
-          <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Parts subtotal</span>
+          <span style={{ fontSize: 12, color: '#374151' }}>Parts subtotal</span>
           <span style={{
             fontFamily: 'var(--font-mono)',
             fontSize: 12,
-            fontWeight: 600,
-            color: 'var(--text-2)',
+            fontWeight: 700,
+            color: '#111827',
           }}>
             ${partsSubtotal.toFixed(2)}
           </span>
@@ -784,7 +971,7 @@ function TotalsSummary({
         borderBottom: '1px solid var(--border-2)',
         fontSize: 12,
         fontWeight: 700,
-        color: 'var(--text-3)',
+        color: '#1e293b',
         textTransform: 'uppercase',
         letterSpacing: '0.06em',
       }}>
@@ -815,7 +1002,7 @@ function TotalsSummary({
           <SummaryRow
             label="Awaiting decision"
             amount={remainingSubtotal}
-            color="var(--text-3)"
+            color="#6B7280"
             bold={false}
           />
         )}
@@ -825,7 +1012,7 @@ function TotalsSummary({
           <SummaryRow
             label={`Tax on approved parts${taxRatePercent ? ` (${taxRatePercent}%)` : ''}`}
             amount={approvedPartsTax}
-            color="var(--text-2)"
+            color="#374151"
             bold={false}
             small
           />
@@ -856,8 +1043,8 @@ function TotalsSummary({
           gap: 4,
         }}>
           <div style={{
-            fontSize: 11, fontWeight: 600,
-            color: 'var(--text-3)',
+            fontSize: 11, fontWeight: 700,
+            color: '#374151',
             textTransform: 'uppercase',
             letterSpacing: '0.05em',
             marginBottom: 2,
@@ -867,7 +1054,7 @@ function TotalsSummary({
           <SummaryRow
             label="Jobs subtotal"
             amount={fullEstimateSubtotal}
-            color="var(--text-2)"
+            color="#374151"
             bold={false}
             small
           />
@@ -875,7 +1062,7 @@ function TotalsSummary({
             <SummaryRow
               label={`Tax${taxRatePercent ? ` (${taxRatePercent}% on parts)` : ''}`}
               amount={fullEstimateTax}
-              color="var(--text-3)"
+              color="#6B7280"
               bold={false}
               small
             />
@@ -883,7 +1070,7 @@ function TotalsSummary({
           <SummaryRow
             label="Estimate total"
             amount={fullEstimateTotal}
-            color="var(--text)"
+            color="#111827"
             bold
           />
         </div>
@@ -922,7 +1109,7 @@ function SummaryRow({
       alignItems: 'center',
       opacity,
     }}>
-      <span style={{ fontSize: size, color: 'var(--text-2)', fontWeight: bold ? 700 : 400 }}>
+      <span style={{ fontSize: size, color: '#374151', fontWeight: bold ? 700 : 400 }}>
         {label}
       </span>
       <span style={{

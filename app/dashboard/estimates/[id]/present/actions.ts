@@ -5,15 +5,18 @@
  *
  * sendEstimateByText — sends the public estimate link to the customer's phone.
  *
- * Architecture notes:
- *   • Uses the Twilio Messaging REST API directly (no SDK needed).
- *   • Reads TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_FROM_NUMBER from env.
- *   • If those vars are absent (dev / staging), logs a warning and returns success
- *     so the UI flow can be tested without a live Twilio account.
- *   • On success, inserts a row in message_logs for delivery tracking and
- *     future resend / follow-up automation.
- *   • The public estimate URL is built from NEXT_PUBLIC_BASE_URL → VERCEL_URL → fallback,
- *     so it is NEVER derived from window.location (server-side safe).
+ * approveEstimateItem  — persists an 'approved' decision for one line item.
+ * declineEstimateItem  — persists a 'declined' decision for one line item.
+ * undecideEstimateItem — removes a persisted decision (item returns to pending).
+ *
+ * Architecture notes for item-decision actions:
+ *   • Uses createAdminClient to match the existing pattern in this file and
+ *     avoid any RLS edge-cases. Auth is validated via getDashboardTenant().
+ *   • approve/decline use an upsert ON CONFLICT (estimate_item_id) so calling
+ *     twice is idempotent and changing a decision is a single round-trip.
+ *   • undecide DELETEs the row — absence of a row is the canonical "pending" state.
+ *   • Each action validates that the item belongs to the estimate + tenant before
+ *     writing, so an attacker with a valid session cannot modify another tenant's data.
  */
 
 import { createAdminClient } from '@/lib/supabase/server'
@@ -142,4 +145,329 @@ export async function sendEstimateByText(
   })
 
   return { success: true }
+}
+
+// ── Per-job advisor decision actions ──────────────────────────────────────────
+//
+// Phase 1A scope: persist and remove decisions only.
+// No work order creation, no estimate status changes, no public route changes.
+//
+// decided_by is NULL in every write below.  This is intentional: Phase 1A is
+// NOT a real audit trail.  Wiring auth.uid() is deferred to a later phase.
+// Do not treat decided_by as trustworthy until that work is complete.
+//
+// Upsert conflict target: 'estimate_id,estimate_item_id' — matches the
+// UNIQUE INDEX idx_item_decisions_unique defined in migration 20240005.
+
+/**
+ * Persists an 'approved' decision for a single estimate line item.
+ * Idempotent — upsert means calling twice is a no-op.
+ * Changing from 'declined' → 'approved' is also a single round-trip.
+ */
+export async function approveEstimateItem(
+  estimateId: string,
+  itemId:     string,
+): Promise<{ error: string } | null> {
+  const ctx = await getDashboardTenant()
+  if (!ctx) return { error: 'Not authenticated.' }
+
+  const supabase = createAdminClient()
+  const tenantId = ctx.tenant.id
+  const now      = new Date().toISOString()
+
+  // Validate item belongs to this estimate and tenant before writing.
+  const { data: item } = await supabase
+    .from('estimate_items')
+    .select('id')
+    .eq('id', itemId)
+    .eq('estimate_id', estimateId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+
+  if (!item) return { error: 'Item not found.' }
+
+  const { error } = await supabase
+    .from('estimate_item_decisions')
+    .upsert(
+      {
+        tenant_id:        tenantId,
+        estimate_id:      estimateId,
+        estimate_item_id: itemId,
+        decision:         'approved',
+        decided_by:       null,   // Phase 1A: not a real audit trail
+        decided_at:       now,
+        updated_at:       now,
+      },
+      { onConflict: 'estimate_id,estimate_item_id' },
+    )
+
+  if (error) {
+    console.error('[approveEstimateItem]', error.message)
+    return { error: error.message }
+  }
+
+  return null
+}
+
+/**
+ * Persists a 'declined' decision for a single estimate line item.
+ * Idempotent — upsert means calling twice is a no-op.
+ * Changing from 'approved' → 'declined' is also a single round-trip.
+ */
+export async function declineEstimateItem(
+  estimateId: string,
+  itemId:     string,
+): Promise<{ error: string } | null> {
+  const ctx = await getDashboardTenant()
+  if (!ctx) return { error: 'Not authenticated.' }
+
+  const supabase = createAdminClient()
+  const tenantId = ctx.tenant.id
+  const now      = new Date().toISOString()
+
+  const { data: item } = await supabase
+    .from('estimate_items')
+    .select('id')
+    .eq('id', itemId)
+    .eq('estimate_id', estimateId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+
+  if (!item) return { error: 'Item not found.' }
+
+  const { error } = await supabase
+    .from('estimate_item_decisions')
+    .upsert(
+      {
+        tenant_id:        tenantId,
+        estimate_id:      estimateId,
+        estimate_item_id: itemId,
+        decision:         'declined',
+        decided_by:       null,   // Phase 1A: not a real audit trail
+        decided_at:       now,
+        updated_at:       now,
+      },
+      { onConflict: 'estimate_id,estimate_item_id' },
+    )
+
+  if (error) {
+    console.error('[declineEstimateItem]', error.message)
+    return { error: error.message }
+  }
+
+  return null
+}
+
+/**
+ * Removes a persisted decision, returning the item to pending.
+ * Absence of a row is the canonical pending state — no row is inserted here.
+ * If no decision row existed, the DELETE is a silent no-op.
+ */
+export async function undecideEstimateItem(
+  estimateId: string,
+  itemId:     string,
+): Promise<{ error: string } | null> {
+  const ctx = await getDashboardTenant()
+  if (!ctx) return { error: 'Not authenticated.' }
+
+  const supabase = createAdminClient()
+  const tenantId = ctx.tenant.id
+
+  const { error } = await supabase
+    .from('estimate_item_decisions')
+    .delete()
+    .eq('estimate_id', estimateId)
+    .eq('estimate_item_id', itemId)
+    .eq('tenant_id', tenantId)
+
+  if (error) {
+    console.error('[undecideEstimateItem]', error.message)
+    return { error: error.message }
+  }
+
+  return null
+}
+
+// ── Work Order creation from approved items ────────────────────────────────
+//
+// Called when advisor clicks "Send Approved to Work Order" button.
+// Creates a new work order with only the approved line items.
+
+/**
+ * Creates a work order from approved estimate items.
+ *
+ * Flow:
+ *   1. Load estimate header for tenant_id, customer_id, vehicle_id
+ *   2. Fetch all approved decisions from estimate_item_decisions
+ *   3. Load the corresponding estimate_items
+ *   4. Create work_orders row
+ *   5. Create work_order_items rows (one per approved item)
+ *   6. Return the new work_orders.id for redirect
+ *
+ * Returns { data: { workOrderId } } on success, { error } on failure.
+ */
+export async function createWorkOrderFromApprovedItems(
+  estimateId: string,
+): Promise<{ data: { workOrderId: string } } | { error: string }> {
+  const ctx = await getDashboardTenant()
+  if (!ctx) return { error: 'Not authenticated.' }
+
+  const supabase = createAdminClient()
+  const tenantId = ctx.tenant.id
+
+  console.log('[createWorkOrderFromApprovedItems] start', {
+    tenantId,
+    estimateId,
+  })
+
+  // ── Step 1: Load estimate header ────────────────────────────────────────
+  const { data: estimate, error: estErr } = await supabase
+    .from('estimates')
+    .select('id, tenant_id, customer_id, vehicle_id, inspection_id, estimate_number, subtotal, tax_rate, tax_amount, total, parts_markup_percent')
+    .eq('id', estimateId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+
+  if (estErr || !estimate) {
+    console.error('[createWorkOrderFromApprovedItems] estimate not found', estErr?.message)
+    return { error: 'Estimate not found.' }
+  }
+
+  console.log('[createWorkOrderFromApprovedItems] estimate loaded', {
+    estimateId: estimate.id,
+    estimateNumber: estimate.estimate_number,
+  })
+
+  // ── Step 2: Fetch approved decisions for this estimate ───────────────────
+  const { data: decisions, error: decisErr } = await supabase
+    .from('estimate_item_decisions')
+    .select('estimate_item_id')
+    .eq('estimate_id', estimateId)
+    .eq('tenant_id', tenantId)
+    .eq('decision', 'approved')
+
+  if (decisErr) {
+    console.error('[createWorkOrderFromApprovedItems] fetch decisions failed:', decisErr.message)
+    return { error: decisErr.message }
+  }
+
+  const approvedItemIds = (decisions ?? []).map(d => d.estimate_item_id)
+
+  if (approvedItemIds.length === 0) {
+    console.error('[createWorkOrderFromApprovedItems] no approved items')
+    return { error: 'No approved items selected. Please approve at least one job.' }
+  }
+
+  console.log('[createWorkOrderFromApprovedItems] approved items found', {
+    count: approvedItemIds.length,
+  })
+
+  // ── Step 3: Load the approved estimate_items ───────────────────────────
+  const { data: approvedItems, error: itemsErr } = await supabase
+    .from('estimate_items')
+    .select('*')
+    .eq('estimate_id', estimateId)
+    .in('id', approvedItemIds)
+
+  if (itemsErr) {
+    console.error('[createWorkOrderFromApprovedItems] fetch items failed:', itemsErr.message)
+    return { error: itemsErr.message }
+  }
+
+  const items = approvedItems ?? []
+  if (items.length === 0) {
+    return { error: 'Failed to load approved items.' }
+  }
+
+  console.log('[createWorkOrderFromApprovedItems] approved items loaded', {
+    count: items.length,
+  })
+
+  // ── Step 4: Generate work order number ──────────────────────────────────
+  // Format: WO-YYYY-NNNN (similar to estimates)
+  const { count: woCount } = await supabase
+    .from('work_orders')
+    .select('*', { count: 'exact', head: true })
+    .eq('tenant_id', tenantId)
+
+  const year = new Date().getFullYear()
+  const seq = (woCount ?? 0) + 1
+  const workOrderNumber = `WO-${year}-${String(seq).padStart(4, '0')}`
+
+  // ── Step 5: Create work_orders row ────────────────────────────────────────
+  const now = new Date().toISOString()
+  const { data: wo, error: woErr } = await supabase
+    .from('work_orders')
+    .insert({
+      tenant_id:           tenantId,
+      estimate_id:         estimateId,
+      inspection_id:       estimate.inspection_id ?? null,
+      customer_id:         estimate.customer_id ?? null,
+      vehicle_id:          estimate.vehicle_id ?? null,
+      work_order_number:   workOrderNumber,
+      estimate_number:     estimate.estimate_number,  // soft copy for traceability
+      creation_mode:       'from_estimate',
+      status:              'draft',  // Valid statuses: draft, ready, in_progress, completed, invoiced
+      subtotal:            Number(estimate.subtotal) || 0,
+      tax_rate:            estimate.tax_rate ?? null,
+      tax_amount:          Number(estimate.tax_amount) || 0,
+      total:               Number(estimate.total) || 0,
+      parts_markup_percent: estimate.parts_markup_percent ?? null,
+      created_at:          now,
+      updated_at:          now,
+    })
+    .select('id')
+    .single()
+
+  if (woErr || !wo) {
+    console.error('[createWorkOrderFromApprovedItems] create work_order failed:', woErr?.message)
+    return { error: 'Failed to create work order.' }
+  }
+
+  const workOrderId = wo.id
+
+  console.log('[createWorkOrderFromApprovedItems] work order created', {
+    workOrderId,
+    workOrderNumber,
+  })
+
+  // ── Step 6: Create work_order_items rows ───────────────────────────────
+  // Note: work_order_items schema does NOT have quantity/unit_price columns.
+  // It only has labor_total, parts_total, and line_total for pricing.
+  const woItems = items.map((item, idx) => ({
+    tenant_id:               tenantId,
+    work_order_id:           workOrderId,
+    estimate_item_id:        item.id,
+    service_job_id:          item.service_job_id ?? null,
+    title:                   item.title,
+    description:             item.description ?? null,
+    category:                item.category,
+    labor_hours:             item.labor_hours ?? null,
+    labor_rate:              item.labor_rate ?? null,
+    labor_total:             item.labor_total || 0,
+    parts_total:             item.parts_total || 0,
+    line_total:              item.line_total,
+    inspection_item_id:      item.inspection_item_id ?? null,
+    service_recommendation_id: item.service_recommendation_id ?? null,
+    display_order:           idx,
+    created_at:              now,
+    updated_at:              now,
+  }))
+
+  const { error: wiErr } = await supabase
+    .from('work_order_items')
+    .insert(woItems)
+
+  if (wiErr) {
+    console.error('[createWorkOrderFromApprovedItems] create work_order_items failed:', wiErr.message)
+    // Clean up the work order we just created
+    await supabase.from('work_orders').delete().eq('id', workOrderId)
+    return { error: wiErr.message }
+  }
+
+  console.log('[createWorkOrderFromApprovedItems] work order items created', {
+    count: woItems.length,
+  })
+
+  return { data: { workOrderId } }
 }

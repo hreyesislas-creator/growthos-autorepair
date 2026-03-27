@@ -32,8 +32,12 @@ import type {
   EstimateItem,
   EstimateItemPart,
   EstimateWithItems,
+  EstimateItemDecision,
   TenantPricingConfig,
   ServiceJobWithCategory,
+  WorkOrder,
+  WorkOrderItem,
+  WorkOrderWithItems,
 } from '@/lib/types'
 
 const APPOINTMENT_DATE_COLUMN = 'appointment_date'
@@ -328,6 +332,7 @@ export async function getInspections(tenantId: string): Promise<Inspection[]> {
     .from('inspections')
     .select('*')
     .eq('tenant_id', tenantId)
+    .eq('is_archived', false)          // Phase A: hide archived records from list
     .order('created_at', { ascending: false })
     .limit(100)
 
@@ -442,6 +447,7 @@ export async function getPendingInspectionCount(tenantId: string): Promise<numbe
     .from('inspections')
     .select('id', { count: 'exact', head: true })
     .eq('tenant_id', tenantId)
+    .eq('is_archived', false)          // Phase A: exclude archived from pending count
     .in('status', ['draft', 'in_progress'])
 
   if (error) {
@@ -910,6 +916,14 @@ export async function getEstimateWithItems(
   const rawItems = (itemsRes.data ?? []) as EstimateItem[]
   const parts    = (partsRes.data ?? []) as EstimateItemPart[]
 
+  console.log('[getEstimateWithItems] loaded', {
+    estimateId,
+    itemCount: rawItems.length,
+    partsCount: parts.length,
+    itemIds: rawItems.map(i => i.id),
+    itemServiceRecIds: rawItems.map(i => i.service_recommendation_id),
+  })
+
   // Nest parts under their parent item
   const partsMap = new Map<string, EstimateItemPart[]>()
   for (const part of parts) {
@@ -941,6 +955,7 @@ export async function getEstimatesByTenant(
     .from('estimates')
     .select('*')
     .eq('tenant_id', tenantId)
+    .eq('is_archived', false)          // Phase A: hide archived records from list
     .order('created_at', { ascending: false })
 
   if (error) {
@@ -1040,6 +1055,34 @@ export async function getTenantPricingConfig(
   return (data as TenantPricingConfig | null) ?? null
 }
 
+/**
+ * Returns all persisted advisor decisions for a given estimate.
+ * Items with no row in this table are still pending (no decision yet).
+ * Sorted by decided_at so the most recent decisions come first.
+ */
+export async function getEstimateItemDecisions(
+  tenantId:   string,
+  estimateId: string,
+): Promise<EstimateItemDecision[]> {
+  if (!hasValue(tenantId) || !hasValue(estimateId)) return []
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('estimate_item_decisions')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('estimate_id', estimateId)
+    .order('decided_at', { ascending: false })
+
+  if (error) {
+    console.error('[getEstimateItemDecisions]', error.message)
+    return []
+  }
+
+  return (data ?? []) as EstimateItemDecision[]
+}
+
 export async function getSupportTickets(tenantId?: string): Promise<SupportTicket[]> {
   const supabase = await createClient()
 
@@ -1057,4 +1100,77 @@ export async function getSupportTickets(tenantId?: string): Promise<SupportTicke
   }
 
   return (data ?? []) as SupportTicket[]
+}
+
+// ── Work orders ────────────────────────────────────────────────
+
+/**
+ * Fetch all work orders for a tenant, ordered by creation date descending.
+ * Does NOT include line items — use getWorkOrderById for that.
+ */
+export async function getWorkOrdersForTenant(tenantId: string, limit = 200): Promise<WorkOrder[]> {
+  if (!hasValue(tenantId)) return []
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('work_orders')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('is_archived', false)          // Phase A: hide archived records from list
+    .order('created_at', { ascending: false })
+    .limit(limit)
+
+  if (error) {
+    console.error('[getWorkOrdersForTenant]', error.message)
+    return []
+  }
+
+  return (data ?? []) as WorkOrder[]
+}
+
+/**
+ * Fetch a single work order by ID, including all its line items.
+ * Returns null if not found or auth check fails.
+ */
+export async function getWorkOrderById(
+  tenantId: string,
+  workOrderId: string,
+): Promise<WorkOrderWithItems | null> {
+  if (!hasValue(tenantId) || !hasValue(workOrderId)) return null
+
+  const supabase = await createClient()
+
+  // Fetch work order header
+  const { data: woData, error: woError } = await supabase
+    .from('work_orders')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('id', workOrderId)
+    .single()
+
+  if (woError) {
+    console.error('[getWorkOrderById] work_orders query:', woError.message)
+    return null
+  }
+
+  if (!woData) return null
+
+  // Fetch work order items
+  const { data: itemsData, error: itemsError } = await supabase
+    .from('work_order_items')
+    .select('*')
+    .eq('work_order_id', workOrderId)
+    .order('display_order', { ascending: true })
+
+  if (itemsError) {
+    console.error('[getWorkOrderById] work_order_items query:', itemsError.message)
+    // Return work order without items rather than failing completely
+    return { ...(woData as WorkOrder), items: [] }
+  }
+
+  return {
+    ...(woData as WorkOrder),
+    items: (itemsData ?? []) as WorkOrderItem[],
+  }
 }

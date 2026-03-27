@@ -689,6 +689,27 @@ export interface EstimateWithItems extends Estimate {
 }
 
 /**
+ * Persisted per-job advisor decision for a single estimate line item.
+ *
+ * Design: absence of a row means the item is still pending.
+ * Only 'approved' and 'declined' are written to the DB.
+ * Undoing a decision deletes the row.
+ */
+export type ItemDecision = 'approved' | 'declined'
+
+export interface EstimateItemDecision {
+  id:               string
+  tenant_id:        string
+  estimate_id:      string
+  estimate_item_id: string
+  decision:         ItemDecision
+  decided_by:       string | null   // auth.users.id of the advisor; nullable for Phase 1
+  decided_at:       string          // ISO timestamp of the most-recent decision
+  created_at:       string
+  updated_at:       string
+}
+
+/**
  * Tracks the source PDF file for pdf_import estimates.
  * One record per uploaded file; linked to estimates.source_file_url.
  */
@@ -705,6 +726,110 @@ export interface EstimateSourceFile {
   parse_result:    Record<string, unknown> | null
   parse_error:     string | null
   created_at:      string
+}
+
+// ── Work order types ──────────────────────────────────────────
+//
+// Work orders are derived from approved estimate items.
+// They maintain soft links to estimates and items for audit trails.
+//
+export type WorkOrderCreationMode =
+  | 'from_estimate'
+  | 'manual_entry'
+
+export type WorkOrderStatus =
+  | 'draft'
+  | 'ready'
+  | 'in_progress'
+  | 'completed'
+  | 'invoiced'
+
+export interface WorkOrder {
+  id:                   string
+  tenant_id:            string
+  estimate_id:          string              // soft FK to source estimate
+  inspection_id:        string | null
+  customer_id:          string | null
+  vehicle_id:           string | null
+
+  /** Human-readable sequential ID, e.g. "WO-2024-0042". Unique per tenant. */
+  work_order_number:    string | null
+  creation_mode:        WorkOrderCreationMode
+  status:               WorkOrderStatus
+
+  /** Pricing snapshot from the source estimate. */
+  subtotal:             number
+  tax_rate:             number | null
+  tax_amount:           number
+  total:                number
+
+  notes:                string | null       // customer-facing
+  internal_notes:       string | null       // shop-internal only
+
+  /** Markup % applied to all parts on this work order. */
+  parts_markup_percent: number | null
+
+  /** Soft copy of source estimate number for traceability. */
+  estimate_number:      string | null
+
+  /** Set when status transitions to in_progress. NULL until work begins. */
+  started_at:           string | null
+
+  /** Set when status transitions to completed. NULL until work finishes. */
+  completed_at:         string | null
+
+  /**
+   * Elapsed hours between started_at and completed_at, rounded to 2 decimal places.
+   * Computed server-side at completion time. NULL if work has not been completed.
+   */
+  actual_hours:         number | null
+
+  created_by:           string | null       // auth.users.id
+  created_at:           string
+  updated_at:           string
+}
+
+export interface WorkOrderItem {
+  id:                      string
+  tenant_id:               string
+  work_order_id:           string
+
+  /** Soft link to the source estimate item (no FK constraint). */
+  estimate_item_id:        string | null
+
+  service_job_id:          string | null
+  title:                   string
+  description:             string | null
+
+  category:                EstimateItemCategory
+
+  // ── Labor pricing ───────────────────────────────────────────
+  labor_hours:             number | null
+  labor_rate:              number | null
+  labor_total:             number
+
+  // ── Parts pricing ───────────────────────────────────────────
+  parts_total:             number
+
+  // ── Total ───────────────────────────────────────────────────
+  line_total:              number
+
+  // ── Traceability ────────────────────────────────────────────
+  inspection_item_id:      string | null
+  service_recommendation_id: string | null
+
+  // ── Future use ──────────────────────────────────────────────
+  status:                  string | null       // Item-level status tracking
+  assigned_to:             string | null       // Technician assignment
+
+  display_order:           number
+  created_at:              string
+  updated_at:              string
+}
+
+/** Convenience type — work order header + all its line items in one object. */
+export interface WorkOrderWithItems extends WorkOrder {
+  items: WorkOrderItem[]
 }
 
 // ── Tenant pricing config ─────────────────────────────────────

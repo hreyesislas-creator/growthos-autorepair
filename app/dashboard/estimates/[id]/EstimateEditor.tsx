@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useMemo, useId, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import type { EstimateWithItems, EstimateItem, EstimateItemPart, ServiceJobWithCategory } from '@/lib/types'
+import type { EstimateWithItems, EstimateItem, EstimateItemPart, EstimateItemDecision, ServiceJobWithCategory } from '@/lib/types'
 import {
   saveEstimate,
   saveEstimateItems,
@@ -10,11 +10,24 @@ import {
   type EstimateItemInput,
   type EstimateItemPartInput,
 } from '../actions'
+import { createWorkOrderFromEstimate, voidEstimate } from './actions'
+import ArchiveConfirmModal from '@/components/dashboard/ArchiveConfirmModal'
+import type { ReasonOption } from '@/components/dashboard/ArchiveConfirmModal'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 // NOTE: 'part' is intentionally excluded — parts must live as nested children
 // under a labor/job item via the PartsSection, never as top-level line items.
+// ── Void reason options ───────────────────────────────────────────────────────
+
+const VOID_REASONS: ReasonOption[] = [
+  { value: 'customer_declined', label: 'Customer declined'           },
+  { value: 'replaced_by_new',   label: 'Replaced by a newer estimate'},
+  { value: 'created_in_error',  label: 'Created in error'            },
+  { value: 'duplicate',         label: 'Duplicate estimate'          },
+  { value: 'other',             label: 'Other (see note)'            },
+]
+
 const CATEGORIES = [
   { value: 'labor', label: 'Labor' },
   { value: 'fee',   label: 'Fee'   },
@@ -168,10 +181,11 @@ function newKey() { return `new-${++_keyCounter}` }
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 interface Props {
-  estimate:         EstimateWithItems
-  inspectionId?:    string | null
-  serviceJobs:      ServiceJobWithCategory[]
-  defaultLaborRate: number
+  estimate:          EstimateWithItems
+  inspectionId?:     string | null
+  serviceJobs:       ServiceJobWithCategory[]
+  defaultLaborRate:  number
+  initialDecisions:  EstimateItemDecision[]   // pre-loaded snapshot from DB — read-only in editor
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -181,6 +195,7 @@ export default function EstimateEditor({
   inspectionId,
   serviceJobs,
   defaultLaborRate,
+  initialDecisions,
 }: Props) {
   const router  = useRouter()
   const inputId = useId()
@@ -267,6 +282,19 @@ export default function EstimateEditor({
   )
   const [copied, setCopied] = useState(false)
 
+  // ── Work order creation state ─────────────────────────────────────────────
+  const [woCreating, setWoCreating] = useState(false)
+  const [woError,    setWoError]    = useState<string | null>(null)
+  // Populated once a work order is successfully created or found (idempotent)
+  const [woResult,   setWoResult]   = useState<{ id: string; work_order_number: string | null } | null>(null)
+
+  // ── Void modal state ───────────────────────────────────────────────────────
+  const [voidOpen,    setVoidOpen]    = useState(false)
+  const [voidSubmit,  setVoidSubmit]  = useState(false)
+  const [voidError,   setVoidError]   = useState<string | null>(null)
+  const [voidTier,    setVoidTier]    = useState<'standard' | 'strong_warning' | 'hard_block'>('standard')
+  const [voidWarning, setVoidWarning] = useState('')
+
   // ── Job groups for <optgroup> ─────────────────────────────────────────────
   // serviceJobs comes pre-sorted by category.sort_order then name from getServiceJobs()
   const jobGroups = useMemo<JobGroup[]>(() => {
@@ -322,6 +350,33 @@ export default function EstimateEditor({
     ? round2(taxableSubtotal * rateNum)
     : round2(parseFloat(taxAmountRaw) || 0)
   const total = round2(subtotal + taxAmountNum)
+
+  // ── Decision summary — derived from initialDecisions snapshot ─────────────
+  //
+  // initialDecisions is a read-only snapshot loaded at page render.  The editor
+  // does not approve/decline items itself; decisions come from PresentationView.
+  // A refresh (router.refresh() after save) will re-run the server component and
+  // pass an updated snapshot the next time the page loads.
+  //
+  // These are plain const derivations — no useState or useEffect needed.
+  const approvedItemIds = new Set(
+    initialDecisions.filter(d => d.decision === 'approved').map(d => d.estimate_item_id),
+  )
+  const declinedItemIds = new Set(
+    initialDecisions.filter(d => d.decision === 'declined').map(d => d.estimate_item_id),
+  )
+  const decisionApprovedCount = approvedItemIds.size
+  const decisionDeclinedCount = declinedItemIds.size
+  const decisionPendingCount  = estimate.items.length - decisionApprovedCount - decisionDeclinedCount
+  const decisionApprovedAmount = round2(
+    estimate.items
+      .filter(i => approvedItemIds.has(i.id))
+      .reduce((sum, i) => sum + Number(i.line_total), 0),
+  )
+  // Show the summary bar if the estimate has been presented (status = 'sent')
+  // OR if any decisions already exist (handles manual status overrides gracefully).
+  const showDecisionSummary =
+    estimate.status === 'sent' || initialDecisions.length > 0
 
   // ── Item mutation helpers ──────────────────────────────────────────────────
   const addItem = useCallback(() => {
@@ -592,6 +647,73 @@ export default function EstimateEditor({
     })
   }
 
+  // ── Create Work Order ──────────────────────────────────────────────────────
+  //
+  // Calls the server action which is fully idempotent:
+  //   • If a WO already exists for this estimate, the backend returns it.
+  //   • If none exists, one is created from the approved items only.
+  //
+  // On success: stores the WO id + number to display the success banner.
+  // On error:   stores the message for display in the sticky bar.
+  //
+  const handleCreateWorkOrder = async () => {
+    setWoCreating(true)
+    setWoError(null)
+
+    try {
+      const wo = await createWorkOrderFromEstimate(estimate.id)
+      setWoResult({ id: wo.id, work_order_number: wo.work_order_number })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to create work order'
+      setWoError(msg)
+    } finally {
+      setWoCreating(false)
+    }
+  }
+
+  // ── Void modal handlers ────────────────────────────────────────────────────
+
+  function openVoidModal() {
+    setVoidError(null)
+    // Use the saved estimate.status — not the local status state which may have
+    // unsaved dropdown changes — to determine the correct warning tier.
+    if (estimate.status === 'approved') {
+      setVoidTier('strong_warning')
+      setVoidWarning(
+        'This estimate has been approved by the customer. ' +
+        'Voiding it cannot be undone from this screen.',
+      )
+    } else if (estimate.status === 'sent') {
+      setVoidTier('standard')
+      setVoidWarning(
+        'This estimate has been sent to the customer. ' +
+        'It will be removed from your active records.',
+      )
+    } else {
+      setVoidTier('standard')
+      setVoidWarning(
+        'This estimate will be removed from your active lists. ' +
+        'It can still be viewed by an admin.',
+      )
+    }
+    setVoidOpen(true)
+  }
+
+  async function handleVoidConfirm(reason: string, note: string) {
+    setVoidSubmit(true)
+    setVoidError(null)
+
+    const result = await voidEstimate(estimate.id, reason, note || undefined)
+
+    if (result === null) {
+      setVoidOpen(false)
+      router.push('/dashboard/estimates')
+    } else {
+      setVoidError(result.error)
+      setVoidSubmit(false)
+    }
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────────
   const backHref = inspectionId
     ? `/dashboard/inspections/${inspectionId}`
@@ -657,6 +779,61 @@ export default function EstimateEditor({
         }}>
           Line Items
         </div>
+
+        {/* ── Decision summary bar ────────────────────────────────────────── */}
+        {/* Shown when the estimate has been presented or decisions already exist. */}
+        {showDecisionSummary && (
+          <div style={{
+            display: 'flex',
+            gap: 8,
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            padding: '8px 12px',
+            marginBottom: 12,
+            background: 'var(--surface-2,#f8fafc)',
+            border: '1px solid var(--border-2)',
+            borderRadius: 8,
+            fontSize: 12,
+          }}>
+            {/* Approved */}
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              fontWeight: 700, color: '#15803d',
+              background: '#dcfce7', padding: '3px 10px', borderRadius: 999,
+            }}>
+              ✓ {decisionApprovedCount} Approved
+              {decisionApprovedCount > 0 && (
+                <span style={{ fontWeight: 400, opacity: 0.85 }}>
+                  (${decisionApprovedAmount.toFixed(2)})
+                </span>
+              )}
+            </span>
+
+            {/* Declined */}
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              fontWeight: 700, color: '#dc2626',
+              background: '#fee2e2', padding: '3px 10px', borderRadius: 999,
+            }}>
+              ✗ {decisionDeclinedCount} Declined
+            </span>
+
+            {/* Pending */}
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              fontWeight: 700, color: '#4b5563',
+              background: '#e2e8f0', padding: '3px 10px', borderRadius: 999,
+            }}>
+              ○ {decisionPendingCount} Pending
+            </span>
+
+            {decisionPendingCount === 0 && decisionApprovedCount + decisionDeclinedCount > 0 && (
+              <span style={{ fontSize: 11, color: 'var(--text-3)', marginLeft: 4 }}>
+                All decisions received
+              </span>
+            )}
+          </div>
+        )}
 
         {items.length === 0 ? (
           <div style={{
@@ -911,6 +1088,39 @@ export default function EstimateEditor({
         </div>
       )}
 
+      {/* ── Work order success banner ────────────────────────────────────── */}
+      {/* Shown once a work order has been created or found for this estimate. */}
+      {woResult && (
+        <div style={{
+          marginBottom: 12, padding: '12px 16px',
+          background: '#eff6ff', border: '1px solid #93c5fd',
+          borderRadius: 'var(--r8,8px)',
+          display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+        }}>
+          <span style={{ fontSize: 14 }}>🔧</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#1d4ed8', marginBottom: 2 }}>
+              Work order {woResult.work_order_number ?? woResult.id} is ready
+            </div>
+            <div style={{ fontSize: 11, color: '#1e40af' }}>
+              {decisionApprovedCount} approved item{decisionApprovedCount !== 1 ? 's' : ''} ·
+              ${decisionApprovedAmount.toFixed(2)}
+            </div>
+          </div>
+          <a
+            href={`/dashboard/work-orders/${woResult.id}`}
+            style={{
+              fontSize: 11, fontWeight: 700, padding: '4px 12px',
+              borderRadius: 6, border: '1px solid #93c5fd',
+              background: '#fff', color: '#1d4ed8',
+              textDecoration: 'none', flexShrink: 0, whiteSpace: 'nowrap',
+            }}
+          >
+            View Work Order ↗
+          </a>
+        </div>
+      )}
+
       {/* ── Sticky save bar ────────────────────────────────────────────────── */}
       <div style={{
         position: 'sticky', bottom: 16,
@@ -921,9 +1131,9 @@ export default function EstimateEditor({
       }}>
         {/* Status / error area */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          {(saveError || presentError) ? (
+          {(saveError || presentError || woError) ? (
             <span style={{ fontSize: 12, color: '#b91c1c' }}>
-              ✕ {saveError ?? presentError}
+              ✕ {saveError ?? presentError ?? woError}
             </span>
           ) : savedAt ? (
             <span style={{ fontSize: 12, color: '#15803d' }}>
@@ -957,6 +1167,60 @@ export default function EstimateEditor({
           </button>
         )}
 
+        {/* Create Work Order — shown when at least one item is approved.
+            Idempotent: clicking again returns the existing WO, never creates a duplicate. */}
+        {decisionApprovedCount > 0 && (
+          <button
+            type="button"
+            disabled={woCreating || saving || presenting}
+            onClick={handleCreateWorkOrder}
+            title={
+              woResult
+                ? `Work order ${woResult.work_order_number ?? ''} already created`
+                : `Create work order from ${decisionApprovedCount} approved item${decisionApprovedCount !== 1 ? 's' : ''}`
+            }
+            style={{
+              fontSize: 12, fontWeight: 700, padding: '8px 14px',
+              borderRadius: 'var(--r8,8px)',
+              border: 'none',
+              cursor: (woCreating || saving || presenting) ? 'default' : 'pointer',
+              background: woResult
+                ? '#1d4ed8'
+                : woCreating
+                ? '#1d4ed8'
+                : 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+              color: '#fff',
+              opacity: (woCreating || saving || presenting) ? 0.7 : 1,
+              transition: 'all 0.15s',
+              boxShadow: '0 2px 8px rgba(37,99,235,0.3)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {woCreating
+              ? 'Creating…'
+              : woResult
+              ? `🔧 ${woResult.work_order_number ?? 'Work Order'} ↗`
+              : '🔧 Create Work Order'}
+          </button>
+        )}
+
+        {/* Preview — links to the advisor presentation view */}
+        <a
+          href={`/dashboard/estimates/${estimate.id}/present`}
+          style={{
+            fontSize: 12, fontWeight: 700, padding: '8px 14px',
+            borderRadius: 'var(--r8,8px)',
+            border: '1px solid #cbd5e1',
+            background: '#fff',
+            color: '#1e293b',
+            textDecoration: 'none',
+            flexShrink: 0,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          Preview ↗
+        </a>
+
         <button
           type="button"
           className="btn-primary"
@@ -970,7 +1234,33 @@ export default function EstimateEditor({
         <a href={backHref} className="btn-ghost" style={{ fontSize: 12 }}>
           ← Back
         </a>
+
+        {/* Void Estimate — destructive, always available in the save bar */}
+        <button
+          type="button"
+          className="btn-danger"
+          style={{ fontSize: 12 }}
+          onClick={openVoidModal}
+          title="Void this estimate and remove it from active lists"
+        >
+          Void Estimate
+        </button>
       </div>
+
+      {/* ── Void confirmation modal ───────────────────────────────────────────── */}
+      <ArchiveConfirmModal
+        isOpen={voidOpen}
+        onClose={() => { setVoidOpen(false); setVoidError(null) }}
+        entityType="estimate"
+        entityLabel={estimate.estimate_number}
+        actionLabel="Void"
+        warningTier={voidTier}
+        warningText={voidWarning}
+        reasonOptions={VOID_REASONS}
+        onConfirm={handleVoidConfirm}
+        isSubmitting={voidSubmit}
+        errorMessage={voidError}
+      />
     </div>
   )
 }
