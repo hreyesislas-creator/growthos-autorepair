@@ -21,9 +21,23 @@ export async function createInspection(
 
   const vehicleId    = String(formData.get('vehicle_id')    ?? '').trim() || null
   const customerId   = String(formData.get('customer_id')   ?? '').trim() || null
-  const templateId   = String(formData.get('template_id')   ?? '').trim() || null
+  let templateId     = String(formData.get('template_id')   ?? '').trim() || null
   const technicianId = String(formData.get('technician_id') ?? '').trim() || null
   const notes        = String(formData.get('notes')         ?? '').trim() || null
+
+  // Server-side fallback: If no template provided, use "Standard Vehicle Inspection"
+  if (!templateId) {
+    const { data: defaultTemplate } = await supabase
+      .from('inspection_templates')
+      .select('id')
+      .eq('tenant_id', ctx.tenant.id)
+      .eq('name', 'Standard Vehicle Inspection')
+      .single()
+
+    if (defaultTemplate) {
+      templateId = defaultTemplate.id
+    }
+  }
 
   const { error } = await supabase.from('inspections').insert({
     tenant_id:     ctx.tenant.id,

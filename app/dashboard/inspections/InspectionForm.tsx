@@ -29,6 +29,11 @@ export default function InspectionForm({
   const [error,   setError]   = useState<string | null>(null)
   const [pending, setPending] = useState(false)
 
+  // Find the Standard Vehicle Inspection template ID for default selection
+  const standardTemplateId = templates.find(
+    t => t.name === 'Standard Vehicle Inspection'
+  )?.id ?? ''
+
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setPending(true)
@@ -110,7 +115,11 @@ export default function InspectionForm({
                   Template
                   <span style={{ color: 'var(--text-3)', fontWeight: 400 }}> (optional)</span>
                 </label>
-                <select name="template_id" className="field-select">
+                <select
+                  name="template_id"
+                  className="field-select"
+                  defaultValue={standardTemplateId}
+                >
                   <option value="">— No template —</option>
                   {templates.map(t => (
                     <option key={t.id} value={t.id}>{t.name}</option>
