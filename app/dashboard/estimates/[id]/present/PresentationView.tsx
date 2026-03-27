@@ -95,6 +95,8 @@ export default function PresentationView({
   customerPhone,
   initialDecisions,
 }: Props) {
+  const router = useRouter()
+
   // ── Decisions — initialised from DB, then managed locally ─────────────────
   const [decisions, setDecisions] = useState<DecisionMap>(() => {
     const map: DecisionMap = {}

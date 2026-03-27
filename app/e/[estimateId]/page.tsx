@@ -76,20 +76,20 @@ export default async function EstimatePresentationPage({
         .order('display_order'),
 
       // Customer
-      estimate.customer_id
+      (estimate as any).customer_id
         ? supabase
             .from('customers')
             .select('first_name, last_name, phone, email')
-            .eq('id', estimate.customer_id)
+            .eq('id', (estimate as any).customer_id)
             .single()
         : Promise.resolve({ data: null }),
 
       // Vehicle
-      estimate.vehicle_id
+      (estimate as any).vehicle_id
         ? supabase
             .from('vehicles')
             .select('year, make, model, license_plate')
-            .eq('id', estimate.vehicle_id)
+            .eq('id', (estimate as any).vehicle_id)
             .single()
         : Promise.resolve({ data: null }),
 
@@ -97,25 +97,25 @@ export default async function EstimatePresentationPage({
       supabase
         .from('tenants')
         .select('name')
-        .eq('id', estimate.tenant_id)
+        .eq('id', (estimate as any).tenant_id)
         .single(),
 
       // Business profile (phone, logo)
       supabase
         .from('business_profiles')
         .select('phone, logo_url')
-        .eq('tenant_id', estimate.tenant_id)
+        .eq('tenant_id', (estimate as any).tenant_id)
         .maybeSingle(),
 
       // Inspection findings (all recommendations from the linked inspection)
-      estimate.inspection_id
+      (estimate as any).inspection_id
         ? supabase
             .from('service_recommendations')
             .select(
               'id, title, description, technician_notes, ' +
               'source_status, priority, item_name, section_name, estimated_price',
             )
-            .eq('inspection_id', estimate.inspection_id)
+            .eq('inspection_id', (estimate as any).inspection_id)
         : Promise.resolve({ data: [] }),
     ])
 
@@ -126,14 +126,14 @@ export default async function EstimatePresentationPage({
 
   return (
     <CustomerPresentation
-      estimate={estimate as Parameters<typeof CustomerPresentation>[0]['estimate']}
-      items={(itemsRes.data ?? []) as Parameters<typeof CustomerPresentation>[0]['items']}
-      customer={(customerRes.data ?? null) as Parameters<typeof CustomerPresentation>[0]['customer']}
-      vehicle={(vehicleRes.data ?? null) as Parameters<typeof CustomerPresentation>[0]['vehicle']}
+      estimate={estimate as unknown as Parameters<typeof CustomerPresentation>[0]['estimate']}
+      items={(itemsRes.data ?? []) as unknown as Parameters<typeof CustomerPresentation>[0]['items']}
+      customer={(customerRes.data ?? null) as unknown as Parameters<typeof CustomerPresentation>[0]['customer']}
+      vehicle={(vehicleRes.data ?? null) as unknown as Parameters<typeof CustomerPresentation>[0]['vehicle']}
       shopName={shopName}
       shopPhone={shopPhone}
       logoUrl={logoUrl}
-      recommendations={(recsRes.data ?? []) as Parameters<typeof CustomerPresentation>[0]['recommendations']}
+      recommendations={(recsRes.data ?? []) as unknown as Parameters<typeof CustomerPresentation>[0]['recommendations']}
     />
   )
 }

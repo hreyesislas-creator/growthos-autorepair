@@ -13,7 +13,7 @@ export type ArchiveResult = { error: string } | null
 
 export async function createInspection(
   formData: FormData
-): Promise<{ error: string } | null> {
+): Promise<{ error: string } | { inspectionId: string }> {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
 
@@ -39,7 +39,7 @@ export async function createInspection(
     }
   }
 
-  const { error } = await supabase.from('inspections').insert({
+  const { data, error } = await supabase.from('inspections').insert({
     tenant_id:     ctx.tenant.id,
     vehicle_id:    vehicleId,
     customer_id:   customerId,
@@ -47,10 +47,12 @@ export async function createInspection(
     technician_id: technicianId,
     status:        'draft',
     notes,
-  })
+  }).select('id')
 
   if (error) return { error: error.message }
-  return null
+  if (!data || data.length === 0) return { error: 'Failed to create inspection' }
+
+  return { inspectionId: data[0].id }
 }
 
 // ── Inspection lifecycle ──────────────────────────────────────────────────────

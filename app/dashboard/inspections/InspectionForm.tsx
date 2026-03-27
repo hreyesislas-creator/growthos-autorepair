@@ -42,13 +42,16 @@ export default function InspectionForm({
     const formData = new FormData(e.currentTarget)
     const result   = await createInspection(formData)
 
-    if (result?.error) {
+    if ('error' in result) {
       setError(result.error)
       setPending(false)
       return
     }
 
-    router.push('/dashboard/inspections')
+    // Redirect to the newly created inspection
+    if (result.inspectionId) {
+      router.push(`/dashboard/inspections/${result.inspectionId}`)
+    }
     router.refresh()
   }
 
