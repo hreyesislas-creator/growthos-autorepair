@@ -9,7 +9,7 @@
 import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import { createAdminClient } from '@/lib/supabase/server'
-import CustomerPresentation from './CustomerPresentation'
+import PresentationView from './PresentationView'
 
 // Always fetch fresh — status can change (approved/declined)
 export const dynamic = 'force-dynamic'
@@ -47,30 +47,38 @@ export default async function EstimatePresentationPage({
 }) {
   const supabase = createAdminClient()
 
-  // ── 1. Fetch estimate header ───────────────────────────────────────────────
-  const { data: estimate } = await supabase
-    .from('estimates')
-    .select(
-      'id, tenant_id, customer_id, vehicle_id, inspection_id, ' +
-      'estimate_number, status, notes, subtotal, tax_rate, tax_amount, total, ' +
-      'created_at, updated_at',
-    )
-    .eq('id', params.estimateId)
-    .maybeSingle()
+  // ── 1. Fetch estimate header + items ───────────────────────────────────────
+  const [estimateRes, decisionRes] = await Promise.all([
+    supabase
+      .from('estimates')
+      .select(
+        'id, tenant_id, customer_id, vehicle_id, inspection_id, ' +
+        'estimate_number, status, notes, subtotal, tax_rate, tax_amount, total, ' +
+        'created_at, updated_at',
+      )
+      .eq('id', params.estimateId)
+      .maybeSingle(),
+    // Fetch item decisions (for per-job approval state)
+    supabase
+      .from('estimate_item_decisions')
+      .select('id, tenant_id, estimate_id, estimate_item_id, decision, decided_by, decided_at, created_at, updated_at')
+      .eq('estimate_id', params.estimateId),
+  ])
 
+  const estimate = estimateRes.data
   if (!estimate) return notFound()
 
   // ── 2. Parallel data fetches ───────────────────────────────────────────────
   const [itemsRes, customerRes, vehicleRes, tenantRes, profileRes, recsRes] =
     await Promise.all([
 
-      // Estimate line items (non-internal)
+      // Estimate line items (with full details for per-job approval)
       supabase
         .from('estimate_items')
         .select(
           'id, title, description, notes, category, source_type, ' +
           'service_job_id, labor_hours, labor_rate, labor_total, parts_total, line_total, ' +
-          'display_order',
+          'display_order, estimate_id, tenant_id, quantity, unit_price, needs_review, service_recommendation_id, inspection_item_id, created_at, updated_at',
         )
         .eq('estimate_id', params.estimateId)
         .order('display_order'),
@@ -121,19 +129,33 @@ export default async function EstimatePresentationPage({
 
   // ── 3. Shape data ──────────────────────────────────────────────────────────
   const shopName  = tenantRes.data?.name ?? 'Your Auto Shop'
-  const shopPhone = (profileRes.data as { phone?: string | null } | null)?.phone ?? null
-  const logoUrl   = (profileRes.data as { logo_url?: string | null } | null)?.logo_url ?? null
+  const customer  = customerRes.data as { first_name: string; last_name: string; phone: string | null; email: string | null } | null
+  const vehicle   = vehicleRes.data  as { year: number | null; make: string | null; model: string | null; license_plate: string | null } | null
+
+  const customerName = customer
+    ? `${customer.first_name} ${customer.last_name}`.trim()
+    : null
+  const customerPhone = customer?.phone ?? null
+
+  const vehicleLabel = vehicle
+    ? [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(' ')
+    : null
+
+  // Build EstimateWithItems
+  const estimateWithItems = Object.assign({}, estimate, { items: itemsRes.data ?? [] }) as unknown as Parameters<typeof PresentationView>[0]['estimate']
+
+  // Convert decisions to initial state
+  const initialDecisions = (decisionRes.data ?? []) as unknown as Parameters<typeof PresentationView>[0]['initialDecisions']
 
   return (
-    <CustomerPresentation
-      estimate={estimate as unknown as Parameters<typeof CustomerPresentation>[0]['estimate']}
-      items={(itemsRes.data ?? []) as unknown as Parameters<typeof CustomerPresentation>[0]['items']}
-      customer={(customerRes.data ?? null) as unknown as Parameters<typeof CustomerPresentation>[0]['customer']}
-      vehicle={(vehicleRes.data ?? null) as unknown as Parameters<typeof CustomerPresentation>[0]['vehicle']}
+    <PresentationView
+      estimate={estimateWithItems}
+      estimateId={params.estimateId}
+      customerName={customerName}
+      vehicleLabel={vehicleLabel}
       shopName={shopName}
-      shopPhone={shopPhone}
-      logoUrl={logoUrl}
-      recommendations={(recsRes.data ?? []) as unknown as Parameters<typeof CustomerPresentation>[0]['recommendations']}
+      customerPhone={customerPhone}
+      initialDecisions={initialDecisions}
     />
   )
 }

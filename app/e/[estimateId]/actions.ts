@@ -99,3 +99,133 @@ export async function declineEstimate(
 
   return null
 }
+
+// ── Per-job customer decision actions ───────────────────────────────────────
+//
+// Public versions of per-item approval (for customers via public link).
+// Uses the estimate UUID as access token (no auth needed).
+// Validates that the item belongs to the estimate before writing.
+
+/**
+ * Customer approves a single repair job/line item.
+ * Idempotent — upsert means calling twice is a no-op.
+ * Changing from 'declined' → 'approved' is also a single round-trip.
+ */
+export async function approveEstimateItem(
+  estimateId: string,
+  itemId:     string,
+): Promise<{ error: string } | null> {
+  const supabase = createAdminClient()
+  const now      = new Date().toISOString()
+
+  // Validate item belongs to this estimate + get tenant_id
+  const { data: item } = await supabase
+    .from('estimate_items')
+    .select('id, tenant_id')
+    .eq('id', itemId)
+    .eq('estimate_id', estimateId)
+    .maybeSingle()
+
+  if (!item) return { error: 'Item not found.' }
+
+  const { error } = await supabase
+    .from('estimate_item_decisions')
+    .upsert(
+      {
+        tenant_id:        item.tenant_id,
+        estimate_id:      estimateId,
+        estimate_item_id: itemId,
+        decision:         'approved',
+        decided_by:       null,
+        decided_at:       now,
+        updated_at:       now,
+      },
+      { onConflict: 'estimate_id,estimate_item_id' },
+    )
+
+  if (error) {
+    console.error('[approveEstimateItem]', error.message)
+    return { error: error.message }
+  }
+
+  return null
+}
+
+/**
+ * Customer declines a single repair job/line item.
+ * Idempotent — upsert means calling twice is a no-op.
+ * Changing from 'approved' → 'declined' is also a single round-trip.
+ */
+export async function declineEstimateItem(
+  estimateId: string,
+  itemId:     string,
+): Promise<{ error: string } | null> {
+  const supabase = createAdminClient()
+  const now      = new Date().toISOString()
+
+  // Validate item belongs to this estimate + get tenant_id
+  const { data: item } = await supabase
+    .from('estimate_items')
+    .select('id, tenant_id')
+    .eq('id', itemId)
+    .eq('estimate_id', estimateId)
+    .maybeSingle()
+
+  if (!item) return { error: 'Item not found.' }
+
+  const { error } = await supabase
+    .from('estimate_item_decisions')
+    .upsert(
+      {
+        tenant_id:        item.tenant_id,
+        estimate_id:      estimateId,
+        estimate_item_id: itemId,
+        decision:         'declined',
+        decided_by:       null,
+        decided_at:       now,
+        updated_at:       now,
+      },
+      { onConflict: 'estimate_id,estimate_item_id' },
+    )
+
+  if (error) {
+    console.error('[declineEstimateItem]', error.message)
+    return { error: error.message }
+  }
+
+  return null
+}
+
+/**
+ * Customer undoes a decision for a single item (returns to pending state).
+ * Deletes the row — absence of a row means pending.
+ */
+export async function undecideEstimateItem(
+  estimateId: string,
+  itemId:     string,
+): Promise<{ error: string } | null> {
+  const supabase = createAdminClient()
+
+  // Validate item belongs to this estimate
+  const { data: item } = await supabase
+    .from('estimate_items')
+    .select('id, tenant_id')
+    .eq('id', itemId)
+    .eq('estimate_id', estimateId)
+    .maybeSingle()
+
+  if (!item) return { error: 'Item not found.' }
+
+  const { error } = await supabase
+    .from('estimate_item_decisions')
+    .delete()
+    .eq('estimate_id', estimateId)
+    .eq('estimate_item_id', itemId)
+
+  if (error) {
+    console.error('[undecideEstimateItem]', error.message)
+    return { error: error.message }
+  }
+
+  return null
+}
