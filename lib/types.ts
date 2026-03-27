@@ -368,6 +368,12 @@ export interface Inspection {
   updated_at: string
 }
 
+/** Inspection with related customer and vehicle data for list views */
+export interface InspectionRow extends Inspection {
+  customer?: Pick<Customer, 'first_name' | 'last_name'> | null
+  vehicle?: Pick<Vehicle, 'year' | 'make' | 'model'> | null
+}
+
 /** Matches the real inspection_items DB table created for DVI persistence */
 export interface InspectionItem {
   id: string

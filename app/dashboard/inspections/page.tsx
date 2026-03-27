@@ -49,28 +49,46 @@ export default async function InspectionsPage() {
                 </tr>
               </thead>
               <tbody>
-                {inspections.map(i => (
-                  <tr key={i.id}>
-                    <td style={{ fontSize: "12px", color: "var(--text-3)", fontFamily: "var(--font-mono)" }}>
-                      {format(new Date(i.created_at), "MMM d, yyyy")}
-                    </td>
-                    <td style={{ fontWeight: 600, color: "var(--text)" }}>{i.vehicle_id ?? "—"}</td>
-                    <td><StatusBadge status={i.status} /></td>
-                    <td style={{ fontSize: "12px" }}>{i.template_id ? "Standard" : "No template"}</td>
-                    <td style={{ fontSize: "12px", color: "var(--text-3)" }}>
-                      {i.completed_at ? format(new Date(i.completed_at), "MMM d") : "—"}
-                    </td>
-                    <td>
-                      <Link
-                        href={`/dashboard/inspections/${i.id}`}
-                        className="btn-ghost"
-                        style={{ padding: '3px 10px', fontSize: '12px' }}
-                      >
-                        View
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
+                {inspections.map(i => {
+                  // Format vehicle display: "Karina Romero — 2014 BMW i3"
+                  const vehicleDisplay = (() => {
+                    const customerName = i.customer
+                      ? `${i.customer.first_name} ${i.customer.last_name}`.trim()
+                      : null
+                    const vehicleInfo = i.vehicle
+                      ? [i.vehicle.year, i.vehicle.make, i.vehicle.model]
+                          .filter(Boolean)
+                          .join(' ')
+                      : null
+                    if (customerName && vehicleInfo) return `${customerName} — ${vehicleInfo}`
+                    if (customerName) return customerName
+                    if (vehicleInfo) return vehicleInfo
+                    return '—'
+                  })()
+
+                  return (
+                    <tr key={i.id}>
+                      <td style={{ fontSize: "12px", color: "var(--text-3)", fontFamily: "var(--font-mono)" }}>
+                        {format(new Date(i.created_at), "MMM d, yyyy")}
+                      </td>
+                      <td style={{ fontWeight: 600, color: "var(--text)" }}>{vehicleDisplay}</td>
+                      <td><StatusBadge status={i.status} /></td>
+                      <td style={{ fontSize: "12px" }}>{i.template_id ? "Standard" : "No template"}</td>
+                      <td style={{ fontSize: "12px", color: "var(--text-3)" }}>
+                        {i.completed_at ? format(new Date(i.completed_at), "MMM d") : "—"}
+                      </td>
+                      <td>
+                        <Link
+                          href={`/dashboard/inspections/${i.id}`}
+                          className="btn-ghost"
+                          style={{ padding: '3px 10px', fontSize: '12px' }}
+                        >
+                          View
+                        </Link>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           )}

@@ -11,6 +11,7 @@ import type {
   CustomerRow,
   Vehicle,
   Inspection,
+  InspectionRow,
   InspectionTemplate,
   InspectionTemplateItem,
   MessageLog,
@@ -323,14 +324,14 @@ export async function getRecommendations(tenantId: string, vehicleId: string): P
 
 // ── Inspections ───────────────────────────────────────────────
 
-export async function getInspections(tenantId: string): Promise<Inspection[]> {
+export async function getInspections(tenantId: string): Promise<InspectionRow[]> {
   if (!hasValue(tenantId)) return []
 
   const supabase = await createClient()
 
   const { data, error } = await supabase
     .from('inspections')
-    .select('*')
+    .select('*, customer:customers(first_name, last_name), vehicle:vehicles(year, make, model)')
     .eq('tenant_id', tenantId)
     .eq('is_archived', false)          // Phase A: hide archived records from list
     .order('created_at', { ascending: false })
@@ -341,7 +342,7 @@ export async function getInspections(tenantId: string): Promise<Inspection[]> {
     return []
   }
 
-  return (data ?? []) as Inspection[]
+  return (data ?? []) as InspectionRow[]
 }
 
 export async function getInspectionById(tenantId: string, id: string) {
