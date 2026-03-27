@@ -657,6 +657,12 @@ export default function EstimateEditor({
   // On error:   stores the message for display in the sticky bar.
   //
   const handleCreateWorkOrder = async () => {
+    // If work order already exists, navigate to it instead of creating again
+    if (woResult) {
+      router.push(`/dashboard/work-orders/${woResult.id}`)
+      return
+    }
+
     setWoCreating(true)
     setWoError(null)
 
