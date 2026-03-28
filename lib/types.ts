@@ -757,6 +757,7 @@ export interface WorkOrder {
   inspection_id:        string | null
   customer_id:          string | null
   vehicle_id:           string | null
+  invoice_id:           string | null       // soft FK to generated invoice
 
   /** Human-readable sequential ID, e.g. "WO-2024-0042". Unique per tenant. */
   work_order_number:    string | null
@@ -836,6 +837,54 @@ export interface WorkOrderItem {
 /** Convenience type — work order header + all its line items in one object. */
 export interface WorkOrderWithItems extends WorkOrder {
   items: WorkOrderItem[]
+}
+
+// ── Invoices ───────────────────────────────────────────────────
+
+export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'void'
+
+export interface Invoice {
+  id:                 string
+  tenant_id:          string
+  customer_id:        string | null
+  vehicle_id:         string | null
+  work_order_id:      string        // soft FK to source work order
+  invoice_number:     string | null // unique per tenant: "INV-2024-0001"
+  status:             InvoiceStatus
+  subtotal_labor:     number
+  subtotal_parts:     number
+  subtotal_other:     number
+  subtotal:           number
+  tax_rate:           number | null
+  tax_amount:         number
+  total:              number
+  notes:              string | null // customer-facing notes
+  internal_notes:     string | null // shop-internal only
+  created_at:         string
+  updated_at:         string
+}
+
+export interface InvoiceItem {
+  id:                      string
+  tenant_id:               string
+  invoice_id:              string
+  work_order_item_id:      string | null // soft link to source WO item
+  title:                   string
+  description:             string | null
+  category:                EstimateItemCategory
+  labor_hours:             number | null
+  labor_rate:              number | null
+  labor_total:             number
+  parts_total:             number
+  line_total:              number
+  display_order:           number
+  created_at:              string
+  updated_at:              string
+}
+
+/** Convenience type — invoice header + all its line items in one object. */
+export interface InvoiceWithItems extends Invoice {
+  items: InvoiceItem[]
 }
 
 // ── Tenant pricing config ─────────────────────────────────────

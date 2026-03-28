@@ -39,6 +39,9 @@ import type {
   WorkOrder,
   WorkOrderItem,
   WorkOrderWithItems,
+  Invoice,
+  InvoiceItem,
+  InvoiceWithItems,
 } from '@/lib/types'
 
 const APPOINTMENT_DATE_COLUMN = 'appointment_date'
@@ -1174,4 +1177,79 @@ export async function getWorkOrderById(
     ...(woData as WorkOrder),
     items: (itemsData ?? []) as WorkOrderItem[],
   }
+}
+
+// ── Invoices ─────────────────────────────────────────────────
+
+/**
+ * Fetch a single invoice by ID, including all its line items.
+ * Returns null if not found or auth check fails.
+ */
+export async function getInvoiceById(
+  tenantId: string,
+  invoiceId: string,
+): Promise<InvoiceWithItems | null> {
+  if (!hasValue(tenantId) || !hasValue(invoiceId)) return null
+
+  const supabase = await createClient()
+
+  // Fetch invoice header
+  const { data: invData, error: invError } = await supabase
+    .from('invoices')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('id', invoiceId)
+    .single()
+
+  if (invError) {
+    console.error('[getInvoiceById] invoices query:', invError.message)
+    return null
+  }
+
+  if (!invData) return null
+
+  // Fetch invoice items
+  const { data: itemsData, error: itemsError } = await supabase
+    .from('invoice_items')
+    .select('*')
+    .eq('invoice_id', invoiceId)
+    .order('display_order', { ascending: true })
+
+  if (itemsError) {
+    console.error('[getInvoiceById] invoice_items query:', itemsError.message)
+    // Return invoice without items rather than failing completely
+    return { ...(invData as Invoice), items: [] }
+  }
+
+  return {
+    ...(invData as Invoice),
+    items: (itemsData ?? []) as InvoiceItem[],
+  }
+}
+
+/**
+ * Fetch invoice by work order ID.
+ * Returns null if no invoice exists for this work order.
+ */
+export async function getInvoiceByWorkOrderId(
+  tenantId: string,
+  workOrderId: string,
+): Promise<Invoice | null> {
+  if (!hasValue(tenantId) || !hasValue(workOrderId)) return null
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('invoices')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('work_order_id', workOrderId)
+    .maybeSingle()
+
+  if (error) {
+    console.error('[getInvoiceByWorkOrderId]', error.message)
+    return null
+  }
+
+  return (data ?? null) as Invoice | null
 }

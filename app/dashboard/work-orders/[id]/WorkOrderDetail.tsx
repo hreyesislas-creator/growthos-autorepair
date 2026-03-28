@@ -10,6 +10,7 @@ import {
   completeWorkOrder,
   reopenWorkOrder,
   cancelWorkOrder,
+  createInvoiceFromWorkOrder,
   type WorkOrderTimeSnapshot,
 } from './actions'
 import ArchiveConfirmModal from '@/components/dashboard/ArchiveConfirmModal'
@@ -133,6 +134,13 @@ export default function WorkOrderDetail({ workOrder, customerName, vehicleLabel 
   const [cancelTier,    setCancelTier]    = useState<'standard' | 'strong_warning' | 'hard_block'>('standard')
   const [cancelWarning, setCancelWarning] = useState('')
 
+  // ── Invoice creation state ────────────────────────────────────────────────
+  const [invoiceCreating, setInvoiceCreating] = useState(false)
+  const [invoiceError,    setInvoiceError]    = useState<string | null>(null)
+  const [invoiceResult,   setInvoiceResult]   = useState<{ id: string; invoice_number: string | null } | null>(
+    workOrder.invoice_id ? { id: workOrder.invoice_id, invoice_number: null } : null
+  )
+
   const s = statusStyle(status)
 
   // ── Generic transition wrapper ────────────────────────────────────────────
@@ -228,6 +236,30 @@ export default function WorkOrderDetail({ workOrder, customerName, vehicleLabel 
       null,        // completedAt → null
       null,        // actualHours → null
     )
+
+  // ── Invoice handlers ──────────────────────────────────────────────────────
+
+  const handleCreateInvoice = async () => {
+    // If invoice already exists, navigate to it
+    if (invoiceResult) {
+      router.push(`/dashboard/invoices/${invoiceResult.id}`)
+      return
+    }
+
+    setInvoiceCreating(true)
+    setInvoiceError(null)
+
+    try {
+      const result = await createInvoiceFromWorkOrder(workOrder.id)
+      setInvoiceResult({ id: result.id, invoice_number: result.invoice_number })
+      router.refresh()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to create invoice'
+      setInvoiceError(msg)
+    } finally {
+      setInvoiceCreating(false)
+    }
+  }
 
   // ── Cancel / archive handlers ─────────────────────────────────────────────
 
@@ -403,6 +435,50 @@ export default function WorkOrderDetail({ workOrder, customerName, vehicleLabel 
               <span style={{ fontSize: 12, color: '#b91c1c', textAlign: 'right', maxWidth: 220 }}>
                 ✕ {updateError}
               </span>
+            )}
+
+            {/* ── Create/View Invoice — shown when work order is completed ────── */}
+            {status === 'completed' && (
+              <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border-2)' }}>
+                <button
+                  type="button"
+                  disabled={invoiceCreating}
+                  onClick={handleCreateInvoice}
+                  title={
+                    invoiceResult
+                      ? 'View invoice'
+                      : 'Create invoice from completed work'
+                  }
+                  style={{
+                    fontSize: 12, fontWeight: 700, padding: '8px 14px',
+                    borderRadius: 'var(--r8,8px)',
+                    border: 'none',
+                    cursor: (invoiceCreating) ? 'default' : 'pointer',
+                    background: invoiceResult
+                      ? '#1d4ed8'
+                      : invoiceCreating
+                      ? '#1d4ed8'
+                      : 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+                    color: '#fff',
+                    opacity: invoiceCreating ? 0.7 : 1,
+                    transition: 'all 0.15s',
+                    boxShadow: '0 2px 8px rgba(37,99,235,0.3)',
+                    whiteSpace: 'nowrap',
+                    width: '100%',
+                  }}
+                >
+                  {invoiceCreating
+                    ? 'Creating…'
+                    : invoiceResult
+                    ? `📄 Invoice ↗`
+                    : '📄 Create Invoice'}
+                </button>
+                {invoiceError && (
+                  <div style={{ fontSize: 11, color: '#b91c1c', marginTop: 6, textAlign: 'center' }}>
+                    ✕ {invoiceError}
+                  </div>
+                )}
+              </div>
             )}
 
             {/* ── Cancel / Archive — always shown, styled as secondary destructive */}

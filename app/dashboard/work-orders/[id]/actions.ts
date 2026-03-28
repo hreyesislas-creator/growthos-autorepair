@@ -336,3 +336,167 @@ export async function cancelWorkOrder(
 
   return null
 }
+
+// ── createInvoiceFromWorkOrder ────────────────────────────────────────────
+
+/**
+ * Creates an invoice from a work order.
+ * Idempotent: if an invoice already exists, returns it without creating a duplicate.
+ *
+ * Steps:
+ *   1. Fetch the work order + items
+ *   2. Check if invoice already exists
+ *   3. If not, create invoice header + line items
+ *   4. Update work order with invoice_id
+ *   5. Return the created/existing invoice
+ */
+export async function createInvoiceFromWorkOrder(
+  workOrderId: string,
+): Promise<{ id: string; invoice_number: string | null }> {
+  const ctx = await getDashboardTenant()
+  if (!ctx) throw new Error('Not authenticated')
+
+  const tenantId    = ctx.tenant.id
+  const supabase    = await createAdminClient()
+
+  // 1. Fetch work order + items
+  const { data: woData, error: woError } = await supabase
+    .from('work_orders')
+    .select('*')
+    .eq('id', workOrderId)
+    .eq('tenant_id', tenantId)
+    .single()
+
+  if (woError || !woData) {
+    console.error('[createInvoiceFromWorkOrder] fetch work order:', woError?.message)
+    throw new Error('Work order not found')
+  }
+
+  const { data: woItems, error: itemsError } = await supabase
+    .from('work_order_items')
+    .select('*')
+    .eq('work_order_id', workOrderId)
+    .order('display_order', { ascending: true })
+
+  if (itemsError) {
+    console.error('[createInvoiceFromWorkOrder] fetch items:', itemsError.message)
+    throw new Error('Failed to fetch work order items')
+  }
+
+  // 2. Check if invoice already exists
+  const { data: existingInvoice } = await supabase
+    .from('invoices')
+    .select('id, invoice_number')
+    .eq('work_order_id', workOrderId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+
+  if (existingInvoice) {
+    return {
+      id: existingInvoice.id,
+      invoice_number: existingInvoice.invoice_number,
+    }
+  }
+
+  // 3. Generate invoice number (simple sequence per tenant)
+  const { count } = await supabase
+    .from('invoices')
+    .select('id', { count: 'exact', head: true })
+    .eq('tenant_id', tenantId)
+
+  const invoiceNumber = `INV-${new Date().getFullYear()}-${String((count ?? 0) + 1).padStart(4, '0')}`
+
+  // Calculate subtotals from work order items
+  let subtotalLabor = 0
+  let subtotalParts = 0
+  let subtotalOther = 0
+
+  const items = woItems ?? []
+  items.forEach(item => {
+    if (item.category === 'labor') {
+      subtotalLabor += item.labor_total
+    } else if (item.category === 'part') {
+      subtotalParts += item.parts_total
+    } else {
+      subtotalOther += item.line_total
+    }
+  })
+
+  const subtotal = subtotalLabor + subtotalParts + subtotalOther
+  const taxAmount = subtotal * (woData.tax_rate ?? 0)
+  const total = subtotal + taxAmount
+
+  // 4. Create invoice header
+  const { data: invoiceData, error: invoiceError } = await supabase
+    .from('invoices')
+    .insert({
+      tenant_id: tenantId,
+      work_order_id: workOrderId,
+      customer_id: woData.customer_id,
+      vehicle_id: woData.vehicle_id,
+      invoice_number: invoiceNumber,
+      status: 'draft',
+      subtotal_labor: subtotalLabor,
+      subtotal_parts: subtotalParts,
+      subtotal_other: subtotalOther,
+      subtotal,
+      tax_rate: woData.tax_rate,
+      tax_amount: taxAmount,
+      total,
+    })
+    .select()
+    .single()
+
+  if (invoiceError || !invoiceData) {
+    console.error('[createInvoiceFromWorkOrder] create invoice:', invoiceError?.message)
+    throw new Error('Failed to create invoice')
+  }
+
+  // Create invoice items from work order items
+  if (items.length > 0) {
+    const invoiceItems = items.map(item => ({
+      tenant_id: tenantId,
+      invoice_id: invoiceData.id,
+      work_order_item_id: item.id,
+      title: item.title,
+      description: item.description,
+      category: item.category,
+      labor_hours: item.labor_hours,
+      labor_rate: item.labor_rate,
+      labor_total: item.labor_total,
+      parts_total: item.parts_total,
+      line_total: item.line_total,
+      display_order: item.display_order,
+    }))
+
+    const { error: itemsInsertError } = await supabase
+      .from('invoice_items')
+      .insert(invoiceItems)
+
+    if (itemsInsertError) {
+      console.error('[createInvoiceFromWorkOrder] insert items:', itemsInsertError.message)
+      throw new Error('Failed to create invoice items')
+    }
+  }
+
+  // 5. Update work order with invoice_id and status
+  const { error: updateError } = await supabase
+    .from('work_orders')
+    .update({
+      invoice_id: invoiceData.id,
+      status: 'invoiced',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', workOrderId)
+    .eq('tenant_id', tenantId)
+
+  if (updateError) {
+    console.error('[createInvoiceFromWorkOrder] update work order:', updateError.message)
+    throw new Error('Failed to link invoice to work order')
+  }
+
+  return {
+    id: invoiceData.id,
+    invoice_number: invoiceData.invoice_number,
+  }
+}
