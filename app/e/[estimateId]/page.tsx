@@ -78,7 +78,7 @@ export default async function EstimatePresentationPage({
   const existingWorkOrderId = workOrderRes.data?.id ?? undefined
 
   // ── 2. Parallel data fetches ───────────────────────────────────────────────
-  const [itemsRes, customerRes, vehicleRes, tenantRes, profileRes, recsRes] =
+  const [itemsRes, partsRes, customerRes, vehicleRes, tenantRes, profileRes, recsRes] =
     await Promise.all([
 
       // Estimate line items (with full details for per-job approval)
@@ -91,6 +91,13 @@ export default async function EstimatePresentationPage({
         )
         .eq('estimate_id', params.estimateId)
         .order('display_order'),
+
+      // Estimate item parts (nested breakdown for each item)
+      supabase
+        .from('estimate_item_parts')
+        .select('*')
+        .eq('estimate_id', params.estimateId)
+        .order('display_order', { ascending: true }),
 
       // Customer
       (estimate as any).customer_id
@@ -150,8 +157,21 @@ export default async function EstimatePresentationPage({
     ? [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(' ')
     : null
 
+  // Nest parts under their parent item
+  const partsMap = new Map<string, any[]>()
+  for (const part of partsRes.data ?? []) {
+    const bucket = partsMap.get(part.estimate_item_id) ?? []
+    bucket.push(part)
+    partsMap.set(part.estimate_item_id, bucket)
+  }
+
+  const itemsWithParts = (itemsRes.data ?? []).map(item => ({
+    ...item,
+    parts: partsMap.get(item.id) ?? [],
+  }))
+
   // Build EstimateWithItems
-  const estimateWithItems = Object.assign({}, estimate, { items: itemsRes.data ?? [] }) as unknown as Parameters<typeof PresentationView>[0]['estimate']
+  const estimateWithItems = Object.assign({}, estimate, { items: itemsWithParts }) as unknown as Parameters<typeof PresentationView>[0]['estimate']
 
   // Convert decisions to initial state
   const initialDecisions = (decisionRes.data ?? []) as unknown as Parameters<typeof PresentationView>[0]['initialDecisions']
