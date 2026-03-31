@@ -142,24 +142,36 @@ export async function recalculateEstimateTotals(
     return { error: itemsErr.message }
   }
 
-  // 2. Bucket subtotals.
+  // 2. Bucket subtotals — unified financial model.
   //    RULE: Tax applies to PARTS ONLY — labor is never taxed.
-  //    Job-mode items carry both labor and parts costs; split them here so tax
-  //    is only applied to the parts portion regardless of the item's category.
+  //
+  //    ALL items now use the unified model:
+  //    - subtotalLabor = SUM(labor_total) for all items
+  //    - subtotalParts = SUM(parts_total) for all items
+  //    - subtotalOther = line_total for misc/fee items only
+  //
+  //    Why: Manual labor items can now have nested estimate_item_parts
+  //    that are synced into parts_total. The old dual model (job vs. manual)
+  //    doesn't work anymore because it ignored parts_total for manual items.
+  //
+  //    This unified model ensures:
+  //    - Labor costs always go to subtotalLabor
+  //    - Parts costs always go to subtotalParts (whether from job or manual item)
+  //    - Tax is applied only to subtotalParts
   let subtotalLabor = 0
   let subtotalParts = 0
   let subtotalOther = 0
 
   for (const item of items ?? []) {
-    if (item.service_job_id) {
-      // Job mode: labor_total / parts_total are stored separately on the item.
+    if (item.category === 'misc' || item.category === 'fee') {
+      // Misc/fee items: use line_total as-is, no labor/parts breakdown
+      const amount = Number(item.line_total) || 0
+      subtotalOther += amount
+    } else {
+      // Labor, part, job items: always sum labor_total and parts_total separately
+      // This works for both job-mode items and manual labor items with nested parts
       subtotalLabor += Number(item.labor_total ?? 0)
       subtotalParts += Number(item.parts_total ?? 0)
-    } else {
-      const amount = Number(item.line_total) || 0
-      if (item.category === 'labor') subtotalLabor += amount
-      else if (item.category === 'part') subtotalParts += amount
-      else subtotalOther += amount
     }
   }
 
