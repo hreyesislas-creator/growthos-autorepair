@@ -998,16 +998,44 @@ export async function saveEstimateItemParts(
 
   // Update items with recalculated parts_total and line_total
   const updatePromises: Promise<any>[] = []
+  console.log('[saveEstimateItemParts] SYNC: Starting item updates', {
+    totalItems: allItems?.length ?? 0,
+    partsSumByItemId: Object.fromEntries(partsSumByItemId),
+  })
+
   for (const item of allItems ?? []) {
     const newPartsTotal = partsSumByItemId.get(item.id as string) ?? 0
     const laborTotal = round2(Number(item.labor_total || 0))
     const newLineTotal = round2(laborTotal + newPartsTotal)
 
-    // Only update if values changed
-    if (
-      newPartsTotal !== round2(Number(item.parts_total || 0)) ||
-      newLineTotal !== round2(Number(item.line_total || 0))
-    ) {
+    const currentPartsTotal = round2(Number(item.parts_total || 0))
+    const currentLineTotal = round2(Number(item.line_total || 0))
+
+    const partsTotalChanged = newPartsTotal !== currentPartsTotal
+    const lineTotalChanged = newLineTotal !== currentLineTotal
+
+    console.log('[saveEstimateItemParts] SYNC: Item evaluation', {
+      itemId: item.id,
+      laborTotal,
+      currentPartsTotal,
+      newPartsTotal,
+      partsTotalChanged,
+      currentLineTotal,
+      newLineTotal,
+      lineTotalChanged,
+      shouldUpdate: partsTotalChanged || lineTotalChanged,
+    })
+
+    // Always update if parts_total or line_total will change
+    if (partsTotalChanged || lineTotalChanged) {
+      console.log('[saveEstimateItemParts] SYNC: Adding update promise for item', {
+        itemId: item.id,
+        updatePayload: {
+          parts_total: newPartsTotal,
+          line_total: newLineTotal,
+        },
+      })
+
       updatePromises.push(
         supabase
           .from('estimate_items')
@@ -1022,14 +1050,27 @@ export async function saveEstimateItemParts(
     }
   }
 
+  console.log('[saveEstimateItemParts] SYNC: Update promises created', {
+    promiseCount: updatePromises.length,
+  })
+
   if (updatePromises.length > 0) {
+    console.log('[saveEstimateItemParts] SYNC: Executing updates', {
+      count: updatePromises.length,
+    })
     const results = await Promise.all(updatePromises)
+    console.log('[saveEstimateItemParts] SYNC: Updates completed', {
+      successCount: results.filter((r: any) => !r.error).length,
+      errorCount: results.filter((r: any) => r.error).length,
+    })
     for (const result of results) {
       if (result.error) {
-        console.error('[saveEstimateItemParts] update item:', result.error.message)
+        console.error('[saveEstimateItemParts] SYNC UPDATE FAILED:', result.error.message)
         return { error: result.error.message }
       }
     }
+  } else {
+    console.log('[saveEstimateItemParts] SYNC: No items needed updating')
   }
 
   // Recalculate estimate snapshot totals
