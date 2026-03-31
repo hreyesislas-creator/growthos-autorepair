@@ -142,6 +142,11 @@ export async function recalculateEstimateTotals(
     return { error: itemsErr.message }
   }
 
+  console.log('[recalculateEstimateTotals] RUNTIME AUDIT START', {
+    estimateId,
+    itemCount: items?.length ?? 0,
+  })
+
   // 2. Bucket subtotals — unified financial model.
   //    RULE: Tax applies to PARTS ONLY — labor is never taxed.
   //
@@ -163,22 +168,59 @@ export async function recalculateEstimateTotals(
   let subtotalOther = 0
 
   for (const item of items ?? []) {
+    const laborTotal = Number(item.labor_total ?? 0)
+    const partsTotal = Number(item.parts_total ?? 0)
+    const lineTotal = Number(item.line_total || 0)
+
+    console.log('[recalculateEstimateTotals] ITEM DETAILS', {
+      id: item.id,
+      category: item.category,
+      service_job_id: item.service_job_id,
+      labor_total: laborTotal,
+      parts_total: partsTotal,
+      line_total: lineTotal,
+      isMiscOrFee: item.category === 'misc' || item.category === 'fee',
+    })
+
     if (item.category === 'misc' || item.category === 'fee') {
       // Misc/fee items: use line_total as-is, no labor/parts breakdown
-      const amount = Number(item.line_total) || 0
+      const amount = lineTotal
       subtotalOther += amount
+      console.log('[recalculateEstimateTotals] MISC/FEE ITEM', {
+        amount,
+        newSubtotalOther: subtotalOther,
+      })
     } else {
       // Labor, part, job items: always sum labor_total and parts_total separately
       // This works for both job-mode items and manual labor items with nested parts
-      subtotalLabor += Number(item.labor_total ?? 0)
-      subtotalParts += Number(item.parts_total ?? 0)
+      subtotalLabor += laborTotal
+      subtotalParts += partsTotal
+      console.log('[recalculateEstimateTotals] LABOR/PART ITEM', {
+        laborTotal,
+        partsTotal,
+        newSubtotalLabor: subtotalLabor,
+        newSubtotalParts: subtotalParts,
+      })
     }
   }
+
+  console.log('[recalculateEstimateTotals] ACCUMULATORS BEFORE ROUNDING', {
+    subtotalLabor,
+    subtotalParts,
+    subtotalOther,
+  })
 
   const subtotalLabor2 = round2(subtotalLabor)
   const subtotalParts2 = round2(subtotalParts)
   const subtotalOther2 = round2(subtotalOther)
   const subtotal       = round2(subtotalLabor2 + subtotalParts2 + subtotalOther2)
+
+  console.log('[recalculateEstimateTotals] AFTER ROUNDING', {
+    subtotalLabor2,
+    subtotalParts2,
+    subtotalOther2,
+    subtotal,
+  })
 
   // 3. Fetch current tax_rate from the estimate header
   const { data: header, error: headerErr } = await supabase
@@ -203,7 +245,27 @@ export async function recalculateEstimateTotals(
 
   const total = round2(subtotal + taxAmount)
 
+  console.log('[recalculateEstimateTotals] TAX CALCULATION', {
+    taxRate,
+    subtotalParts2,
+    taxAmount,
+    total,
+  })
+
   // 5. Write back to the estimate header
+  console.log('[recalculateEstimateTotals] WRITING TO DATABASE', {
+    estimateId,
+    tenantId,
+    payload: {
+      subtotal_labor: subtotalLabor2,
+      subtotal_parts: subtotalParts2,
+      subtotal_other: subtotalOther2,
+      subtotal,
+      tax_amount:     taxAmount,
+      total,
+    },
+  })
+
   const { error: updateErr } = await supabase
     .from('estimates')
     .update({
@@ -219,9 +281,20 @@ export async function recalculateEstimateTotals(
     .eq('id', estimateId)
 
   if (updateErr) {
-    console.error('[recalculateEstimateTotals] update:', updateErr.message)
+    console.error('[recalculateEstimateTotals] UPDATE FAILED', {
+      error: updateErr.message,
+      code: updateErr.code,
+      details: updateErr.details,
+    })
     return { error: updateErr.message }
   }
+
+  console.log('[recalculateEstimateTotals] SUCCESS - totals updated', {
+    estimateId,
+    subtotal_labor: subtotalLabor2,
+    subtotal_parts: subtotalParts2,
+    total,
+  })
 
   return null
 }
