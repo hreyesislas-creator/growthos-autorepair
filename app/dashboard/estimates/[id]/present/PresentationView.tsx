@@ -1063,7 +1063,7 @@ function TotalsSummary({
           <SummaryRow
             label="Estimate total"
             amount={fullEstimateTotal}
-            color="#111827"
+            color="#ffffff"
             bold
           />
         </div>
