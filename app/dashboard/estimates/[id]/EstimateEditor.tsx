@@ -35,14 +35,14 @@ const CATEGORIES = [
 ] as const
 
 const STATUSES = [
-  { value: 'draft',    label: 'Draft',    style: { background: '#f1f5f9', color: '#475569' } },
-  { value: 'sent',     label: 'Sent',     style: { background: '#eff6ff', color: '#1d4ed8' } },
-  { value: 'approved', label: 'Approved', style: { background: '#f0fdf4', color: '#15803d' } },
-  { value: 'declined', label: 'Declined', style: { background: '#fff7ed', color: '#c2410c' } },
+  { value: 'draft',     label: 'Draft',      style: { background: '#f1f5f9', color: '#475569' } },
+  { value: 'presented', label: 'Presented', style: { background: '#eff6ff', color: '#1d4ed8' } },
+  { value: 'approved',  label: 'Approved',  style: { background: '#f0fdf4', color: '#15803d' } },
+  { value: 'declined',  label: 'Declined',  style: { background: '#fff7ed', color: '#c2410c' } },
 ] as const
 
 type Category = 'labor' | 'part' | 'fee' | 'misc'
-type Status   = 'draft' | 'sent' | 'approved' | 'declined'
+type Status   = 'draft' | 'presented' | 'approved' | 'declined'
 
 // ── Local part shape ──────────────────────────────────────────────────────────
 
@@ -276,9 +276,9 @@ export default function EstimateEditor({
   // ── Present to customer state ─────────────────────────────────────────────
   const [presenting,   setPresenting]   = useState(false)
   const [presentError, setPresentError] = useState<string | null>(null)
-  // Show the share link once presented OR if the estimate is already sent/approved/declined
+  // Show the share link once presented OR if the estimate is already presented/approved/declined
   const [shareVisible, setShareVisible] = useState(
-    () => ['sent', 'approved', 'declined'].includes(estimate.status),
+    () => ['presented', 'approved', 'declined'].includes(estimate.status),
   )
   const [copied, setCopied] = useState(false)
 
@@ -373,10 +373,10 @@ export default function EstimateEditor({
       .filter(i => approvedItemIds.has(i.id))
       .reduce((sum, i) => sum + Number(i.line_total), 0),
   )
-  // Show the summary bar if the estimate has been presented (status = 'sent')
+  // Show the summary bar if the estimate has been presented (status = 'presented')
   // OR if any decisions already exist (handles manual status overrides gracefully).
   const showDecisionSummary =
-    estimate.status === 'sent' || initialDecisions.length > 0
+    estimate.status === 'presented' || initialDecisions.length > 0
 
   // ── Item mutation helpers ──────────────────────────────────────────────────
   const addItem = useCallback(() => {
@@ -615,8 +615,14 @@ export default function EstimateEditor({
     }
 
     const taxRateToSave = taxRate.trim() !== '' ? parseFloat(taxRate) / 100 : null
+    console.log('[handlePresent] About to save estimate', {
+      estimateId: estimate.id,
+      statusBeingSaved: 'presented',
+      taxRate: taxRateToSave,
+      hasNotes: !!notes,
+    })
     const headerErr = await saveEstimate(estimate.id, {
-      status:               'sent',
+      status:               'presented',
       notes:                notes         || null,
       internal_notes:       internalNotes || null,
       tax_rate:             taxRateToSave,
@@ -633,7 +639,7 @@ export default function EstimateEditor({
     }
 
     // Update local state to reflect the new status
-    setStatus('sent')
+    setStatus('presented')
     setShareVisible(true)
     setPresenting(false)
     router.refresh()
@@ -689,7 +695,7 @@ export default function EstimateEditor({
         'This estimate has been approved by the customer. ' +
         'Voiding it cannot be undone from this screen.',
       )
-    } else if (estimate.status === 'sent') {
+    } else if (estimate.status === 'presented') {
       setVoidTier('standard')
       setVoidWarning(
         'This estimate has been sent to the customer. ' +

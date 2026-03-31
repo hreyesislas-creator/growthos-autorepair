@@ -1,7 +1,14 @@
 'use client'
 
-import { useState } from 'react'
-import { approveEstimate, declineEstimate } from './actions'
+import { useState, useMemo } from 'react'
+import FinalAuthorizationBlock from '@/components/estimates/FinalAuthorizationBlock'
+import {
+  approveEstimate,
+  declineEstimate,
+  approveEstimateItem,
+  declineEstimateItem,
+  finalizeEstimateApproval
+} from './actions'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -96,9 +103,16 @@ export default function CustomerPresentation({
   const [status, setStatus] = useState(estimate.status)
   const [busy,   setBusy]   = useState<'approve' | 'decline' | null>(null)
   const [error,  setError]  = useState<string | null>(null)
+  const [workOrderId, setWorkOrderId] = useState<string | undefined>(undefined)
+
+  // Track individual item decisions (item ID → 'approved' | 'declined')
+  const [itemDecisions, setItemDecisions] = useState<Record<string, 'approved' | 'declined'>>({})
 
   const isDecided   = status === 'approved' || status === 'declined'
-  const canDecide   = status === 'sent' || status === 'draft'
+  const canDecide   = status === 'presented' || status === 'draft'
+
+  // Count approved items from local decisions
+  const approvedItemsCount = Object.values(itemDecisions).filter(d => d === 'approved').length
 
   async function handleApprove() {
     setBusy('approve')
@@ -116,6 +130,43 @@ export default function CustomerPresentation({
     setBusy(null)
     if (result?.error) { setError(result.error); return }
     setStatus('declined')
+  }
+
+  async function handleApproveItem(itemId: string) {
+    const result = await approveEstimateItem(estimate.id, itemId)
+    if (result?.error) {
+      setError(result.error)
+      return
+    }
+    setItemDecisions(prev => ({ ...prev, [itemId]: 'approved' }))
+  }
+
+  async function handleDeclineItem(itemId: string) {
+    const result = await declineEstimateItem(estimate.id, itemId)
+    if (result?.error) {
+      setError(result.error)
+      return
+    }
+    setItemDecisions(prev => ({ ...prev, [itemId]: 'declined' }))
+  }
+
+  async function handleAuthorizeEstimate(approvedByName: string | null): Promise<string> {
+    const result = await finalizeEstimateApproval(estimate.id, approvedByName)
+    if ('error' in result) {
+      throw new Error(result.error || 'Authorization failed')
+    }
+    const woId = result.data?.workOrderId
+    if (woId) {
+      setWorkOrderId(woId)
+      return woId
+    }
+    throw new Error('No work order ID returned')
+  }
+
+  function handleViewWorkOrder(woId: string) {
+    // For public customer page, navigate to dashboard work order
+    // In production, might redirect to customer portal or email confirmation
+    window.location.href = `/dashboard/work-orders/${woId}`
   }
 
   // Sort findings: critical first, then warnings
@@ -145,7 +196,7 @@ export default function CustomerPresentation({
   return (
     <div style={{
       minHeight: '100vh',
-      background: '#f0f4f8',
+      background: '#0f172a',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif',
     }}>
 
@@ -269,7 +320,7 @@ export default function CustomerPresentation({
 
           <div style={S.card}>
             {items.length === 0 ? (
-              <p style={{ textAlign: 'center', color: '#64748b', fontSize: 13, padding: '12px 0', margin: 0 }}>
+              <p style={{ textAlign: 'center', color: '#cbd5e1', fontSize: 13, padding: '12px 0', margin: 0 }}>
                 No line items on this estimate.
               </p>
             ) : (
@@ -284,25 +335,26 @@ export default function CustomerPresentation({
                     const partsTotal  = Number(item.parts_total  ?? 0)
                     const lineTotal   = Number(item.line_total)
                     const isLast      = idx === items.length - 1
+                    const itemDecision = itemDecisions[item.id]
 
                     return (
                       <div
                         key={item.id}
                         style={{
                           padding: '14px 0',
-                          borderBottom: isLast ? 'none' : '1px solid #f1f5f9',
+                          borderBottom: isLast ? 'none' : '1px solid #334155',
                         }}
                       >
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             {/* Title */}
-                            <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', lineHeight: 1.3 }}>
+                            <div style={{ fontSize: 15, fontWeight: 700, color: '#e2e8f0', lineHeight: 1.3 }}>
                               {item.title}
                             </div>
 
                             {/* Description */}
                             {item.description && (
-                              <div style={{ fontSize: 13, color: '#64748b', marginTop: 3, lineHeight: 1.4 }}>
+                              <div style={{ fontSize: 13, color: '#cbd5e1', marginTop: 3, lineHeight: 1.4 }}>
                                 {item.description}
                               </div>
                             )}
@@ -325,21 +377,87 @@ export default function CustomerPresentation({
                             {/* Line item note */}
                             {item.notes && (
                               <div style={{
-                                marginTop: 8, fontSize: 12, color: '#64748b',
+                                marginTop: 8, fontSize: 12, color: '#cbd5e1',
                                 fontStyle: 'italic', lineHeight: 1.5,
                                 padding: '6px 10px',
-                                background: '#f8fafc',
+                                background: '#0f172a',
                                 borderRadius: 6,
                                 borderLeft: '3px solid #e2e8f0',
                               }}>
                                 {item.notes}
                               </div>
                             )}
+
+                            {/* Per-item approval buttons */}
+                            <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+                              <button
+                                onClick={() => handleApproveItem(item.id)}
+                                style={{
+                                  flex: 1,
+                                  padding: '8px 12px',
+                                  borderRadius: 8,
+                                  border: itemDecision === 'approved' ? 'none' : '1px solid #475569',
+                                  background: itemDecision === 'approved' ? '#16a34a' : 'transparent',
+                                  color: itemDecision === 'approved' ? '#fff' : '#cbd5e1',
+                                  fontSize: 13,
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                  transition: 'all 0.2s',
+                                  textTransform: 'uppercase',
+                                  letterSpacing: '0.04em',
+                                }}
+                                onMouseEnter={e => {
+                                  if (itemDecision !== 'approved') {
+                                    e.currentTarget.style.borderColor = '#16a34a'
+                                    e.currentTarget.style.color = '#16a34a'
+                                  }
+                                }}
+                                onMouseLeave={e => {
+                                  if (itemDecision !== 'approved') {
+                                    e.currentTarget.style.borderColor = '#475569'
+                                    e.currentTarget.style.color = '#cbd5e1'
+                                  }
+                                }}
+                              >
+                                ✓ Approve
+                              </button>
+                              <button
+                                onClick={() => handleDeclineItem(item.id)}
+                                style={{
+                                  flex: 1,
+                                  padding: '8px 12px',
+                                  borderRadius: 8,
+                                  border: itemDecision === 'declined' ? 'none' : '1px solid #475569',
+                                  background: itemDecision === 'declined' ? '#dc2626' : 'transparent',
+                                  color: itemDecision === 'declined' ? '#fff' : '#cbd5e1',
+                                  fontSize: 13,
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                  transition: 'all 0.2s',
+                                  textTransform: 'uppercase',
+                                  letterSpacing: '0.04em',
+                                }}
+                                onMouseEnter={e => {
+                                  if (itemDecision !== 'declined') {
+                                    e.currentTarget.style.borderColor = '#dc2626'
+                                    e.currentTarget.style.color = '#dc2626'
+                                  }
+                                }}
+                                onMouseLeave={e => {
+                                  if (itemDecision !== 'declined') {
+                                    e.currentTarget.style.borderColor = '#475569'
+                                    e.currentTarget.style.color = '#cbd5e1'
+                                  }
+                                }}
+                              >
+                                ✕ Decline
+                              </button>
+                            </div>
                           </div>
 
                           {/* Line total */}
                           <div style={{
-                            fontSize: 16, fontWeight: 800, color: '#0f172a',
+                            fontSize: 16, fontWeight: 800, color: '#e2e8f0',
                             whiteSpace: 'nowrap',
                             fontVariantNumeric: 'tabular-nums',
                           }}>
@@ -354,7 +472,7 @@ export default function CustomerPresentation({
                 {/* Totals block */}
                 <div style={{
                   marginTop: 12, paddingTop: 14,
-                  borderTop: '2px solid #e2e8f0',
+                  borderTop: '2px solid #475569',
                 }}>
                   {Number(estimate.subtotal) > 0 && (
                     <TotalLine label="Subtotal" amount={Number(estimate.subtotal)} />
@@ -368,13 +486,13 @@ export default function CustomerPresentation({
                   <div style={{
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     marginTop: 10, paddingTop: 10,
-                    borderTop: '1px solid #e2e8f0',
+                    borderTop: '1px solid #475569',
                   }}>
-                    <span style={{ fontSize: 17, fontWeight: 800, color: '#0f172a' }}>
+                    <span style={{ fontSize: 17, fontWeight: 800, color: '#e2e8f0' }}>
                       Total
                     </span>
                     <span style={{
-                      fontSize: 28, fontWeight: 900, color: '#0f172a',
+                      fontSize: 28, fontWeight: 900, color: '#e2e8f0',
                       fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em',
                     }}>
                       ${Number(estimate.total).toFixed(2)}
@@ -397,7 +515,7 @@ export default function CustomerPresentation({
             </div>
             <div style={{
               ...S.card,
-              fontSize: 15, lineHeight: 1.7, color: '#334155',
+              fontSize: 15, lineHeight: 1.7, color: '#cbd5e1',
               borderLeft: '4px solid #3b82f6',
               paddingLeft: 20,
             }}>
@@ -419,10 +537,10 @@ export default function CustomerPresentation({
 
               <div style={S.card}>
                 <div style={{ textAlign: 'center', marginBottom: 20 }}>
-                  <div style={{ fontSize: 17, fontWeight: 800, color: '#0f172a', marginBottom: 6 }}>
+                  <div style={{ fontSize: 17, fontWeight: 800, color: '#e2e8f0', marginBottom: 6 }}>
                     Ready to proceed?
                   </div>
-                  <div style={{ fontSize: 14, color: '#64748b', lineHeight: 1.5 }}>
+                  <div style={{ fontSize: 14, color: '#cbd5e1', lineHeight: 1.5 }}>
                     Your authorization is needed to begin the repair.
                     <br />Approving this estimate authorizes the work listed above.
                   </div>
@@ -431,8 +549,8 @@ export default function CustomerPresentation({
                 {error && (
                   <div style={{
                     marginBottom: 14, padding: '10px 14px',
-                    background: '#fef2f2', border: '1px solid #fca5a5',
-                    borderRadius: 10, fontSize: 13, color: '#b91c1c',
+                    background: '#7f1d1d', border: '1px solid #7f1d1d',
+                    borderRadius: 10, fontSize: 13, color: '#fca5a5',
                   }}>
                     {error}
                   </div>
@@ -466,7 +584,7 @@ export default function CustomerPresentation({
                   style={{
                     width: '100%', padding: '14px 16px',
                     fontSize: 14, fontWeight: 600, borderRadius: 14,
-                    border: '1px solid #e2e8f0',
+                    border: '1px solid #475569',
                     cursor: busy ? 'not-allowed' : 'pointer',
                     background: 'transparent',
                     color: '#94a3b8',
@@ -533,26 +651,30 @@ export default function CustomerPresentation({
           <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
             <a
               href={`tel:${shopPhone.replace(/\D/g, '')}`}
-              style={{
-                ...S.contactBtn,
-                background: '#fff',
-              }}
+              style={S.contactBtn}
             >
               <span style={{ fontSize: 18 }}>📞</span>
               <span>Call Shop</span>
             </a>
             <a
               href={`sms:${shopPhone.replace(/\D/g, '')}`}
-              style={{
-                ...S.contactBtn,
-                background: '#fff',
-              }}
+              style={S.contactBtn}
             >
               <span style={{ fontSize: 18 }}>💬</span>
               <span>Text Shop</span>
             </a>
           </div>
         )}
+
+        {/* ═══════════════════════════════════════════════════════════════════
+            FINAL AUTHORIZATION & WORK ORDER
+        ═══════════════════════════════════════════════════════════════════ */}
+        <FinalAuthorizationBlock
+          approvedItemsCount={approvedItemsCount}
+          workOrderId={workOrderId}
+          onAuthorize={handleAuthorizeEstimate}
+          onViewWorkOrder={handleViewWorkOrder}
+        />
 
         {/* Bottom breathing room on mobile */}
         <div style={{ height: 32 }} />
@@ -574,8 +696,8 @@ function FindingCard({
     <div style={{
       marginBottom: 12,
       borderRadius: 14,
-      border: critical ? '2px solid #fca5a5' : '1px solid #fde68a',
-      background: critical ? '#fff5f5' : '#fffbeb',
+      border: critical ? '2px solid #7f1d1d' : '1px solid #92400e',
+      background: critical ? '#3f0a0a' : '#44290d',
       overflow: 'hidden',
     }}>
       {/* Critical header strip */}
@@ -583,12 +705,12 @@ function FindingCard({
         <div style={{
           display: 'flex', alignItems: 'center', gap: 8,
           padding: '10px 16px',
-          background: 'linear-gradient(90deg, #fee2e2, #fecaca)',
-          borderBottom: '1px solid #fca5a5',
+          background: 'linear-gradient(90deg, #7f1d1d, #5b1b1b)',
+          borderBottom: '1px solid #7f1d1d',
         }}>
           <span style={{ fontSize: 16 }}>🚨</span>
           <span style={{
-            fontSize: 11, fontWeight: 900, color: '#b91c1c',
+            fontSize: 11, fontWeight: 900, color: '#fca5a5',
             textTransform: 'uppercase', letterSpacing: '0.07em',
           }}>
             Immediate Attention Required
@@ -605,9 +727,9 @@ function FindingCard({
             padding: '3px 9px', borderRadius: 6,
             fontSize: 10, fontWeight: 900,
             textTransform: 'uppercase', letterSpacing: '0.06em',
-            background: critical ? '#dc2626' : '#fef3c7',
-            color:      critical ? '#fff'     : '#92400e',
-            border:     critical ? '1px solid #b91c1c' : '1px solid #fcd34d',
+            background: critical ? '#7f1d1d' : '#663a0d',
+            color:      critical ? '#fca5a5' : '#fcd34d',
+            border:     critical ? '1px solid #7f1d1d' : '1px solid #663a0d',
           }}>
             {critical ? '⚠ Critical' : '! Warning'}
           </span>
@@ -623,7 +745,7 @@ function FindingCard({
             {/* Finding title */}
             <div style={{
               fontSize: 15, fontWeight: 800, lineHeight: 1.3, marginBottom: 4,
-              color: critical ? '#7f1d1d' : '#78350f',
+              color: critical ? '#fca5a5' : '#fcd34d',
             }}>
               {rec.title}
             </div>
@@ -632,7 +754,7 @@ function FindingCard({
             {rec.description && (
               <div style={{
                 fontSize: 13, lineHeight: 1.55,
-                color: critical ? '#991b1b' : '#92400e',
+                color: critical ? '#f87171' : '#fbbf24',
                 fontWeight: critical ? 500 : 400,
               }}>
                 {rec.description}
@@ -646,9 +768,9 @@ function FindingCard({
                 fontStyle: 'italic',
                 padding: '8px 12px',
                 borderRadius: 8,
-                background:  critical ? '#fff1f1' : '#fef9ec',
+                background:  critical ? '#5b1b1b' : '#663a0d',
                 borderLeft:  `3px solid ${critical ? '#fca5a5' : '#f59e0b'}`,
-                color:        critical ? '#991b1b' : '#78350f',
+                color:        critical ? '#f87171' : '#fbbf24',
               }}>
                 <strong style={{ fontStyle: 'normal', marginRight: 4 }}>Tech Note:</strong>
                 {rec.technician_notes}
@@ -659,10 +781,10 @@ function FindingCard({
             {rec.section_name && (
               <div style={{ marginTop: 8 }}>
                 <span style={{
-                  fontSize: 10, color: '#94a3b8',
+                  fontSize: 10, color: '#cbd5e1',
                   padding: '2px 7px', borderRadius: 4,
-                  background: critical ? '#fff' : '#fff',
-                  border: '1px solid #e2e8f0',
+                  background: '#334155',
+                  border: '1px solid #475569',
                 }}>
                   {rec.section_name}
                 </span>
@@ -681,8 +803,8 @@ function TotalLine({ label, amount }: { label: string; amount: number }) {
       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
       padding: '4px 0',
     }}>
-      <span style={{ fontSize: 13, color: '#64748b' }}>{label}</span>
-      <span style={{ fontSize: 14, color: '#334155', fontVariantNumeric: 'tabular-nums' }}>
+      <span style={{ fontSize: 13, color: '#cbd5e1' }}>{label}</span>
+      <span style={{ fontSize: 14, color: '#cbd5e1', fontVariantNumeric: 'tabular-nums' }}>
         ${amount.toFixed(2)}
       </span>
     </div>
@@ -693,10 +815,10 @@ function TotalLine({ label, amount }: { label: string; amount: number }) {
 
 const S = {
   card: {
-    background: '#fff',
+    background: '#1e293b',
     borderRadius: 16,
     padding: '18px 16px',
-    boxShadow: '0 1px 4px rgba(0,0,0,0.07), 0 0 0 1px rgba(0,0,0,0.04)',
+    border: '1px solid #475569',
     marginBottom: 16,
   } as React.CSSProperties,
 
@@ -708,7 +830,7 @@ const S = {
     fontWeight: 900,
     textTransform: 'uppercase' as const,
     letterSpacing: '0.08em',
-    color: '#64748b',
+    color: '#cbd5e1',
     marginBottom: 10,
     paddingLeft: 2,
   } as React.CSSProperties,
@@ -729,12 +851,12 @@ const S = {
   value: {
     fontSize: 15,
     fontWeight: 700,
-    color: '#0f172a',
+    color: '#e2e8f0',
   } as React.CSSProperties,
 
   sub: {
     fontSize: 12,
-    color: '#64748b',
+    color: '#cbd5e1',
     marginTop: 2,
   } as React.CSSProperties,
 
@@ -746,11 +868,12 @@ const S = {
     gap: 8,
     padding: '14px 12px',
     borderRadius: 14,
-    border: '1px solid #e2e8f0',
-    color: '#334155',
+    border: '1px solid #475569',
+    background: '#1e293b',
+    color: '#cbd5e1',
     fontSize: 14,
     fontWeight: 700,
     textDecoration: 'none',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+    transition: 'all 0.2s',
   } as React.CSSProperties,
 }

@@ -162,7 +162,6 @@ ALTER TABLE estimate_source_files ENABLE ROW LEVEL SECURITY;
 --   (SELECT tenant_id FROM tenant_users WHERE user_id = auth.uid() LIMIT 1)
 
 -- Example policies (adjust the tenant-resolution expression for your project):
-/*
 CREATE POLICY "tenant_estimates" ON estimates
   USING (tenant_id = (auth.jwt() ->> 'tenant_id')::uuid);
 
@@ -171,7 +170,6 @@ CREATE POLICY "tenant_estimate_items" ON estimate_items
 
 CREATE POLICY "tenant_estimate_source_files" ON estimate_source_files
   USING (tenant_id = (auth.jwt() ->> 'tenant_id')::uuid);
-*/
 
 -- ---------------------------------------------------------------------------
 -- E) Estimate number helper function

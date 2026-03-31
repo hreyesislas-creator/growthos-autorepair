@@ -48,7 +48,7 @@ export default async function EstimatePresentationPage({
   const supabase = createAdminClient()
 
   // ── 1. Fetch estimate header + items ───────────────────────────────────────
-  const [estimateRes, decisionRes] = await Promise.all([
+  const [estimateRes, decisionRes, workOrderRes] = await Promise.all([
     supabase
       .from('estimates')
       .select(
@@ -63,10 +63,19 @@ export default async function EstimatePresentationPage({
       .from('estimate_item_decisions')
       .select('id, tenant_id, estimate_id, estimate_item_id, decision, decided_by, decided_at, created_at, updated_at')
       .eq('estimate_id', params.estimateId),
+    // Fetch existing work order (for persistence after reload)
+    supabase
+      .from('work_orders')
+      .select('id')
+      .eq('estimate_id', params.estimateId)
+      .maybeSingle(),
   ])
 
   const estimate = estimateRes.data
   if (!estimate) return notFound()
+
+  // Extract existing work order ID if one exists
+  const existingWorkOrderId = workOrderRes.data?.id ?? undefined
 
   // ── 2. Parallel data fetches ───────────────────────────────────────────────
   const [itemsRes, customerRes, vehicleRes, tenantRes, profileRes, recsRes] =
@@ -156,6 +165,7 @@ export default async function EstimatePresentationPage({
       shopName={shopName}
       customerPhone={customerPhone}
       initialDecisions={initialDecisions}
+      existingWorkOrderId={existingWorkOrderId}
     />
   )
 }

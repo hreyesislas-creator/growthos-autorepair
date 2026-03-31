@@ -34,7 +34,6 @@ import type {
   EstimateItemPart,
   EstimateWithItems,
   EstimateItemDecision,
-  EstimateApproval,
   TenantPricingConfig,
   ServiceJobWithCategory,
   WorkOrder,
@@ -1326,11 +1325,14 @@ export async function getVehicleDisplay(vehicleId: string): Promise<string | nul
 /**
  * Fetch the most recent approval record for an estimate.
  * Returns the latest EstimateApproval if it exists.
- */
+ *
+ * COMMENTED OUT: Requires EstimateApproval type definition and estimate_approvals table.
+ * Currently unused. Re-enable when implementing estimate approval workflow.
+ *
 export async function getLatestEstimateApproval(
   tenantId: string,
   estimateId: string,
-): Promise<EstimateApproval | null> {
+): Promise<any | null> {
   if (!hasValue(tenantId) || !hasValue(estimateId)) return null
 
   const supabase = await createClient()
@@ -1349,16 +1351,20 @@ export async function getLatestEstimateApproval(
     return null
   }
 
-  return (data ?? null) as EstimateApproval | null
+  return (data ?? null) as any | null
 }
+*/
 
 /**
  * Fetch all approval records for an estimate (audit trail).
- */
+ *
+ * COMMENTED OUT: Requires EstimateApproval type definition and estimate_approvals table.
+ * Currently unused. Re-enable when implementing estimate approval audit trail.
+ *
 export async function getEstimateApprovalHistory(
   tenantId: string,
   estimateId: string,
-): Promise<EstimateApproval[]> {
+): Promise<any[]> {
   if (!hasValue(tenantId) || !hasValue(estimateId)) return []
 
   const supabase = await createClient()
@@ -1375,5 +1381,6 @@ export async function getEstimateApprovalHistory(
     return []
   }
 
-  return (data ?? []) as EstimateApproval[]
+  return (data ?? []) as any[]
 }
+*/

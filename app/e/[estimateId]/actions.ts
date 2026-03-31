@@ -229,3 +229,151 @@ export async function undecideEstimateItem(
 
   return null
 }
+
+// ── Final Authorization & Work Order Creation ──────────────────────────────
+
+/**
+ * Finalize estimate authorization and create work order from approved items.
+ * Public version for unauthenticated customers.
+ *
+ * Flow:
+ * 1. Validate estimate exists and has approved items
+ * 2. Check for existing work order (idempotency)
+ * 3. If exists → return it
+ * 4. If not → create new work order from approved items
+ * 5. Update estimate with approval metadata
+ * 6. Return workOrderId
+ */
+export async function finalizeEstimateApproval(
+  estimateId: string,
+  approvedByName: string | null,
+): Promise<{ data?: { workOrderId: string }; error?: string }> {
+  const supabase = createAdminClient()
+  const now = new Date().toISOString()
+
+  // ── Step 1: Load estimate and validate ──────────────────────────────────
+  const { data: estimate, error: fetchEstimateErr } = await supabase
+    .from('estimates')
+    .select('id, tenant_id, customer_id, status')
+    .eq('id', estimateId)
+    .maybeSingle()
+
+  if (fetchEstimateErr || !estimate) {
+    return { error: 'Estimate not found.' }
+  }
+
+  // ── Step 2: Load approved items ─────────────────────────────────────────
+  const { data: items, error: fetchItemsErr } = await supabase
+    .from('estimate_items')
+    .select('id, tenant_id, title, description, line_total')
+    .eq('estimate_id', estimateId)
+
+  if (fetchItemsErr) {
+    return { error: 'Failed to load estimate items.' }
+  }
+
+  // ── Step 3: Load item decisions to find approved items ──────────────────
+  const { data: decisions, error: fetchDecisionsErr } = await supabase
+    .from('estimate_item_decisions')
+    .select('estimate_item_id, decision')
+    .eq('estimate_id', estimateId)
+
+  if (fetchDecisionsErr) {
+    return { error: 'Failed to load item decisions.' }
+  }
+
+  const approvedItemIds = new Set(
+    decisions
+      .filter(d => d.decision === 'approved')
+      .map(d => d.estimate_item_id)
+  )
+
+  const approvedItems = items.filter(i => approvedItemIds.has(i.id))
+
+  if (approvedItems.length === 0) {
+    return { error: 'No approved items to create work order.' }
+  }
+
+  // ── Step 4: Check for existing work order (idempotency) ─────────────────
+  const { data: existingWorkOrder, error: fetchWoErr } = await supabase
+    .from('work_orders')
+    .select('id')
+    .eq('estimate_id', estimateId)
+    .maybeSingle()
+
+  if (fetchWoErr && fetchWoErr.code !== 'PGRST116') {
+    // PGRST116 = no rows found, which is expected
+    return { error: 'Failed to check for existing work order.' }
+  }
+
+  if (existingWorkOrder) {
+    // Work order already exists — return it (idempotent)
+    return { data: { workOrderId: existingWorkOrder.id } }
+  }
+
+  // ── Step 5: Create new work order ──────────────────────────────────────
+  const { data: newWorkOrder, error: createWoErr } = await supabase
+    .from('work_orders')
+    .insert({
+      tenant_id: estimate.tenant_id,
+      customer_id: estimate.customer_id,
+      estimate_id: estimateId,
+      status: 'pending',
+      created_at: now,
+      updated_at: now,
+    })
+    .select('id')
+    .single()
+
+  if (createWoErr || !newWorkOrder) {
+    console.error('[finalizeEstimateApproval] Create WO failed:', createWoErr)
+    return { error: 'Failed to create work order.' }
+  }
+
+  // ── Step 6: Create work order items from approved items ────────────────
+  const workOrderItems = approvedItems.map(item => ({
+    work_order_id: newWorkOrder.id,
+    estimate_item_id: item.id,
+    tenant_id: estimate.tenant_id,
+    title: item.title,
+    description: item.description,
+    line_total: item.line_total,
+    status: 'pending',
+    created_at: now,
+    updated_at: now,
+  }))
+
+  const { error: createItemsErr } = await supabase
+    .from('work_order_items')
+    .insert(workOrderItems)
+
+  if (createItemsErr) {
+    console.error('[finalizeEstimateApproval] Create items failed:', createItemsErr)
+    // Rollback: delete orphaned work order
+    await supabase.from('work_orders').delete().eq('id', newWorkOrder.id)
+    return { error: 'Failed to create work order items.' }
+  }
+
+  // ── Step 7: Update estimate with approval metadata ────────────────────
+  const { error: updateEstimateErr } = await supabase
+    .from('estimates')
+    .update({
+      status: 'approved',
+      approved_by_name: approvedByName,
+      approval_method: 'in_person',
+      approved_at: now,
+      updated_at: now,
+    })
+    .eq('id', estimateId)
+
+  if (updateEstimateErr) {
+    console.error('[finalizeEstimateApproval] Update estimate failed:', updateEstimateErr)
+    // Rollback: delete work order and items
+    await supabase.from('work_order_items').delete().eq('work_order_id', newWorkOrder.id)
+    await supabase.from('work_orders').delete().eq('id', newWorkOrder.id)
+    return { error: 'Failed to update estimate.' }
+  }
+
+  // ── Success ─────────────────────────────────────────────────────────────
+  return { data: { workOrderId: newWorkOrder.id } }
+}

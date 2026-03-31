@@ -530,7 +530,7 @@ export type EstimateCreationMode =
 
 export type EstimateStatus =
   | 'draft'
-  | 'sent'
+  | 'presented'
   | 'approved'
   | 'declined'
 

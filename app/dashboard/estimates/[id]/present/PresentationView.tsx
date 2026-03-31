@@ -3,12 +3,14 @@
 import { useState, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import type { EstimateWithItems, EstimateItem, EstimateItemPart, EstimateItemDecision } from '@/lib/types'
+import FinalAuthorizationBlock from '@/components/estimates/FinalAuthorizationBlock'
 import {
   sendEstimateByText,
   approveEstimateItem,
   declineEstimateItem,
   undecideEstimateItem,
   createWorkOrderFromApprovedItems,
+  finalizeEstimateApproval,
 } from './actions'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -115,6 +117,9 @@ export default function PresentationView({
   const [creatingWorkOrder, setCreatingWorkOrder] = useState(false)
   const [woError, setWoError] = useState<string | null>(null)
 
+  // ── Final Authorization state ──────────────────────────────────────────────
+  const [workOrderId, setWorkOrderId] = useState<string | undefined>(undefined)
+
   // ── Optimistic-update helpers ──────────────────────────────────────────────
 
   const approve = useCallback(async (id: string) => {
@@ -198,6 +203,27 @@ export default function PresentationView({
     router.push(`/dashboard/work-orders/${result.data.workOrderId}`)
   }, [estimateId, router])
 
+  // ── Final Authorization handler ────────────────────────────────────────────
+  const handleAuthorizeEstimate = useCallback(async (approvedByName: string | null): Promise<string> => {
+    const result = await finalizeEstimateApproval(estimateId, approvedByName)
+
+    if ('error' in result) {
+      throw new Error(result.error || 'Authorization failed')
+    }
+
+    const woId = result.data?.workOrderId
+    if (woId) {
+      setWorkOrderId(woId)
+      return woId
+    }
+
+    throw new Error('No work order ID returned')
+  }, [estimateId])
+
+  const handleViewWorkOrder = useCallback((woId: string) => {
+    router.push(`/dashboard/work-orders/${woId}`)
+  }, [router])
+
   // ── Decision buckets ────────────────────────────────────────────────────────
   const approvedItems  = useMemo(() => estimate.items.filter(i => decisions[i.id] === 'approved'),  [estimate.items, decisions])
   const declinedItems  = useMemo(() => estimate.items.filter(i => decisions[i.id] === 'declined'),  [estimate.items, decisions])
@@ -240,31 +266,31 @@ export default function PresentationView({
 
       {/* ── Header ────────────────────────────────────────────────────────── */}
       <div style={{
-        background: '#fff',
-        border: '1px solid var(--border-2)',
+        background: '#1e293b',
+        border: '1px solid #475569',
         borderRadius: 10,
         padding: '20px 24px',
         marginBottom: 20,
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
           <div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: '#0f172a', marginBottom: 2 }}>
+            <div style={{ fontSize: 20, fontWeight: 700, color: '#e2e8f0', marginBottom: 2 }}>
               {shopName}
             </div>
-            <div style={{ fontSize: 13, color: '#4B5563' }}>
+            <div style={{ fontSize: 13, color: '#cbd5e1' }}>
               Service Estimate · {estimate.estimate_number}
             </div>
           </div>
           <div style={{ textAlign: 'right' }}>
             {customerName && (
-              <div style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#e2e8f0' }}>
                 {customerName}
               </div>
             )}
             {vehicleLabel && (
-              <div style={{ fontSize: 13, color: '#4B5563' }}>{vehicleLabel}</div>
+              <div style={{ fontSize: 13, color: '#cbd5e1' }}>{vehicleLabel}</div>
             )}
-            <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>{estimateDate}</div>
+            <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>{estimateDate}</div>
           </div>
         </div>
 
@@ -314,13 +340,13 @@ export default function PresentationView({
 
       {/* ── Instruction banner ────────────────────────────────────────────── */}
       <div style={{
-        background: '#eff6ff',
-        border: '1px solid #bfdbfe',
+        background: '#0f2847',
+        border: '1px solid #1e3a5f',
         borderRadius: 8,
         padding: '12px 16px',
         marginBottom: 20,
         fontSize: 13,
-        color: '#1e40af',
+        color: '#93c5fd',
         display: 'flex',
         alignItems: 'center',
         gap: 8,
@@ -365,6 +391,8 @@ export default function PresentationView({
           declinedSubtotal={declinedSubtotal}
           remainingSubtotal={remainingSubtotal}
           fullEstimateSubtotal={round2(Number(estimate.subtotal))}
+          fullEstimateLaborSubtotal={round2(Number(estimate.subtotal_labor ?? 0))}
+          fullEstimatePartsSubtotal={round2(Number(estimate.subtotal_parts ?? 0))}
           fullEstimateTax={fullEstimateTax}
           fullEstimateTotal={round2(Number(estimate.total))}
           taxRatePercent={taxRateFraction ? round2(taxRateFraction * 100) : null}
@@ -374,72 +402,13 @@ export default function PresentationView({
         />
       </div>
 
-      {/* ── Work-order CTA ────────────────────────────────────────────────── */}
-      <div style={{
-        marginTop: 24,
-        display: 'flex',
-        justifyContent: 'flex-end',
-        alignItems: 'center',
-        gap: 12,
-        flexWrap: 'wrap',
-        flexDirection: 'column',
-      }}>
-        {woError && (
-          <div style={{
-            fontSize: 13,
-            color: '#dc2626',
-            background: '#fef2f2',
-            border: '1px solid #fecaca',
-            padding: '10px 12px',
-            borderRadius: 6,
-            width: '100%',
-            textAlign: 'center',
-          }}>
-            {woError}
-          </div>
-        )}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          justifyContent: 'flex-end',
-          width: '100%',
-          flexWrap: 'wrap',
-        }}>
-          {!allDecided && (
-            <span style={{ fontSize: 12, color: '#64748b' }}>
-              {remainingItems.length} job{remainingItems.length !== 1 ? 's' : ''} still need a decision
-            </span>
-          )}
-          <button
-            disabled={creatingWorkOrder || !allDecided || approvedItems.length === 0}
-            onClick={handleCreateWorkOrder}
-            title={
-              !allDecided
-                ? 'Approve or decline all jobs first'
-                : approvedItems.length === 0
-                  ? 'Approve at least one job'
-                  : 'Create a work order from approved jobs'
-            }
-            style={{
-              padding: '10px 22px',
-              borderRadius: 8,
-              border: 'none',
-              background: allDecided && approvedItems.length > 0
-                ? 'var(--accent,#2563eb)'
-                : '#e2e8f0',
-              color: allDecided && approvedItems.length > 0 ? '#fff' : '#94a3b8',
-              fontWeight: 600,
-              fontSize: 14,
-              cursor: (allDecided && approvedItems.length > 0 && !creatingWorkOrder) ? 'pointer' : 'not-allowed',
-              opacity: allDecided && approvedItems.length > 0 ? 0.85 : 0.6,
-              transition: 'all 0.2s',
-            }}
-          >
-            {creatingWorkOrder ? '⏳ Creating...' : '✓ Send Approved to Work Order'}
-          </button>
-        </div>
-      </div>
+      {/* ── Final Authorization Block ────────────────────────────────────── */}
+      <FinalAuthorizationBlock
+        approvedItemsCount={approvedItems.length}
+        workOrderId={workOrderId}
+        onAuthorize={handleAuthorizeEstimate}
+        onViewWorkOrder={handleViewWorkOrder}
+      />
 
     </div>
   )
@@ -510,8 +479,8 @@ function ShareBar({ estimateId, customerName, customerPhone, shopName }: ShareBa
 
   return (
     <div style={{
-      background: '#fff',
-      border: '1px solid var(--border-2)',
+      background: '#1e293b',
+      border: '1px solid #475569',
       borderRadius: 10,
       padding: '14px 16px',
       marginBottom: 20,
@@ -524,13 +493,13 @@ function ShareBar({ estimateId, customerName, customerPhone, shopName }: ShareBa
         flexWrap: 'wrap',
       }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 2 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: '#cbd5e1', marginBottom: 2 }}>
             Customer link
           </div>
           {/* ── Hydration-safe: relative path only — identical on server + client ── */}
           <div style={{
             fontSize: 12,
-            color: '#6B7280',
+            color: '#94a3b8',
             fontFamily: 'var(--font-mono)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -547,9 +516,9 @@ function ShareBar({ estimateId, customerName, customerPhone, shopName }: ShareBa
             flexShrink: 0,
             padding: '8px 14px',
             borderRadius: 7,
-            border: '1px solid var(--border-2)',
-            background: copyState === 'copied' ? '#f0fdf4' : '#fff',
-            color:  copyState === 'copied' ? '#15803d' : '#1e293b',
+            border: '1px solid #475569',
+            background: copyState === 'copied' ? '#16a34a' : '#334155',
+            color:  copyState === 'copied' ? '#fff' : '#cbd5e1',
             fontSize: 13,
             fontWeight: 600,
             cursor: 'pointer',
@@ -568,17 +537,17 @@ function ShareBar({ estimateId, customerName, customerPhone, shopName }: ShareBa
             flexShrink: 0,
             padding: '8px 14px',
             borderRadius: 7,
-            border: '1px solid var(--border-2)',
+            border: '1px solid #475569',
             background: textState === 'sent' || textState === 'not_wired'
-              ? '#f0fdf4'
+              ? '#16a34a'
               : textState === 'error' || textState === 'no_phone'
-              ? '#fef2f2'
-              : '#fff',
+              ? '#7f1d1d'
+              : '#334155',
             color: textState === 'sent' || textState === 'not_wired'
-              ? '#15803d'
+              ? '#fff'
               : textState === 'error' || textState === 'no_phone'
-              ? '#dc2626'
-              : '#1e293b',
+              ? '#fca5a5'
+              : '#cbd5e1',
             fontSize: 13,
             fontWeight: 600,
             cursor: textState === 'sending' ? 'wait' : 'pointer',
@@ -730,21 +699,21 @@ function JobCard({ item, decision, onApprove, onDecline, onUndecide, isSaving, s
           justifyContent: 'space-between',
           alignItems: 'center',
           padding: '6px 18px',
-          borderTop: '1px solid var(--border-2)',
-          background: 'var(--surface-2,#f8fafc)',
+          borderTop: '1px solid #334155',
+          background: '#0f172a',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 12, color: '#64748b' }}>🔧</span>
-            <span style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
+            <span style={{ fontSize: 12, color: '#94a3b8' }}>🔧</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0' }}>
               Labor&nbsp;&nbsp;
-              <span style={{ color: '#4B5563', fontSize: 12, fontWeight: 400 }}>
+              <span style={{ color: '#cbd5e1', fontSize: 12, fontWeight: 400 }}>
                 {item.labor_hours} hrs @ ${Number(item.labor_rate ?? 0).toFixed(2)}/hr
               </span>
             </span>
           </div>
           <span style={{
             fontFamily: 'var(--font-mono)', fontWeight: 700,
-            fontSize: 13, color: '#111827',
+            fontSize: 13, color: '#e2e8f0',
           }}>
             ${laborCost.toFixed(2)}
           </span>
@@ -939,6 +908,8 @@ interface TotalsSummaryProps {
   declinedSubtotal:       number
   remainingSubtotal:      number
   fullEstimateSubtotal:   number
+  fullEstimateLaborSubtotal?: number
+  fullEstimatePartsSubtotal?: number
   fullEstimateTax:        number
   fullEstimateTotal:      number
   taxRatePercent:         number | null
@@ -954,6 +925,8 @@ function TotalsSummary({
   declinedSubtotal,
   remainingSubtotal,
   fullEstimateSubtotal,
+  fullEstimateLaborSubtotal,
+  fullEstimatePartsSubtotal,
   fullEstimateTax,
   fullEstimateTotal,
   taxRatePercent,
@@ -963,17 +936,17 @@ function TotalsSummary({
 }: TotalsSummaryProps) {
   return (
     <div style={{
-      background: '#fff',
-      border: '1px solid var(--border-2)',
+      background: '#1e293b',
+      border: '1px solid #475569',
       borderRadius: 10,
       overflow: 'hidden',
     }}>
       <div style={{
         padding: '12px 18px',
-        borderBottom: '1px solid var(--border-2)',
+        borderBottom: '1px solid #475569',
         fontSize: 12,
         fontWeight: 700,
-        color: '#1e293b',
+        color: '#e2e8f0',
         textTransform: 'uppercase',
         letterSpacing: '0.06em',
       }}>
@@ -1060,6 +1033,24 @@ function TotalsSummary({
             bold={false}
             small
           />
+          {(fullEstimateLaborSubtotal ?? 0) > 0 && (
+            <SummaryRow
+              label="Labor"
+              amount={fullEstimateLaborSubtotal}
+              color="#6B7280"
+              bold={false}
+              small
+            />
+          )}
+          {(fullEstimatePartsSubtotal ?? 0) > 0 && (
+            <SummaryRow
+              label="Parts & Materials"
+              amount={fullEstimatePartsSubtotal}
+              color="#6B7280"
+              bold={false}
+              small
+            />
+          )}
           {fullEstimateTax > 0 && (
             <SummaryRow
               label={`Tax${taxRatePercent ? ` (${taxRatePercent}% on parts)` : ''}`}
@@ -1111,7 +1102,7 @@ function SummaryRow({
       alignItems: 'center',
       opacity,
     }}>
-      <span style={{ fontSize: size, color: '#374151', fontWeight: bold ? 700 : 400 }}>
+      <span style={{ fontSize: size, color: '#cbd5e1', fontWeight: bold ? 700 : 400 }}>
         {label}
       </span>
       <span style={{

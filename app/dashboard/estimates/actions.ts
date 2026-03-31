@@ -1,6 +1,6 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { getDashboardTenant } from '@/lib/tenant'
 import { getTenantPricingConfig } from '@/lib/queries'
 import type {
@@ -225,9 +225,8 @@ function round2(n: number): number {
 function recTypeToCategory(type: string | null | undefined): EstimateItemCategory {
   switch ((type ?? '').toLowerCase()) {
     case 'labor':  return 'labor'
-    // 'part'/'parts' are NOT mapped to 'part' — top-level part items are
-    // disallowed in the editor.  Part-type recommendations come in as 'misc'
-    // so the advisor can decide where to place them.
+    case 'part':   return 'part'
+    case 'parts':  return 'part'
     case 'fee':    return 'fee'
     default:       return 'misc'
   }
@@ -324,22 +323,53 @@ export async function saveEstimate(
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
 
-  const supabase = await createClient()
+  const supabase = await createAdminClient()
+
+  const updatePayload = {
+    ...patch,
+    updated_at: new Date().toISOString(),
+  }
+
+  console.log('[saveEstimate] Writing to estimates table', {
+    estimateId,
+    tenantId: ctx.tenant.id,
+    updatePayload,
+    updatePayloadKeys: Object.keys(updatePayload),
+    statusValue: updatePayload.status,
+    statusType: typeof updatePayload.status,
+  })
+
+  // Test: Log all field values to debug constraint issue
+  console.log('[saveEstimate] Full payload details', {
+    status: updatePayload.status,
+    status_typeof: typeof updatePayload.status,
+    status_JSON: JSON.stringify(updatePayload.status),
+    notes: updatePayload.notes,
+    internal_notes: updatePayload.internal_notes,
+    tax_rate: updatePayload.tax_rate,
+    parts_markup_percent: updatePayload.parts_markup_percent,
+    tax_amount: updatePayload.tax_amount,
+    updated_at: updatePayload.updated_at,
+  })
 
   const { error } = await supabase
     .from('estimates')
-    .update({
-      ...patch,
-      updated_at: new Date().toISOString(),
-    })
+    .update(updatePayload)
     .eq('tenant_id', ctx.tenant.id)
     .eq('id', estimateId)
 
   if (error) {
-    console.error('[saveEstimate]', error.message)
+    console.error('[saveEstimate] ERROR', {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+      statusFromPayload: updatePayload.status,
+    })
     return { error: error.message }
   }
 
+  console.log('[saveEstimate] Success')
   return null
 }
 
@@ -841,6 +871,87 @@ export async function saveEstimateItemParts(
     if (updateErr) {
       console.error('[saveEstimateItemParts] update part:', updateErr.message)
     }
+  }
+
+  // ── SYNC: Synchronize parts back to estimate_items ────────────────────────────
+  // After all estimate_item_parts operations, ensure estimate_items.parts_total
+  // reflects the actual sum of estimate_item_parts.line_total, so that:
+  // - item.line_total = labor_total + parts_total (accurate)
+  // - estimate snapshot aggregates correctly
+
+  // Fetch all current estimate_item_parts for this estimate
+  const { data: currentParts, error: fetchPartsErr } = await supabase
+    .from('estimate_item_parts')
+    .select('estimate_item_id, line_total')
+    .eq('tenant_id', tenantId)
+    .eq('estimate_id', estimateId)
+
+  if (fetchPartsErr) {
+    console.error('[saveEstimateItemParts] fetch for sync:', fetchPartsErr.message)
+    return { error: fetchPartsErr.message }
+  }
+
+  // Calculate parts_total for each estimate_item (SUM of part line_totals)
+  const partsSumByItemId = new Map<string, number>()
+  for (const part of currentParts ?? []) {
+    const itemId = part.estimate_item_id as string
+    const current = partsSumByItemId.get(itemId) ?? 0
+    partsSumByItemId.set(itemId, round2(current + Number(part.line_total || 0)))
+  }
+
+  // Fetch all estimate_items to sync their financial fields
+  const { data: allItems, error: fetchItemsErr } = await supabase
+    .from('estimate_items')
+    .select('id, labor_total, parts_total, line_total')
+    .eq('tenant_id', tenantId)
+    .eq('estimate_id', estimateId)
+
+  if (fetchItemsErr) {
+    console.error('[saveEstimateItemParts] fetch items:', fetchItemsErr.message)
+    return { error: fetchItemsErr.message }
+  }
+
+  // Update items with recalculated parts_total and line_total
+  const updatePromises: Promise<any>[] = []
+  for (const item of allItems ?? []) {
+    const newPartsTotal = partsSumByItemId.get(item.id as string) ?? 0
+    const laborTotal = round2(Number(item.labor_total || 0))
+    const newLineTotal = round2(laborTotal + newPartsTotal)
+
+    // Only update if values changed
+    if (
+      newPartsTotal !== round2(Number(item.parts_total || 0)) ||
+      newLineTotal !== round2(Number(item.line_total || 0))
+    ) {
+      updatePromises.push(
+        supabase
+          .from('estimate_items')
+          .update({
+            parts_total: newPartsTotal,
+            line_total: newLineTotal,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', item.id as string)
+          .eq('tenant_id', tenantId)
+      )
+    }
+  }
+
+  if (updatePromises.length > 0) {
+    const results = await Promise.all(updatePromises)
+    for (const result of results) {
+      if (result.error) {
+        console.error('[saveEstimateItemParts] update item:', result.error.message)
+        return { error: result.error.message }
+      }
+    }
+  }
+
+  // Recalculate estimate snapshot totals
+  const recalcErr = await recalculateEstimateTotals(estimateId)
+  if (recalcErr) {
+    console.error('[saveEstimateItemParts] recalc totals:', recalcErr.error)
+    return recalcErr
   }
 
   return null

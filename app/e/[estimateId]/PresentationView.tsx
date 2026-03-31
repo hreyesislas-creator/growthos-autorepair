@@ -2,10 +2,12 @@
 
 import { useState, useMemo, useCallback } from 'react'
 import type { EstimateWithItems, EstimateItem, EstimateItemPart, EstimateItemDecision } from '@/lib/types'
+import FinalAuthorizationBlock from '@/components/estimates/FinalAuthorizationBlock'
 import {
   approveEstimateItem,
   declineEstimateItem,
   undecideEstimateItem,
+  finalizeEstimateApproval,
 } from './actions'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -70,13 +72,14 @@ function sumJobSubtotals(items: EstimateItem[]): number {
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface Props {
-  estimate:          EstimateWithItems
-  estimateId:        string          // used for Edit Estimate link + server actions
-  customerName:      string | null
-  vehicleLabel:      string | null
-  shopName:          string
-  customerPhone:     string | null   // used by Send by Text — null if no phone on file
-  initialDecisions:  EstimateItemDecision[]  // pre-loaded from DB by page.tsx
+  estimate:            EstimateWithItems
+  estimateId:          string          // used for Edit Estimate link + server actions
+  customerName:        string | null
+  vehicleLabel:        string | null
+  shopName:            string
+  customerPhone:       string | null   // used by Send by Text — null if no phone on file
+  initialDecisions:    EstimateItemDecision[]  // pre-loaded from DB by page.tsx
+  existingWorkOrderId?: string          // loaded from work_orders table in page.tsx
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -91,6 +94,7 @@ export default function PresentationView({
   shopName,
   customerPhone,
   initialDecisions,
+  existingWorkOrderId,
 }: Props) {
   // ── Decisions — initialised from DB, then managed locally ─────────────────
   const [decisions, setDecisions] = useState<DecisionMap>(() => {
@@ -105,6 +109,10 @@ export default function PresentationView({
   const [saving,     setSaving]     = useState<Set<string>>(new Set())
   // per-item save error messages (cleared on next attempt for that item)
   const [saveErrors, setSaveErrors] = useState<Record<string, string>>({})
+
+  // ── Work Order Authorization ───────────────────────────────────────────────
+  // Initialize from existingWorkOrderId (loaded from DB in page.tsx)
+  const [workOrderId, setWorkOrderId] = useState<string | undefined>(existingWorkOrderId)
 
   // ── Optimistic-update helpers ──────────────────────────────────────────────
 
@@ -171,6 +179,23 @@ export default function PresentationView({
       setSaveErrors(prev => ({ ...prev, [id]: err.error }))
     }
   }, [estimateId, decisions])
+
+  // ── Work Order Authorization handler ────────────────────────────────────────
+  const handleAuthorizeEstimate = useCallback(async (approvedByName: string | null): Promise<string> => {
+    const result = await finalizeEstimateApproval(estimateId, approvedByName)
+
+    if ('error' in result && result.error) {
+      throw new Error(result.error)
+    }
+
+    const woId = result.data?.workOrderId
+    if (woId) {
+      setWorkOrderId(woId)
+      return woId
+    }
+
+    throw new Error('No work order ID returned')
+  }, [estimateId])
 
   // ── Decision buckets ────────────────────────────────────────────────────────
   const approvedItems  = useMemo(() => estimate.items.filter(i => decisions[i.id] === 'approved'),  [estimate.items, decisions])
@@ -250,6 +275,27 @@ export default function PresentationView({
           justifyContent: 'flex-end',
           flexWrap: 'wrap',
         }}>
+          <a
+            href={`/e/${estimateId}/print`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              fontSize: 13,
+              fontWeight: 600,
+              padding: '7px 14px',
+              borderRadius: 7,
+              border: '1px solid #cbd5e1',
+              background: '#fff',
+              color: '#1e293b',
+              textDecoration: 'none',
+              transition: 'background 0.1s',
+            }}
+          >
+            🖨️ Print Estimate
+          </a>
           <a
             href={`/dashboard/estimates/${estimateId}`}
             style={{
@@ -338,6 +384,8 @@ export default function PresentationView({
           declinedSubtotal={declinedSubtotal}
           remainingSubtotal={remainingSubtotal}
           fullEstimateSubtotal={round2(Number(estimate.subtotal))}
+          fullEstimateLaborSubtotal={round2(Number(estimate.subtotal_labor ?? 0))}
+          fullEstimatePartsSubtotal={round2(Number(estimate.subtotal_parts ?? 0))}
           fullEstimateTax={fullEstimateTax}
           fullEstimateTotal={round2(Number(estimate.total))}
           taxRatePercent={taxRateFraction ? round2(taxRateFraction * 100) : null}
@@ -346,6 +394,13 @@ export default function PresentationView({
           totalCount={estimate.items.length}
         />
       </div>
+
+      {/* ── Final Authorization Block ─────────────────────────────────────── */}
+      <FinalAuthorizationBlock
+        approvedItemsCount={approvedItems.length}
+        workOrderId={workOrderId}
+        onAuthorize={handleAuthorizeEstimate}
+      />
 
       {/* ── Work-order CTA ────────────────────────────────────────────────── */}
       <div style={{
@@ -798,6 +853,8 @@ interface TotalsSummaryProps {
   declinedSubtotal:       number
   remainingSubtotal:      number
   fullEstimateSubtotal:   number
+  fullEstimateLaborSubtotal?: number
+  fullEstimatePartsSubtotal?: number
   fullEstimateTax:        number
   fullEstimateTotal:      number
   taxRatePercent:         number | null
@@ -813,6 +870,8 @@ function TotalsSummary({
   declinedSubtotal,
   remainingSubtotal,
   fullEstimateSubtotal,
+  fullEstimateLaborSubtotal,
+  fullEstimatePartsSubtotal,
   fullEstimateTax,
   fullEstimateTotal,
   taxRatePercent,
@@ -919,6 +978,24 @@ function TotalsSummary({
             bold={false}
             small
           />
+          {(fullEstimateLaborSubtotal ?? 0) > 0 && (
+            <SummaryRow
+              label="Labor"
+              amount={fullEstimateLaborSubtotal}
+              color="#6B7280"
+              bold={false}
+              small
+            />
+          )}
+          {(fullEstimatePartsSubtotal ?? 0) > 0 && (
+            <SummaryRow
+              label="Parts & Materials"
+              amount={fullEstimatePartsSubtotal}
+              color="#6B7280"
+              bold={false}
+              small
+            />
+          )}
           {fullEstimateTax > 0 && (
             <SummaryRow
               label={`Tax${taxRatePercent ? ` (${taxRatePercent}% on parts)` : ''}`}

@@ -471,3 +471,190 @@ export async function createWorkOrderFromApprovedItems(
 
   return { data: { workOrderId } }
 }
+
+// ── Finalize Estimate Approval ──────────────────────────────────────────────────
+/**
+ * Complete final authorization flow:
+ * 1. Validate that approved items exist
+ * 2. Create or reuse work order from approved items
+ * 3. Update estimate with approval metadata
+ * 4. Return work order ID for redirect
+ */
+export async function finalizeEstimateApproval(
+  estimateId: string,
+  approvedByName: string | null,
+): Promise<{ data?: { workOrderId: string }; error?: string }> {
+  const ctx = await getDashboardTenant()
+  if (!ctx) return { error: 'Not authenticated' }
+
+  const tenantId = ctx.tenant.id
+  const supabase = createAdminClient()
+
+  // ── 1. Load estimate with items and decisions ──────────────────────────────
+  const { data: estimate, error: estErr } = await supabase
+    .from('estimates')
+    .select(
+      `id, tenant_id, customer_id, vehicle_id, inspection_id,
+       estimate_number, notes, internal_notes,
+       tax_rate, parts_markup_percent, subtotal, tax_amount, total`,
+    )
+    .eq('id', estimateId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+
+  if (estErr || !estimate) {
+    return { error: 'Estimate not found' }
+  }
+
+  // ── 2. Load estimate items ─────────────────────────────────────────────────
+  const { data: items, error: itemsErr } = await supabase
+    .from('estimate_items')
+    .select('*')
+    .eq('estimate_id', estimateId)
+    .eq('tenant_id', tenantId)
+
+  if (itemsErr) {
+    return { error: 'Could not load estimate items' }
+  }
+
+  // ── 3. Load decisions ──────────────────────────────────────────────────────
+  const { data: decisions, error: decisionsErr } = await supabase
+    .from('estimate_item_decisions')
+    .select('estimate_item_id, decision')
+    .eq('estimate_id', estimateId)
+    .eq('tenant_id', tenantId)
+
+  if (decisionsErr) {
+    return { error: 'Could not load item decisions' }
+  }
+
+  // ── 4. Validate approved items exist ───────────────────────────────────────
+  const approvedItemIds = new Set(
+    decisions
+      .filter(d => d.decision === 'approved')
+      .map(d => d.estimate_item_id),
+  )
+
+  if (approvedItemIds.size === 0) {
+    return { error: 'No approved items to authorize' }
+  }
+
+  // ── 5. Create or reuse work order ──────────────────────────────────────────
+  // Check for existing work order first (idempotency)
+  const { data: existingWO } = await supabase
+    .from('work_orders')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .eq('estimate_id', estimateId)
+    .maybeSingle()
+
+  let workOrderId: string
+
+  if (existingWO) {
+    workOrderId = existingWO.id
+  } else {
+    // Create new work order
+    const approvedItems = items.filter(item => approvedItemIds.has(item.id))
+
+    const woSubtotal = Math.round(
+      approvedItems.reduce((sum, item) => sum + item.line_total, 0) * 100,
+    ) / 100
+
+    const woTaxAmount = estimate.tax_rate != null
+      ? Math.round(woSubtotal * estimate.tax_rate * 100) / 100
+      : 0
+
+    const woTotal = Math.round((woSubtotal + woTaxAmount) * 100) / 100
+
+    const workOrderNumber = `WO-${new Date().getFullYear()}-${Math.floor(Math.random() * 10000)
+      .toString()
+      .padStart(4, '0')}`
+
+    const { data: woData, error: woErr } = await supabase
+      .from('work_orders')
+      .insert({
+        tenant_id: tenantId,
+        estimate_id: estimateId,
+        inspection_id: estimate.inspection_id,
+        customer_id: estimate.customer_id,
+        vehicle_id: estimate.vehicle_id,
+        work_order_number: workOrderNumber,
+        creation_mode: 'from_estimate',
+        status: 'draft',
+        subtotal: woSubtotal,
+        tax_rate: estimate.tax_rate,
+        tax_amount: woTaxAmount,
+        total: woTotal,
+        notes: estimate.notes,
+        internal_notes: estimate.internal_notes,
+        parts_markup_percent: estimate.parts_markup_percent,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .select('id')
+      .single()
+
+    if (woErr || !woData) {
+      return { error: 'Failed to create work order' }
+    }
+
+    workOrderId = woData.id
+
+    // ── Insert work order items ────────────────────────────────────────────
+    const woItems = approvedItems.map((item, idx) => ({
+      tenant_id: tenantId,
+      work_order_id: workOrderId,
+      estimate_item_id: item.id,
+      service_job_id: item.service_job_id,
+      title: item.title,
+      description: item.description,
+      category: item.category,
+      labor_hours: item.labor_hours,
+      labor_rate: item.labor_rate,
+      labor_total: item.labor_total,
+      parts_total: item.parts_total,
+      line_total: item.line_total,
+      inspection_item_id: item.inspection_item_id,
+      service_recommendation_id: item.service_recommendation_id,
+      display_order: idx,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }))
+
+    const { error: itemsInsertErr } = await supabase
+      .from('work_order_items')
+      .insert(woItems)
+
+    if (itemsInsertErr) {
+      // Rollback work order
+      await supabase.from('work_orders').delete().eq('id', workOrderId)
+      return { error: 'Failed to create work order items' }
+    }
+  }
+
+  // ── 6. Update estimate with approval metadata ──────────────────────────────
+  const now = new Date().toISOString()
+  const { error: updateErr } = await supabase
+    .from('estimates')
+    .update({
+      status: 'approved',
+      approved_by_name: approvedByName || null,
+      approval_method: 'in_person',
+      approved_at: now,
+      updated_at: now,
+    })
+    .eq('id', estimateId)
+    .eq('tenant_id', tenantId)
+
+  if (updateErr) {
+    return { error: 'Failed to update estimate approval status' }
+  }
+
+  console.log('[finalizeEstimateApproval] Success', {
+    estimateId,
+    workOrderId,
+    approvedByName,
+  })
+
+  return { data: { workOrderId } }
+}
