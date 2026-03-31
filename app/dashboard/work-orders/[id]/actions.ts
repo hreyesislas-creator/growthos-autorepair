@@ -283,7 +283,7 @@ export async function cancelWorkOrder(
 
   const tenantId    = ctx.tenant.id
   const supabase    = await createClient()
-  const adminClient = createAdminClient()
+  const adminClient = await createAdminClient()
 
   // ── Resolve current auth user for audit column ───────────────────────────
   const { data: { user } } = await supabase.auth.getUser()
@@ -359,6 +359,9 @@ export async function createInvoiceFromWorkOrder(
   const tenantId    = ctx.tenant.id
   const supabase    = await createAdminClient()
 
+  console.log('═══════════════════════════════════════════════════════════')
+  console.log('[createInvoiceFromWorkOrder] START', { workOrderId, tenantId })
+
   // 1. Fetch work order + items
   const { data: woData, error: woError } = await supabase
     .from('work_orders')
@@ -375,23 +378,114 @@ export async function createInvoiceFromWorkOrder(
   const { data: woItems, error: itemsError } = await supabase
     .from('work_order_items')
     .select('*')
+    .eq('tenant_id', tenantId)
     .eq('work_order_id', workOrderId)
     .order('display_order', { ascending: true })
 
   if (itemsError) {
-    console.error('[createInvoiceFromWorkOrder] fetch items:', itemsError.message)
+    console.error('[createInvoiceFromWorkOrder] FETCH ITEMS ERROR:', itemsError.message)
     throw new Error('Failed to fetch work order items')
   }
 
+  const items = woItems ?? []
+  const woItemCount = items.length
+
+  console.log('[createInvoiceFromWorkOrder] FETCHED work_order_items:', {
+    workOrderId,
+    itemCount: woItemCount,
+  })
+
+  if (woItemCount > 0) {
+    console.log('[createInvoiceFromWorkOrder] First work order item:', items[0])
+  } else {
+    console.log('[createInvoiceFromWorkOrder] ⚠️ WARNING: No work_order_items found')
+  }
+
   // 2. Check if invoice already exists
-  const { data: existingInvoice } = await supabase
+  const { data: existingInvoice, error: existingInvoiceError } = await supabase
     .from('invoices')
     .select('id, invoice_number')
     .eq('work_order_id', workOrderId)
     .eq('tenant_id', tenantId)
     .maybeSingle()
 
+  if (existingInvoiceError) {
+    console.error('[createInvoiceFromWorkOrder] fetch existing invoice:', existingInvoiceError.message)
+    throw new Error(`Failed to check existing invoice: ${existingInvoiceError.message}`)
+  }
+
   if (existingInvoice) {
+    console.log('[createInvoiceFromWorkOrder] Existing invoice found:', existingInvoice)
+
+    const { data: existingInvoiceItems, error: existingItemsError } = await supabase
+      .from('invoice_items')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('invoice_id', existingInvoice.id)
+
+    if (existingItemsError) {
+      console.error('[createInvoiceFromWorkOrder] check existing invoice items:', existingItemsError.message)
+      throw new Error(`Failed to check existing invoice items: ${existingItemsError.message}`)
+    }
+
+    const existingItemCount = existingInvoiceItems?.length ?? 0
+
+    console.log('[createInvoiceFromWorkOrder] Existing invoice item count:', {
+      invoiceId: existingInvoice.id,
+      existingItemCount,
+    })
+
+    if (existingItemCount > 0) {
+      console.log('[createInvoiceFromWorkOrder] Existing invoice already has items, returning as-is')
+      console.log('═══════════════════════════════════════════════════════════')
+      return {
+        id: existingInvoice.id,
+        invoice_number: existingInvoice.invoice_number,
+      }
+    }
+
+    console.log('[createInvoiceFromWorkOrder] Existing invoice has NO items, backfilling from work_order_items')
+
+    if (items.length > 0) {
+      const backfillInvoiceItems = items.map(item => ({
+        tenant_id: tenantId,
+        invoice_id: existingInvoice.id,
+        source_work_order_item_id: item.id,
+        title: item.title,
+        description: item.description,
+        category: item.category ?? 'misc',
+        quantity: 1,
+        labor: item.labor_total,
+        parts: item.parts_total,
+        total: item.line_total,
+        labor_hours: item.labor_hours,
+        labor_rate: item.labor_rate,
+        labor_total: item.labor_total,
+        parts_total: item.parts_total,
+        line_total: Math.round((item.labor_total + item.parts_total) * 100) / 100,
+        display_order: item.display_order,
+        source_reference: null,
+        notes: null,
+      }))
+
+      const { error: backfillError, data: backfillData } = await supabase
+        .from('invoice_items')
+        .insert(backfillInvoiceItems)
+        .select('*')
+
+      if (backfillError) {
+        console.error('[createInvoiceFromWorkOrder] backfill invoice items error:', backfillError)
+        throw new Error(`Failed to backfill invoice items: ${backfillError.message}`)
+      }
+
+      console.log('[createInvoiceFromWorkOrder] Backfill complete:', {
+        insertedRowCount: backfillData?.length ?? 0,
+      })
+    } else {
+      console.warn('[createInvoiceFromWorkOrder] Cannot backfill existing invoice because work_order_items is empty')
+    }
+
+    console.log('═══════════════════════════════════════════════════════════')
     return {
       id: existingInvoice.id,
       invoice_number: existingInvoice.invoice_number,
@@ -407,23 +501,19 @@ export async function createInvoiceFromWorkOrder(
   const invoiceNumber = `INV-${new Date().getFullYear()}-${String((count ?? 0) + 1).padStart(4, '0')}`
 
   // Calculate subtotals from work order items
+  // TAX RULE: Tax applies ONLY to parts, NOT to labor
   let subtotalLabor = 0
   let subtotalParts = 0
-  let subtotalOther = 0
 
-  const items = woItems ?? []
   items.forEach(item => {
-    if (item.category === 'labor') {
-      subtotalLabor += item.labor_total
-    } else if (item.category === 'part') {
-      subtotalParts += item.parts_total
-    } else {
-      subtotalOther += item.line_total
-    }
+    subtotalLabor += item.labor_total || 0
+    subtotalParts += item.parts_total || 0
   })
 
-  const subtotal = subtotalLabor + subtotalParts + subtotalOther
-  const taxAmount = subtotal * (woData.tax_rate ?? 0)
+  const subtotal = subtotalLabor + subtotalParts
+  // Tax is calculated ONLY on parts (not labor)
+  const taxableAmount = subtotalParts
+  const taxAmount = Math.round(taxableAmount * (woData.tax_rate ?? 0) * 100) / 100
   const total = subtotal + taxAmount
 
   // 4. Create invoice header
@@ -438,7 +528,6 @@ export async function createInvoiceFromWorkOrder(
       status: 'draft',
       subtotal_labor: subtotalLabor,
       subtotal_parts: subtotalParts,
-      subtotal_other: subtotalOther,
       subtotal,
       tax_rate: woData.tax_rate,
       tax_amount: taxAmount,
@@ -453,50 +542,366 @@ export async function createInvoiceFromWorkOrder(
   }
 
   // Create invoice items from work order items
-  if (items.length > 0) {
+  const itemsLength = items.length
+  console.log('[createInvoiceFromWorkOrder] ABOUT TO INSERT:', {
+    itemsLength,
+    invoiceId: invoiceData.id,
+  })
+
+  if (itemsLength > 0) {
     const invoiceItems = items.map(item => ({
       tenant_id: tenantId,
       invoice_id: invoiceData.id,
-      work_order_item_id: item.id,
+      source_work_order_item_id: item.id,
       title: item.title,
       description: item.description,
-      category: item.category,
+      category: item.category ?? 'misc',
+      quantity: 1,
+      labor: item.labor_total,
+      parts: item.parts_total,
+      total: item.line_total,
       labor_hours: item.labor_hours,
       labor_rate: item.labor_rate,
       labor_total: item.labor_total,
       parts_total: item.parts_total,
-      line_total: item.line_total,
+      line_total: Math.round((item.labor_total + item.parts_total) * 100) / 100,
       display_order: item.display_order,
+      source_reference: null,
+      notes: null,
     }))
 
-    const { error: itemsInsertError } = await supabase
+    const payloadLength = invoiceItems.length
+    console.log('[createInvoiceFromWorkOrder] PAYLOAD READY:', {
+      payloadLength,
+      firstItemTitle: invoiceItems[0]?.title,
+      firstItemCategory: invoiceItems[0]?.category,
+    })
+
+    const { error: itemsInsertError, data: itemsInsertData } = await supabase
       .from('invoice_items')
       .insert(invoiceItems)
+      .select()
+
+    const insertedRowCount = itemsInsertData?.length ?? 0
+    console.log('[createInvoiceFromWorkOrder] INSERT RESULT:', {
+      payloadLength,
+      insertedRowCount,
+      insertError: itemsInsertError?.message ?? 'none',
+    })
 
     if (itemsInsertError) {
-      console.error('[createInvoiceFromWorkOrder] insert items:', itemsInsertError.message)
-      throw new Error('Failed to create invoice items')
+      console.error('  ❌ INSERT FAILED:', itemsInsertError)
+      throw new Error('Failed to create invoice items: ' + itemsInsertError.message)
     }
+
+    if (insertedRowCount === 0) {
+      console.warn('  ⚠️  WARNING: Insert succeeded but NO rows returned!')
+    } else {
+      console.log('  ✅ Inserted', insertedRowCount, 'rows')
+    }
+  } else {
+    console.log('[createInvoiceFromWorkOrder] ⚠️  NO ITEMS TO INSERT: items.length = 0')
   }
 
-  // 5. Update work order with invoice_id and status
-  const { error: updateError } = await supabase
+  // 5. Update work order status to 'invoiced'
+  // NOTE: invoices.work_order_id is the source of truth for the invoice relationship.
+  // We do NOT use work_orders.invoice_id (back-reference) as it is not needed and
+  // allows for potential multiple invoices per work order in the future.
+  const { error: statusError } = await supabase
     .from('work_orders')
     .update({
-      invoice_id: invoiceData.id,
       status: 'invoiced',
       updated_at: new Date().toISOString(),
     })
     .eq('id', workOrderId)
     .eq('tenant_id', tenantId)
 
-  if (updateError) {
-    console.error('[createInvoiceFromWorkOrder] update work order:', updateError.message)
-    throw new Error('Failed to link invoice to work order')
+  if (statusError) {
+    console.error('[createInvoiceFromWorkOrder] update work order status:', statusError.message)
+    // Note: Invoice and items were already created successfully, so we log this but continue
+    console.warn('[createInvoiceFromWorkOrder] ⚠️  Status update failed but invoice was created:', {
+      invoiceId: invoiceData.id,
+      statusError: statusError.message,
+    })
+  } else {
+    console.log('[createInvoiceFromWorkOrder] ✅ Work order status updated to invoiced')
   }
+
+  console.log('[createInvoiceFromWorkOrder] ✅ COMPLETE:', {
+    invoiceId: invoiceData.id,
+    invoiceNumber: invoiceData.invoice_number,
+    workOrderId,
+  })
+  console.log('═══════════════════════════════════════════════════════════')
 
   return {
     id: invoiceData.id,
     invoice_number: invoiceData.invoice_number,
+  }
+}
+
+// ── recalculateInvoiceTotals ──────────────────────────────────────────────────
+//
+// Recalculates and updates invoice totals based on current invoice_items.
+// This ensures correct totals even if items were manually edited or migrated.
+//
+// Calculation rules:
+//   subtotal_labor = SUM(invoice_items.labor_total)
+//   subtotal_parts = SUM(invoice_items.parts_total)
+//   subtotal = subtotal_labor + subtotal_parts
+//   tax_amount = subtotal_parts * tax_rate (tax applies ONLY to parts)
+//   total = subtotal + tax_amount
+//
+
+export async function recalculateInvoiceTotals(invoiceId: string): Promise<void> {
+  const ctx = await getDashboardTenant()
+  if (!ctx) throw new Error('Not authenticated')
+
+  const tenantId    = ctx.tenant.id
+  const supabase    = await createAdminClient()
+
+  console.log('[recalculateInvoiceTotals] START:', { invoiceId, tenantId })
+
+  // 1. Fetch invoice header to get tax_rate
+  const { data: invoice, error: invoiceError } = await supabase
+    .from('invoices')
+    .select('id, tax_rate')
+    .eq('id', invoiceId)
+    .eq('tenant_id', tenantId)
+    .single()
+
+  if (invoiceError || !invoice) {
+    console.error('[recalculateInvoiceTotals] fetch invoice:', invoiceError?.message)
+    throw new Error('Invoice not found')
+  }
+
+  // 2. Fetch all invoice items
+  const { data: items, error: itemsError } = await supabase
+    .from('invoice_items')
+    .select('labor_total, parts_total')
+    .eq('invoice_id', invoiceId)
+    .eq('tenant_id', tenantId)
+
+  if (itemsError) {
+    console.error('[recalculateInvoiceTotals] fetch items:', itemsError.message)
+    throw new Error('Failed to fetch invoice items')
+  }
+
+  // 3. Calculate totals
+  const invoiceItems = items ?? []
+  let subtotalLabor = 0
+  let subtotalParts = 0
+
+  invoiceItems.forEach(item => {
+    subtotalLabor += item.labor_total || 0
+    subtotalParts += item.parts_total || 0
+  })
+
+  const subtotal = subtotalLabor + subtotalParts
+  const taxableAmount = subtotalParts
+  const taxAmount = Math.round(taxableAmount * (invoice.tax_rate ?? 0) * 100) / 100
+  const total = subtotal + taxAmount
+
+  console.log('[recalculateInvoiceTotals] Calculated:', {
+    subtotalLabor,
+    subtotalParts,
+    subtotal,
+    taxRate: invoice.tax_rate,
+    taxAmount,
+    total,
+  })
+
+  // 4. Update invoice with recalculated totals
+  const { error: updateError } = await supabase
+    .from('invoices')
+    .update({
+      subtotal_labor: subtotalLabor,
+      subtotal_parts: subtotalParts,
+      subtotal,
+      tax_amount: taxAmount,
+      total,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', invoiceId)
+    .eq('tenant_id', tenantId)
+
+  if (updateError) {
+    console.error('[recalculateInvoiceTotals] update invoice:', updateError.message)
+    throw new Error('Failed to update invoice totals')
+  }
+
+  console.log('[recalculateInvoiceTotals] ✅ COMPLETE')
+}
+
+// ── fixInvoiceItemLineTotals ──────────────────────────────────────────────────
+//
+// Fixes invoice item line_totals for a specific invoice.
+// If any invoice_items have incorrect line_total (missing parts_total),
+// recalculates them as: line_total = labor_total + parts_total
+//
+// Use this to fix existing invoices that were created with the bug.
+//
+
+export async function fixInvoiceItemLineTotals(invoiceId: string): Promise<{ fixed: number }> {
+  const ctx = await getDashboardTenant()
+  if (!ctx) throw new Error('Not authenticated')
+
+  const tenantId    = ctx.tenant.id
+  const supabase    = await createAdminClient()
+
+  console.log('[fixInvoiceItemLineTotals] START:', { invoiceId, tenantId })
+
+  // 1. Fetch all invoice items
+  const { data: items, error: itemsError } = await supabase
+    .from('invoice_items')
+    .select('id, labor_total, parts_total, line_total')
+    .eq('invoice_id', invoiceId)
+    .eq('tenant_id', tenantId)
+
+  if (itemsError) {
+    console.error('[fixInvoiceItemLineTotals] fetch items:', itemsError.message)
+    throw new Error('Failed to fetch invoice items')
+  }
+
+  const invoiceItems = items ?? []
+  let fixedCount = 0
+
+  // 2. Identify items that need fixing
+  const updatesToApply: Array<{ id: string; correctLineTotal: number }> = []
+
+  invoiceItems.forEach(item => {
+    const expectedLineTotal = Math.round((item.labor_total + item.parts_total) * 100) / 100
+    if (Math.abs(item.line_total - expectedLineTotal) > 0.01) {
+      // Line total is wrong, needs fixing
+      updatesToApply.push({
+        id: item.id,
+        correctLineTotal: expectedLineTotal,
+      })
+      fixedCount++
+    }
+  })
+
+  console.log('[fixInvoiceItemLineTotals] Found', fixedCount, 'items to fix')
+
+  // 3. Apply updates (if any)
+  if (fixedCount > 0) {
+    for (const update of updatesToApply) {
+      const { error } = await supabase
+        .from('invoice_items')
+        .update({
+          line_total: update.correctLineTotal,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', update.id)
+        .eq('tenant_id', tenantId)
+
+      if (error) {
+        console.error('[fixInvoiceItemLineTotals] update item:', error.message)
+        throw new Error(`Failed to fix invoice item ${update.id}: ${error.message}`)
+      }
+    }
+  }
+
+  console.log('[fixInvoiceItemLineTotals] ✅ COMPLETE:', { fixedCount })
+  return { fixed: fixedCount }
+}
+
+// ── validateInvoiceTotals ─────────────────────────────────────────────────────
+//
+// Validates that an invoice's totals are correct based on its items.
+// Returns validation result with details about any discrepancies.
+//
+
+export async function validateInvoiceTotals(
+  invoiceId: string,
+): Promise<{
+  isValid: boolean
+  details: {
+    expectedSubtotalLabor: number
+    actualSubtotalLabor: number
+    expectedSubtotalParts: number
+    actualSubtotalParts: number
+    expectedSubtotal: number
+    actualSubtotal: number
+    expectedTaxAmount: number
+    actualTaxAmount: number
+    expectedTotal: number
+    actualTotal: number
+    itemsWithBadLineTotal: number
+  }
+}> {
+  const ctx = await getDashboardTenant()
+  if (!ctx) throw new Error('Not authenticated')
+
+  const tenantId = ctx.tenant.id
+  const supabase = await createAdminClient()
+
+  // 1. Fetch invoice header
+  const { data: invoice, error: invoiceError } = await supabase
+    .from('invoices')
+    .select('id, subtotal_labor, subtotal_parts, subtotal, tax_rate, tax_amount, total')
+    .eq('id', invoiceId)
+    .eq('tenant_id', tenantId)
+    .single()
+
+  if (invoiceError || !invoice) {
+    throw new Error('Invoice not found')
+  }
+
+  // 2. Fetch all invoice items
+  const { data: items, error: itemsError } = await supabase
+    .from('invoice_items')
+    .select('labor_total, parts_total, line_total')
+    .eq('invoice_id', invoiceId)
+    .eq('tenant_id', tenantId)
+
+  if (itemsError) {
+    throw new Error('Failed to fetch invoice items')
+  }
+
+  // 3. Calculate expected values
+  const invoiceItems = items ?? []
+  let expectedSubtotalLabor = 0
+  let expectedSubtotalParts = 0
+  let itemsWithBadLineTotal = 0
+
+  invoiceItems.forEach(item => {
+    expectedSubtotalLabor += item.labor_total || 0
+    expectedSubtotalParts += item.parts_total || 0
+
+    const expectedLineTotal = Math.round((item.labor_total + item.parts_total) * 100) / 100
+    if (Math.abs(item.line_total - expectedLineTotal) > 0.01) {
+      itemsWithBadLineTotal++
+    }
+  })
+
+  const expectedSubtotal = expectedSubtotalLabor + expectedSubtotalParts
+  const expectedTaxAmount = Math.round(expectedSubtotalParts * (invoice.tax_rate ?? 0) * 100) / 100
+  const expectedTotal = expectedSubtotal + expectedTaxAmount
+
+  // 4. Compare and return validation result
+  const isValid =
+    Math.abs(invoice.subtotal_labor - expectedSubtotalLabor) < 0.01 &&
+    Math.abs(invoice.subtotal_parts - expectedSubtotalParts) < 0.01 &&
+    Math.abs(invoice.subtotal - expectedSubtotal) < 0.01 &&
+    Math.abs(invoice.tax_amount - expectedTaxAmount) < 0.01 &&
+    Math.abs(invoice.total - expectedTotal) < 0.01 &&
+    itemsWithBadLineTotal === 0
+
+  return {
+    isValid,
+    details: {
+      expectedSubtotalLabor,
+      actualSubtotalLabor: invoice.subtotal_labor,
+      expectedSubtotalParts,
+      actualSubtotalParts: invoice.subtotal_parts,
+      expectedSubtotal,
+      actualSubtotal: invoice.subtotal,
+      expectedTaxAmount,
+      actualTaxAmount: invoice.tax_amount,
+      expectedTotal,
+      actualTotal: invoice.total,
+      itemsWithBadLineTotal,
+    },
   }
 }

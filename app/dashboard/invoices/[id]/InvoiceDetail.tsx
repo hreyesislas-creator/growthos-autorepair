@@ -3,6 +3,8 @@ import Link from 'next/link'
 
 interface InvoiceDetailProps {
   invoice: InvoiceWithItems
+  customerName: string | null
+  vehicleDisplay: string | null
 }
 
 // Status badge styles
@@ -17,7 +19,7 @@ function statusStyle(status: string) {
   return STATUS_STYLES[status] ?? { bg: '#f1f5f9', color: '#475569', label: status }
 }
 
-export default function InvoiceDetail({ invoice }: InvoiceDetailProps) {
+export default function InvoiceDetail({ invoice, customerName, vehicleDisplay }: InvoiceDetailProps) {
   const status = statusStyle(invoice.status)
 
   return (
@@ -53,7 +55,7 @@ export default function InvoiceDetail({ invoice }: InvoiceDetailProps) {
               Bill To
             </div>
             <div style={{ fontSize: 13, color: 'var(--text)' }}>
-              {invoice.customer_id ? 'Customer on file' : '—'}
+              {customerName || '—'}
             </div>
           </div>
           <div>
@@ -61,7 +63,7 @@ export default function InvoiceDetail({ invoice }: InvoiceDetailProps) {
               Vehicle
             </div>
             <div style={{ fontSize: 13, color: 'var(--text)' }}>
-              {invoice.vehicle_id ? 'Vehicle on file' : '—'}
+              {vehicleDisplay || '—'}
             </div>
           </div>
         </div>
@@ -119,22 +121,40 @@ export default function InvoiceDetail({ invoice }: InvoiceDetailProps) {
         </div>
       )}
 
-      {/* Totals card */}
+      {/* Totals card with correct tax calculation breakdown */}
       <div className="card">
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 200px', gap: 24 }}>
           <div></div>
           <div>
+            {/* Labor subtotal */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', marginBottom: 6 }}>
+              <span style={{ fontSize: 12, color: 'var(--text-2)' }}>Labor</span>
+              <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)' }}>
+                ${invoice.subtotal_labor.toFixed(2)}
+              </span>
+            </div>
+
+            {/* Parts subtotal */}
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', marginBottom: 8 }}>
-              <span style={{ fontSize: 12, color: 'var(--text-2)' }}>Subtotal</span>
-              <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+              <span style={{ fontSize: 12, color: 'var(--text-2)' }}>Parts</span>
+              <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)' }}>
+                ${invoice.subtotal_parts.toFixed(2)}
+              </span>
+            </div>
+
+            {/* Subtotal before tax */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', marginBottom: 8, fontWeight: 600, borderTop: '1px solid var(--border-2)', paddingTop: 8 }}>
+              <span style={{ fontSize: 12 }}>Subtotal</span>
+              <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)' }}>
                 ${invoice.subtotal.toFixed(2)}
               </span>
             </div>
 
+            {/* Tax (on parts only) */}
             {invoice.tax_rate && invoice.tax_rate > 0 && (
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', marginBottom: 8 }}>
                 <span style={{ fontSize: 12, color: 'var(--text-2)' }}>
-                  Tax ({(invoice.tax_rate * 100).toFixed(2)}%)
+                  Tax on parts ({(invoice.tax_rate * 100).toFixed(2)}%)
                 </span>
                 <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)' }}>
                   ${invoice.tax_amount.toFixed(2)}
@@ -142,6 +162,7 @@ export default function InvoiceDetail({ invoice }: InvoiceDetailProps) {
               </div>
             )}
 
+            {/* Grand total */}
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', fontWeight: 700, borderTop: '1px solid var(--border-2)', marginTop: 8, paddingTop: 8 }}>
               <span style={{ fontSize: 13 }}>Total</span>
               <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)' }}>

@@ -34,6 +34,7 @@ import type {
   EstimateItemPart,
   EstimateWithItems,
   EstimateItemDecision,
+  EstimateApproval,
   TenantPricingConfig,
   ServiceJobWithCategory,
   WorkOrder,
@@ -1212,13 +1213,24 @@ export async function getInvoiceById(
   const { data: itemsData, error: itemsError } = await supabase
     .from('invoice_items')
     .select('*')
+    .eq('tenant_id', tenantId)
     .eq('invoice_id', invoiceId)
     .order('display_order', { ascending: true })
 
+  const itemCount = itemsData?.length ?? 0
+  console.log('[getInvoiceById] FETCHED invoice_items:', {
+    invoiceId,
+    itemCount,
+  })
+
   if (itemsError) {
-    console.error('[getInvoiceById] invoice_items query:', itemsError.message)
+    console.error('[getInvoiceById] invoice_items query error:', itemsError.message)
     // Return invoice without items rather than failing completely
     return { ...(invData as Invoice), items: [] }
+  }
+
+  if (itemCount === 0) {
+    console.warn('[getInvoiceById] ⚠️  No invoice_items found for invoice:', invoiceId)
   }
 
   return {
@@ -1252,4 +1264,116 @@ export async function getInvoiceByWorkOrderId(
   }
 
   return (data ?? null) as Invoice | null
+}
+
+/**
+ * Fetch customer name by ID.
+ * Used to display customer name on invoices.
+ * Combines first_name and last_name into display format.
+ */
+export async function getCustomerName(customerId: string): Promise<string | null> {
+  if (!hasValue(customerId)) return null
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('customers')
+    .select('first_name, last_name')
+    .eq('id', customerId)
+    .maybeSingle()
+
+  if (error) {
+    console.error('[getCustomerName]', error.message)
+    return null
+  }
+
+  if (!data) return null
+
+  // Combine first and last names
+  const parts = [data.first_name, data.last_name].filter(Boolean)
+  return parts.length > 0 ? parts.join(' ') : null
+}
+
+/**
+ * Fetch vehicle display string (e.g., "2014 BMW i3").
+ * Used to display vehicle on invoices.
+ */
+export async function getVehicleDisplay(vehicleId: string): Promise<string | null> {
+  if (!hasValue(vehicleId)) return null
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('vehicles')
+    .select('year, make, model')
+    .eq('id', vehicleId)
+    .maybeSingle()
+
+  if (error) {
+    console.error('[getVehicleDisplay]', error.message)
+    return null
+  }
+
+  if (!data) return null
+
+  // Build display string: "2014 BMW i3"
+  const parts = [data.year, data.make, data.model].filter(Boolean)
+  return parts.length > 0 ? parts.join(' ') : null
+}
+
+// ── Estimate Approval Queries ────────────────────────────────────────
+
+/**
+ * Fetch the most recent approval record for an estimate.
+ * Returns the latest EstimateApproval if it exists.
+ */
+export async function getLatestEstimateApproval(
+  tenantId: string,
+  estimateId: string,
+): Promise<EstimateApproval | null> {
+  if (!hasValue(tenantId) || !hasValue(estimateId)) return null
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('estimate_approvals')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('estimate_id', estimateId)
+    .order('approved_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    console.error('[getLatestEstimateApproval]', error.message)
+    return null
+  }
+
+  return (data ?? null) as EstimateApproval | null
+}
+
+/**
+ * Fetch all approval records for an estimate (audit trail).
+ */
+export async function getEstimateApprovalHistory(
+  tenantId: string,
+  estimateId: string,
+): Promise<EstimateApproval[]> {
+  if (!hasValue(tenantId) || !hasValue(estimateId)) return []
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('estimate_approvals')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('estimate_id', estimateId)
+    .order('approved_at', { ascending: false })
+
+  if (error) {
+    console.error('[getEstimateApprovalHistory]', error.message)
+    return []
+  }
+
+  return (data ?? []) as EstimateApproval[]
 }

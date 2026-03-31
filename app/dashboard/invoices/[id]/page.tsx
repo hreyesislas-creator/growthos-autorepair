@@ -5,7 +5,7 @@
 
 import { notFound } from 'next/navigation'
 import { getDashboardTenant } from '@/lib/tenant'
-import { getInvoiceById } from '@/lib/queries'
+import { getInvoiceById, getCustomerName, getVehicleDisplay } from '@/lib/queries'
 import Topbar from '@/components/dashboard/Topbar'
 import InvoiceDetail from './InvoiceDetail'
 
@@ -24,11 +24,19 @@ export default async function InvoiceDetailPage({
     return notFound()
   }
 
+  // Fetch customer name and vehicle display
+  const customerName = invoice.customer_id ? await getCustomerName(invoice.customer_id) : null
+  const vehicleDisplay = invoice.vehicle_id ? await getVehicleDisplay(invoice.vehicle_id) : null
+
   return (
     <>
       <Topbar title={`Invoice ${invoice.invoice_number || invoice.id}`} />
       <div className="dash-content">
-        <InvoiceDetail invoice={invoice} />
+        <InvoiceDetail
+          invoice={invoice}
+          customerName={customerName}
+          vehicleDisplay={vehicleDisplay}
+        />
       </div>
     </>
   )
