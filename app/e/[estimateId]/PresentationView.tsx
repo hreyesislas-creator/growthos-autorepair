@@ -80,6 +80,7 @@ interface Props {
   customerPhone:       string | null   // used by Send by Text — null if no phone on file
   initialDecisions:    EstimateItemDecision[]  // pre-loaded from DB by page.tsx
   existingWorkOrderId?: string          // loaded from work_orders table in page.tsx
+  profile?:            any             // business_profiles data (address, contact, warranty, footer)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -95,6 +96,7 @@ export default function PresentationView({
   customerPhone,
   initialDecisions,
   existingWorkOrderId,
+  profile,
 }: Props) {
   // ── Decisions — initialised from DB, then managed locally ─────────────────
   const [decisions, setDecisions] = useState<DecisionMap>(() => {
@@ -250,6 +252,28 @@ export default function PresentationView({
             <div style={{ fontSize: 20, fontWeight: 700, color: '#0f172a', marginBottom: 2 }}>
               {shopName}
             </div>
+            {/* Address block */}
+            {(profile?.address_line_1 || profile?.city || profile?.state) && (
+              <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 8, lineHeight: '1.3' }}>
+                {profile?.address_line_1 && <div>{profile.address_line_1}</div>}
+                {profile?.address_line_2 && <div>{profile.address_line_2}</div>}
+                {(profile?.city || profile?.state || profile?.zip_code) && (
+                  <div>
+                    {[profile?.city, profile?.state, profile?.zip_code]
+                      .filter(Boolean)
+                      .join(', ')}
+                  </div>
+                )}
+              </div>
+            )}
+            {/* Contact info */}
+            {(profile?.phone || profile?.email || profile?.website) && (
+              <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 8, lineHeight: '1.3' }}>
+                {profile?.phone && <div>📞 {profile.phone}</div>}
+                {profile?.email && <div>📧 {profile.email}</div>}
+                {profile?.website && <div>🌐 {profile.website}</div>}
+              </div>
+            )}
             <div style={{ fontSize: 13, color: '#4B5563' }}>
               Service Estimate · {estimate.estimate_number}
             </div>
@@ -401,6 +425,51 @@ export default function PresentationView({
         workOrderId={workOrderId}
         onAuthorize={handleAuthorizeEstimate}
       />
+
+      {/* ── Warranty & Footer sections ─────────────────────────────────────────────── */}
+      {profile?.warranty_text && (
+        <div style={{
+          background: '#fff',
+          border: '1px solid var(--border-2)',
+          borderRadius: 10,
+          padding: '20px 24px',
+          marginBottom: 20,
+          marginTop: 20,
+        }}>
+          <div style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: '#374151',
+            marginBottom: 8,
+          }}>
+            Warranty
+          </div>
+          <div style={{
+            fontSize: 13,
+            color: '#555',
+            whiteSpace: 'pre-wrap',
+            lineHeight: '1.5',
+          }}>
+            {profile?.warranty_text}
+          </div>
+        </div>
+      )}
+
+      {profile?.invoice_footer && (
+        <div style={{
+          background: '#fff',
+          border: '1px solid var(--border-2)',
+          borderRadius: 10,
+          padding: '20px 24px',
+          marginBottom: 20,
+          fontSize: 13,
+          color: '#6B7280',
+          lineHeight: '1.6',
+          textAlign: 'center',
+        }}>
+          {profile?.invoice_footer}
+        </div>
+      )}
 
       {/* ── Work-order CTA ────────────────────────────────────────────────── */}
       <div style={{
@@ -981,7 +1050,7 @@ function TotalsSummary({
           {(fullEstimateLaborSubtotal ?? 0) > 0 && (
             <SummaryRow
               label="Labor"
-              amount={fullEstimateLaborSubtotal}
+              amount={fullEstimateLaborSubtotal ?? 0}
               color="#6B7280"
               bold={false}
               small
@@ -990,7 +1059,7 @@ function TotalsSummary({
           {(fullEstimatePartsSubtotal ?? 0) > 0 && (
             <SummaryRow
               label="Parts & Materials"
-              amount={fullEstimatePartsSubtotal}
+              amount={fullEstimatePartsSubtotal ?? 0}
               color="#6B7280"
               bold={false}
               small

@@ -37,32 +37,186 @@ export function BusinessProfileForm({ profile }: ProfileFormProps) {
     router.refresh()
   }
 
-  const fields: { label: string; name: string; value?: string | null; placeholder?: string }[] = [
-    { label: 'Business Name', name: 'business_name', value: profile?.business_name,  placeholder: 'Acme Auto Repair' },
-    { label: 'Phone',         name: 'phone',         value: profile?.phone,          placeholder: '(555) 555-5555' },
-    { label: 'Email',         name: 'email',         value: profile?.email,          placeholder: 'info@shop.com' },
-    { label: 'Address',       name: 'address_street',value: profile?.address_street, placeholder: '123 Main St' },
-    { label: 'City',          name: 'address_city',  value: profile?.address_city,   placeholder: 'Banning' },
-    { label: 'State',         name: 'address_state', value: profile?.address_state,  placeholder: 'CA' },
-    { label: 'ZIP',           name: 'address_zip',   value: profile?.address_zip,    placeholder: '92220' },
-  ]
-
   return (
     <form onSubmit={handleSubmit}>
       <div className="card">
         <div className="section-title" style={{ marginBottom: '16px' }}>Business Profile</div>
-        <div className="form-grid">
-          {fields.map(f => (
-            <div key={f.name} className="form-group">
-              <label className="field-label">{f.label}</label>
+
+        {/* Business Identity */}
+        <div style={{ marginBottom: '24px' }}>
+          <div style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-3)', marginBottom: '12px' }}>
+            Business Identity
+          </div>
+          <div className="form-grid">
+            <div className="form-group">
+              <label className="field-label">Business Name</label>
               <input
-                name={f.name}
+                name="business_name"
                 className="field-input"
-                defaultValue={f.value ?? ''}
-                placeholder={f.placeholder}
+                defaultValue={profile?.business_name ?? ''}
+                placeholder="Acme Auto Repair"
               />
             </div>
-          ))}
+            <div className="form-group">
+              <label className="field-label">Phone</label>
+              <input
+                name="phone"
+                className="field-input"
+                defaultValue={profile?.phone ?? ''}
+                placeholder="(555) 555-5555"
+              />
+            </div>
+            <div className="form-group">
+              <label className="field-label">Email</label>
+              <input
+                name="email"
+                className="field-input"
+                defaultValue={profile?.email ?? ''}
+                placeholder="info@shop.com"
+              />
+            </div>
+            <div className="form-group">
+              <label className="field-label">Website</label>
+              <input
+                name="website"
+                className="field-input"
+                defaultValue={profile?.website ?? ''}
+                placeholder="https://acmeauto.com"
+              />
+            </div>
+            <div className="form-group">
+              <label className="field-label">Address Line 1</label>
+              <input
+                name="address_line_1"
+                className="field-input"
+                defaultValue={(profile as any)?.address_line_1 ?? ''}
+                placeholder="123 Main St"
+              />
+            </div>
+            <div className="form-group">
+              <label className="field-label">Address Line 2</label>
+              <input
+                name="address_line_2"
+                className="field-input"
+                defaultValue={(profile as any)?.address_line_2 ?? ''}
+                placeholder="Suite 100 (optional)"
+              />
+            </div>
+            <div className="form-group">
+              <label className="field-label">City</label>
+              <input
+                name="city"
+                className="field-input"
+                defaultValue={(profile as any)?.city ?? ''}
+                placeholder="Banning"
+              />
+            </div>
+            <div className="form-group">
+              <label className="field-label">State</label>
+              <input
+                name="state"
+                className="field-input"
+                defaultValue={(profile as any)?.state ?? ''}
+                placeholder="CA"
+              />
+            </div>
+            <div className="form-group">
+              <label className="field-label">ZIP Code</label>
+              <input
+                name="zip_code"
+                className="field-input"
+                defaultValue={(profile as any)?.zip_code ?? ''}
+                placeholder="92220"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Legal / Licensing */}
+        <div style={{ marginBottom: '24px', paddingTop: '16px', borderTop: '1px solid var(--border-2)' }}>
+          <div style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-3)', marginBottom: '12px' }}>
+            Legal & Licensing
+          </div>
+          <div className="form-grid">
+            <div className="form-group">
+              <label className="field-label">BAR License</label>
+              <input
+                name="bar_license"
+                className="field-input"
+                defaultValue={profile?.bar_license ?? ''}
+                placeholder="e.g., AB123456"
+              />
+            </div>
+            <div className="form-group">
+              <label className="field-label">Seller&apos;s Permit</label>
+              <input
+                name="seller_permit"
+                className="field-input"
+                defaultValue={profile?.seller_permit ?? ''}
+                placeholder="e.g., 12-3456789-0"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Document Defaults */}
+        <div style={{ paddingTop: '16px', borderTop: '1px solid var(--border-2)' }}>
+          <div style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-3)', marginBottom: '12px' }}>
+            Document Defaults
+          </div>
+          <div className="form-grid">
+            <div className="form-group">
+              <label className="field-label">Tax Rate (%)</label>
+              <input
+                name="tax_rate"
+                className="field-input"
+                type="number"
+                step="0.01"
+                defaultValue={profile?.tax_rate ? (parseFloat(profile.tax_rate.toString()) * 100).toFixed(4) : ''}
+                placeholder="8.75"
+              />
+            </div>
+            <div className="form-group">
+              <label className="field-label">Labor Rate ($/hr)</label>
+              <input
+                name="labor_rate"
+                className="field-input"
+                type="number"
+                step="0.01"
+                defaultValue={profile?.labor_rate ?? ''}
+                placeholder="85.00"
+              />
+            </div>
+            <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+              <label className="field-label">Warranty Text</label>
+              <textarea
+                name="warranty_text"
+                className="field-input"
+                style={{ minHeight: '80px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+                defaultValue={profile?.warranty_text ?? ''}
+                placeholder="e.g., 'All work covered by 12-month warranty'"
+              />
+            </div>
+            <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+              <label className="field-label">Invoice Terms</label>
+              <input
+                name="invoice_terms"
+                className="field-input"
+                defaultValue={profile?.invoice_terms ?? ''}
+                placeholder="e.g., 'Net 30' or 'Due upon receipt'"
+              />
+            </div>
+            <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+              <label className="field-label">Invoice Footer</label>
+              <textarea
+                name="invoice_footer"
+                className="field-input"
+                style={{ minHeight: '80px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+                defaultValue={profile?.invoice_footer ?? ''}
+                placeholder="e.g., 'Thank you for your business! Please call with any questions.'"
+              />
+            </div>
+          </div>
         </div>
 
         {error && (

@@ -1,3 +1,5 @@
+'use client'
+
 import type { InvoiceWithItems } from '@/lib/types'
 import Link from 'next/link'
 
@@ -22,6 +24,10 @@ function statusStyle(status: string) {
 export default function InvoiceDetail({ invoice, customerName, vehicleDisplay }: InvoiceDetailProps) {
   const status = statusStyle(invoice.status)
 
+  const handlePrint = () => {
+    window.open(`/invoices/${invoice.id}/print`, '_blank')
+  }
+
   return (
     <div style={{ maxWidth: 900, margin: '0 auto' }}>
       {/* Header card */}
@@ -40,11 +46,28 @@ export default function InvoiceDetail({ invoice, customerName, vehicleDisplay }:
               })}
             </div>
           </div>
-          <div style={{
-            ...status,
-            padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600,
-          }}>
-            {status.label}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button
+              onClick={handlePrint}
+              style={{
+                padding: '6px 12px',
+                borderRadius: 6,
+                fontSize: 12,
+                fontWeight: 600,
+                border: '1px solid var(--border-2)',
+                background: 'var(--bg-2)',
+                color: 'var(--text)',
+                cursor: 'pointer',
+              }}
+            >
+              Print
+            </button>
+            <div style={{
+              ...status,
+              padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+            }}>
+              {status.label}
+            </div>
           </div>
         </div>
 

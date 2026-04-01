@@ -47,11 +47,12 @@ export interface RolePermission {
 export interface BusinessProfile {
   id: string
   tenant_id: string
-  business_name: string
+  business_name: string | null
   tagline: string | null
   description: string | null
   phone: string | null
   email: string | null
+  website: string | null
   address_street: string | null
   address_city: string | null
   address_state: string | null
@@ -62,6 +63,13 @@ export interface BusinessProfile {
   secondary_color: string | null
   google_maps_embed: string | null
   google_place_id: string | null
+  bar_license: string | null
+  seller_permit: string | null
+  tax_rate: number | null
+  labor_rate: number | null
+  warranty_text: string | null
+  invoice_terms: string | null
+  invoice_footer: string | null
   updated_at: string
 }
 

@@ -11,6 +11,66 @@ import type { Metadata } from 'next'
 import { createAdminClient } from '@/lib/supabase/server'
 import PresentationView from './PresentationView'
 
+// Local type for estimate row (matches selected fields in this page)
+interface EstimateData {
+  id: string
+  tenant_id: string
+  customer_id: string | null
+  vehicle_id: string | null
+  inspection_id: string | null
+  estimate_number: string
+  status: string
+  notes: string | null
+  subtotal: number | string
+  tax_rate: number | string | null
+  tax_amount: number | string
+  total: number | string
+  created_at: string
+  updated_at: string
+}
+
+// Local type for business_profiles shape (matches selected fields in this page)
+interface BusinessProfileData {
+  business_name: string | null
+  address_line_1: string | null
+  address_line_2: string | null
+  city: string | null
+  state: string | null
+  zip_code: string | null
+  phone: string | null
+  email: string | null
+  website: string | null
+  logo_url: string | null
+  warranty_text: string | null
+  invoice_footer: string | null
+}
+
+// Local type for estimate_items shape (matches selected fields in this page)
+interface EstimateItemData {
+  id: string
+  title: string
+  description: string | null
+  notes: string | null
+  category: string
+  source_type: string
+  service_job_id: string | null
+  labor_hours: number | null
+  labor_rate: number | null
+  labor_total: number | null
+  parts_total: number | null
+  line_total: number | null
+  display_order: number
+  estimate_id: string
+  tenant_id: string
+  quantity: number
+  unit_price: number
+  needs_review: boolean | null
+  service_recommendation_id: string | null
+  inspection_item_id: string | null
+  created_at: string
+  updated_at: string
+}
+
 // Always fetch fresh — status can change (approved/declined)
 export const dynamic = 'force-dynamic'
 
@@ -71,7 +131,7 @@ export default async function EstimatePresentationPage({
       .maybeSingle(),
   ])
 
-  const estimate = estimateRes.data
+  const estimate = estimateRes.data as EstimateData | null
   if (!estimate) return notFound()
 
   // Extract existing work order ID if one exists
@@ -124,10 +184,13 @@ export default async function EstimatePresentationPage({
         .eq('id', (estimate as any).tenant_id)
         .single(),
 
-      // Business profile (phone, logo)
+      // Business profile (all fields for header + footer)
       supabase
         .from('business_profiles')
-        .select('phone, logo_url')
+        .select(
+          'business_name, address_line_1, address_line_2, city, state, zip_code, ' +
+          'phone, email, website, logo_url, warranty_text, invoice_footer',
+        )
         .eq('tenant_id', (estimate as any).tenant_id)
         .maybeSingle(),
 
@@ -144,7 +207,8 @@ export default async function EstimatePresentationPage({
     ])
 
   // ── 3. Shape data ──────────────────────────────────────────────────────────
-  const shopName  = tenantRes.data?.name ?? 'Your Auto Shop'
+  const profile   = profileRes.data as BusinessProfileData | null
+  const shopName  = profile?.business_name ?? tenantRes.data?.name ?? 'Your Auto Shop'
   const customer  = customerRes.data as { first_name: string; last_name: string; phone: string | null; email: string | null } | null
   const vehicle   = vehicleRes.data  as { year: number | null; make: string | null; model: string | null; license_plate: string | null } | null
 
@@ -165,7 +229,8 @@ export default async function EstimatePresentationPage({
     partsMap.set(part.estimate_item_id, bucket)
   }
 
-  const itemsWithParts = (itemsRes.data ?? []).map(item => ({
+  const estimateItems = ((itemsRes.data as unknown as EstimateItemData[]) ?? [])
+  const itemsWithParts = estimateItems.map(item => ({
     ...item,
     parts: partsMap.get(item.id) ?? [],
   }))
@@ -186,6 +251,7 @@ export default async function EstimatePresentationPage({
       customerPhone={customerPhone}
       initialDecisions={initialDecisions}
       existingWorkOrderId={existingWorkOrderId}
+      profile={profile}
     />
   )
 }

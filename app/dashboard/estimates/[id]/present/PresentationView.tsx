@@ -1036,7 +1036,7 @@ function TotalsSummary({
           {(fullEstimateLaborSubtotal ?? 0) > 0 && (
             <SummaryRow
               label="Labor"
-              amount={fullEstimateLaborSubtotal}
+              amount={fullEstimateLaborSubtotal ?? 0}
               color="#6B7280"
               bold={false}
               small
@@ -1045,7 +1045,7 @@ function TotalsSummary({
           {(fullEstimatePartsSubtotal ?? 0) > 0 && (
             <SummaryRow
               label="Parts & Materials"
-              amount={fullEstimatePartsSubtotal}
+              amount={fullEstimatePartsSubtotal ?? 0}
               color="#6B7280"
               bold={false}
               small

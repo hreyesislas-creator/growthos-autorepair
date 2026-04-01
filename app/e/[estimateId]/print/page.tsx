@@ -9,6 +9,41 @@
 import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import { createAdminClient } from '@/lib/supabase/server'
+import './styles.css'
+
+// Local type for estimate row (matches selected fields in this page)
+interface EstimateData {
+  id: string
+  tenant_id: string
+  customer_id: string | null
+  vehicle_id: string | null
+  estimate_number: string
+  status: string
+  subtotal: number | string
+  tax_rate: number | string | null
+  tax_amount: number | string
+  total: number | string
+  created_at: string
+  notes: string | null
+}
+
+// Local type for business_profiles shape (matches selected fields in this page)
+interface BusinessProfileData {
+  business_name: string | null
+  address_line_1: string | null
+  address_line_2: string | null
+  city: string | null
+  state: string | null
+  zip_code: string | null
+  phone: string | null
+  email: string | null
+  website: string | null
+  logo_url: string | null
+  bar_license: string | null
+  seller_permit: string | null
+  warranty_text: string | null
+  invoice_footer: string | null
+}
 
 export const dynamic = 'force-dynamic'
 
@@ -49,7 +84,7 @@ export default async function EstimatePrintPage({
     .eq('id', params.estimateId)
     .maybeSingle()
 
-  const estimate = estimateRes.data
+  const estimate = estimateRes.data as EstimateData | null
   if (!estimate) return notFound()
 
   // ── 2. Fetch related data using estimate's FKs
@@ -88,17 +123,22 @@ export default async function EstimatePrintPage({
         .eq('id', estimate.tenant_id)
         .single(),
 
-      // Business profile - FILTER by estimate's tenant_id
+      // Business profile - FILTER by estimate's tenant_id (tenant-scoped)
       supabase
         .from('business_profiles')
-        .select('phone, logo_url')
+        .select(
+          'business_name, address_line_1, address_line_2, city, state, zip_code, ' +
+          'phone, email, website, logo_url, bar_license, seller_permit, ' +
+          'warranty_text, invoice_footer',
+        )
         .eq('tenant_id', estimate.tenant_id)
         .maybeSingle(),
     ])
 
   // ── Shape data
-  const shopName = tenantRes.data?.name ?? 'Auto Repair Shop'
-  const shopPhone = profileRes.data?.phone ?? null
+  const tenant = tenantRes.data
+  const profile = profileRes.data as BusinessProfileData | null
+  const shopName = profile?.business_name ?? tenant?.name ?? 'Auto Repair Shop'
   const customer = customerRes.data
   const vehicle = vehicleRes.data
   const items = itemsRes.data ?? []
@@ -124,188 +164,33 @@ export default async function EstimatePrintPage({
   const total = Number(estimate.total) || 0
 
   return (
-    <>
-      <style>{`
-        * {
-          margin: 0;
-          padding: 0;
-          box-sizing: border-box;
-        }
-
-        html, body {
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          line-height: 1.5;
-          color: #000;
-          background: #fff;
-        }
-
-        .page {
-          max-width: 8.5in;
-          margin: 0 auto;
-          padding: 0.5in;
-          background: #fff;
-        }
-
-        .header {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          border-bottom: 2px solid #000;
-          padding-bottom: 12px;
-          margin-bottom: 20px;
-        }
-
-        .shop-info h1 {
-          font-size: 24px;
-          font-weight: 700;
-          margin-bottom: 4px;
-        }
-
-        .shop-info p {
-          font-size: 12px;
-          color: #555;
-          margin: 2px 0;
-        }
-
-        .estimate-meta {
-          text-align: right;
-          font-size: 12px;
-        }
-
-        .estimate-meta h2 {
-          font-size: 14px;
-          font-weight: 700;
-          margin-bottom: 4px;
-        }
-
-        .estimate-meta p {
-          margin: 2px 0;
-        }
-
-        .customer-vehicle {
-          display: flex;
-          gap: 40px;
-          margin-bottom: 20px;
-          font-size: 12px;
-        }
-
-        .customer-vehicle div {
-          flex: 1;
-        }
-
-        .customer-vehicle strong {
-          display: block;
-          font-weight: 600;
-          margin-bottom: 2px;
-        }
-
-        .items-table {
-          width: 100%;
-          border-collapse: collapse;
-          margin-bottom: 20px;
-          font-size: 12px;
-        }
-
-        .items-table th {
-          background: #f3f4f6;
-          border: 1px solid #d1d5db;
-          padding: 8px;
-          text-align: left;
-          font-weight: 600;
-        }
-
-        .items-table td {
-          border: 1px solid #d1d5db;
-          padding: 8px;
-        }
-
-        .items-table tr:nth-child(even) {
-          background: #fafafa;
-        }
-
-        .items-table .number {
-          text-align: right;
-        }
-
-        .totals {
-          margin: 20px 0;
-          border-top: 2px solid #000;
-          padding-top: 12px;
-          font-size: 13px;
-        }
-
-        .total-row {
-          display: flex;
-          justify-content: flex-end;
-          gap: 60px;
-          margin-bottom: 6px;
-        }
-
-        .total-row strong {
-          width: 100px;
-          text-align: right;
-        }
-
-        .total-row.final {
-          font-size: 16px;
-          font-weight: 700;
-          border-top: 1px solid #000;
-          padding-top: 8px;
-          margin-top: 12px;
-        }
-
-        .signature-area {
-          margin-top: 40px;
-          padding-top: 20px;
-          border-top: 1px solid #ccc;
-          font-size: 12px;
-        }
-
-        .signature-block {
-          margin-bottom: 20px;
-        }
-
-        .signature-line {
-          border-bottom: 1px solid #000;
-          height: 50px;
-          margin-bottom: 4px;
-        }
-
-        .signature-label {
-          font-size: 11px;
-          color: #555;
-        }
-
-        .authorization-text {
-          font-size: 11px;
-          line-height: 1.6;
-          margin-top: 20px;
-          padding: 12px;
-          background: #f9fafb;
-          border: 1px solid #e5e7eb;
-        }
-
-        @media print {
-          body {
-            margin: 0;
-            padding: 0;
-            background: #fff;
-          }
-          .page {
-            max-width: 100%;
-            margin: 0;
-            padding: 0.5in;
-            box-shadow: none;
-            page-break-after: always;
-          }
-        }
-      `}</style>
-      <div className="page">
+    <div className="page">
           {/* Header */}
           <div className="header">
             <div className="shop-info">
               <h1>{shopName}</h1>
-              {shopPhone && <p>📞 {shopPhone}</p>}
+              {/* Address block */}
+              {(profile?.address_line_1 || profile?.city || profile?.state) && (
+                <div style={{ fontSize: '11px', color: '#555', marginTop: '8px', lineHeight: '1.4' }}>
+                  {profile?.address_line_1 && <p>{profile.address_line_1}</p>}
+                  {profile?.address_line_2 && <p>{profile.address_line_2}</p>}
+                  {(profile?.city || profile?.state || profile?.zip_code) && (
+                    <p>
+                      {[profile?.city, profile?.state, profile?.zip_code]
+                        .filter(Boolean)
+                        .join(', ')}
+                    </p>
+                  )}
+                </div>
+              )}
+              {/* Contact info */}
+              {(profile?.phone || profile?.email || profile?.website) && (
+                <div style={{ fontSize: '11px', color: '#666', marginTop: '6px', lineHeight: '1.4' }}>
+                  {profile?.phone && <p>Phone: {profile.phone}</p>}
+                  {profile?.email && <p>Email: {profile.email}</p>}
+                  {profile?.website && <p>Web: {profile.website}</p>}
+                </div>
+              )}
             </div>
             <div className="estimate-meta">
               <h2>Service Estimate</h2>
@@ -419,7 +304,31 @@ export default async function EstimatePrintPage({
               <p style={{ marginTop: 4 }}>{estimate.notes}</p>
             </div>
           )}
+
+          {/* Legal / Compliance */}
+          {(profile?.bar_license || profile?.seller_permit) && (
+            <div style={{ marginTop: 20, fontSize: '10px', color: '#888', borderTop: '1px solid #ddd', paddingTop: 10 }}>
+              {profile?.bar_license && <p>BAR License: {profile.bar_license}</p>}
+              {profile?.seller_permit && <p>Seller&apos;s Permit: {profile.seller_permit}</p>}
+            </div>
+          )}
+
+          {/* Warranty */}
+          {profile?.warranty_text && (
+            <div style={{ marginTop: 16, fontSize: '11px', color: '#555' }}>
+              <strong>Warranty:</strong>
+              <p style={{ marginTop: 4, whiteSpace: 'pre-wrap' }}>
+                {profile.warranty_text}
+              </p>
+            </div>
+          )}
+
+          {/* Footer */}
+          {profile?.invoice_footer && (
+            <div style={{ marginTop: 20, fontSize: '11px', color: '#666', borderTop: '1px solid #ccc', paddingTop: 12 }}>
+              <p>{profile.invoice_footer}</p>
+            </div>
+          )}
       </div>
-    </>
-  )
+    )
 }

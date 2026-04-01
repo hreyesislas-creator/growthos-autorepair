@@ -173,7 +173,6 @@ export async function recalculateEstimateTotals(
     const lineTotal = Number(item.line_total || 0)
 
     console.log('[recalculateEstimateTotals] ITEM DETAILS', {
-      id: item.id,
       category: item.category,
       service_job_id: item.service_job_id,
       labor_total: laborTotal,
@@ -997,7 +996,7 @@ export async function saveEstimateItemParts(
   }
 
   // Update items with recalculated parts_total and line_total
-  const updatePromises: Promise<any>[] = []
+  const updatePromises: PromiseLike<any>[] = []
   console.log('[saveEstimateItemParts] SYNC: Starting item updates', {
     totalItems: allItems?.length ?? 0,
     partsSumByItemId: Object.fromEntries(partsSumByItemId),
@@ -1046,6 +1045,7 @@ export async function saveEstimateItemParts(
           })
           .eq('id', item.id as string)
           .eq('tenant_id', tenantId)
+          .then(r => r)
       )
     }
   }

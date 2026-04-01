@@ -254,7 +254,7 @@ export async function finalizeEstimateApproval(
   // ── Step 1: Load estimate and validate ──────────────────────────────────
   const { data: estimate, error: fetchEstimateErr } = await supabase
     .from('estimates')
-    .select('id, tenant_id, customer_id, status')
+    .select('id, tenant_id, customer_id, vehicle_id, inspection_id, status, estimate_number, subtotal, tax_rate, tax_amount, total, parts_markup_percent')
     .eq('id', estimateId)
     .maybeSingle()
 
@@ -265,7 +265,7 @@ export async function finalizeEstimateApproval(
   // ── Step 2: Load approved items ─────────────────────────────────────────
   const { data: items, error: fetchItemsErr } = await supabase
     .from('estimate_items')
-    .select('id, tenant_id, title, description, line_total')
+    .select('*')
     .eq('estimate_id', estimateId)
 
   if (fetchItemsErr) {
@@ -311,6 +311,16 @@ export async function finalizeEstimateApproval(
     return { data: { workOrderId: existingWorkOrder.id } }
   }
 
+  // ── Step 4b: Generate work order number ─────────────────────────────────
+  const { count: woCount } = await supabase
+    .from('work_orders')
+    .select('*', { count: 'exact', head: true })
+    .eq('tenant_id', estimate.tenant_id)
+
+  const year = new Date().getFullYear()
+  const seq = (woCount ?? 0) + 1
+  const workOrderNumber = `WO-${year}-${String(seq).padStart(4, '0')}`
+
   // ── Step 5: Create new work order ──────────────────────────────────────
   const { data: newWorkOrder, error: createWoErr } = await supabase
     .from('work_orders')
@@ -318,7 +328,17 @@ export async function finalizeEstimateApproval(
       tenant_id: estimate.tenant_id,
       customer_id: estimate.customer_id,
       estimate_id: estimateId,
-      status: 'pending',
+      vehicle_id: estimate.vehicle_id ?? null,
+      inspection_id: estimate.inspection_id ?? null,
+      work_order_number: workOrderNumber,
+      estimate_number: estimate.estimate_number,
+      creation_mode: 'from_estimate',
+      status: 'draft',
+      subtotal: Number(estimate.subtotal) || 0,
+      tax_rate: estimate.tax_rate ?? null,
+      tax_amount: Number(estimate.tax_amount) || 0,
+      total: Number(estimate.total) || 0,
+      parts_markup_percent: estimate.parts_markup_percent ?? null,
       created_at: now,
       updated_at: now,
     })
@@ -331,14 +351,23 @@ export async function finalizeEstimateApproval(
   }
 
   // ── Step 6: Create work order items from approved items ────────────────
-  const workOrderItems = approvedItems.map(item => ({
+  const workOrderItems = approvedItems.map((item, idx) => ({
+    tenant_id: estimate.tenant_id,
     work_order_id: newWorkOrder.id,
     estimate_item_id: item.id,
-    tenant_id: estimate.tenant_id,
+    service_job_id: item.service_job_id ?? null,
     title: item.title,
-    description: item.description,
+    description: item.description ?? null,
+    category: item.category,
+    labor_hours: item.labor_hours ?? null,
+    labor_rate: item.labor_rate ?? null,
+    labor_total: item.labor_total || 0,
+    parts_total: item.parts_total || 0,
     line_total: item.line_total,
-    status: 'pending',
+    inspection_item_id: item.inspection_item_id ?? null,
+    service_recommendation_id: item.service_recommendation_id ?? null,
+    display_order: idx,
+    status: 'draft',
     created_at: now,
     updated_at: now,
   }))

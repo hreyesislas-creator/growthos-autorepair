@@ -12,20 +12,33 @@ export async function updateBusinessProfile(
   const supabase = await createClient()
 
   const str = (key: string) => String(formData.get(key) ?? '').trim() || null
+  const num = (key: string) => {
+    const val = String(formData.get(key) ?? '').trim()
+    return val ? parseFloat(val) : null
+  }
 
   const { error } = await supabase
     .from('business_profiles')
-    .update({
-      business_name:  str('business_name'),
-      phone:          str('phone'),
-      email:          str('email'),
-      address_street: str('address_street'),
-      address_city:   str('address_city'),
-      address_state:  str('address_state'),
-      address_zip:    str('address_zip'),
-      updated_at:     new Date().toISOString(),
-    })
-    .eq('tenant_id', ctx.tenant.id)
+    .upsert({
+      tenant_id:        ctx.tenant.id,
+      business_name:    str('business_name'),
+      phone:            str('phone'),
+      email:            str('email'),
+      website:          str('website'),
+      address_line_1:   str('address_line_1'),
+      address_line_2:   str('address_line_2'),
+      city:             str('city'),
+      state:            str('state'),
+      zip_code:         str('zip_code'),
+      bar_license:      str('bar_license'),
+      seller_permit:    str('seller_permit'),
+      tax_rate:         num('tax_rate'),
+      labor_rate:       num('labor_rate'),
+      warranty_text:    str('warranty_text'),
+      invoice_terms:    str('invoice_terms'),
+      invoice_footer:   str('invoice_footer'),
+      updated_at:       new Date().toISOString(),
+    }, { onConflict: 'tenant_id' })
 
   if (error) return { error: error.message }
   return null
