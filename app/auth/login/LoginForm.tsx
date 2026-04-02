@@ -40,6 +40,14 @@ export default function LoginForm() {
       return
     }
 
+    // ── 1b. Verify session was created ───────────────────────────────────────
+    if (!data.session) {
+      console.error('[LoginForm] signInWithPassword succeeded but returned no session', { data })
+      setError('Sign in failed: no session created. Please try again.')
+      setPending(false)
+      return
+    }
+
     // ── 2. Confirm getSession() can read the session back ────────────────────
     const { data: { session: storedSession } } = await supabase.auth.getSession()
     console.log('[LoginForm] getSession() after sign-in:', storedSession ? 'EXISTS' : 'NULL')
