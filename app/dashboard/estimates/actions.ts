@@ -388,7 +388,13 @@ export async function createEstimate(
     parts_markup_percent: defaultMarkupPct,
   })
 
-  const { data, error } = await supabase
+  // ── Use session client for INSERT to satisfy RLS policy ────────────────────
+  // The estimates RLS policy checks auth.uid() via tenant_users.
+  // Service role (createAdminClient) lacks auth.uid() context, so RLS fails.
+  // Session client has the authenticated user's auth.uid(), satisfying the policy.
+  const sessionSupabase = await createClient()
+
+  const { data, error } = await sessionSupabase
     .from('estimates')
     .insert({
       tenant_id:            tenantId,
