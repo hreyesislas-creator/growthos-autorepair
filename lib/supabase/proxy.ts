@@ -7,6 +7,19 @@ const AUTH_PAGES = ['/auth/login']
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
+  const { pathname } = request.nextUrl
+
+  // ── Diagnostic: Log all cookies in request ─────────────────────────────────
+  const allCookies = request.cookies.getAll()
+  const sbCookies = allCookies.filter((c) => c.name.startsWith('sb-'))
+  console.log(
+    '[middleware] COOKIES:',
+    'pathname:', pathname,
+    '| sb- cookies count:', sbCookies.length,
+    '| all cookies count:', allCookies.length,
+    '| sb- names:', sbCookies.map((c) => c.name).join(', ') || '(none)'
+  )
+
   // @supabase/ssr v0.3.x uses get / set / remove — NOT getAll / setAll
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -35,9 +48,7 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  const { pathname } = request.nextUrl
-
-  console.log('[middleware] pathname:', pathname, '| user:', user?.id ?? 'null')
+  console.log('[middleware] AUTH CHECK:', 'pathname:', pathname, '| user:', user?.id ?? 'null')
 
   // Unauthenticated → redirect away from protected routes
   if (!user && PROTECTED_PREFIXES.some((p) => pathname.startsWith(p))) {

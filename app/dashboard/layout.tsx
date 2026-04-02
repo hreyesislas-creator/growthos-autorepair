@@ -14,10 +14,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  console.log('[dashboard layout] user:', user?.id ?? 'null')
+  console.log(
+    '[dashboard layout] AUTH CHECK:',
+    'user:', user?.id ?? 'null',
+    '| email:', user?.email ?? 'null'
+  )
 
   if (!user) {
-    console.log('[dashboard layout] no user — redirecting to /auth/login')
+    console.log('[dashboard layout] REDIRECT: no user found → /auth/login')
     redirect('/auth/login')
   }
 

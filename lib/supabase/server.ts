@@ -6,6 +6,16 @@ import { cookies } from 'next/headers'
 export async function createClient() {
   const cookieStore = await cookies()
 
+  // ── Diagnostic: Log available cookies ──────────────────────────────────────
+  const allCookies = cookieStore.getAll()
+  const sbCookies = allCookies.filter((c) => c.name.startsWith('sb-'))
+  console.log(
+    '[createClient] COOKIES:',
+    'sb- cookies count:', sbCookies.length,
+    '| all cookies count:', allCookies.length,
+    '| sb- names:', sbCookies.map((c) => c.name).join(', ') || '(none)'
+  )
+
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,

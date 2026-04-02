@@ -51,7 +51,7 @@ export async function getDashboardTenant(): Promise<TenantContext | null> {
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  console.log('[getDashboardTenant] user:', user?.id ?? 'null')
+  console.log('[getDashboardTenant] AUTH CHECK:', 'user:', user?.id ?? 'null', '| email:', user?.email ?? 'null')
 
   if (!user) return null
 
