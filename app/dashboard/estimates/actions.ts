@@ -394,6 +394,19 @@ export async function createEstimate(
   // Session client has the authenticated user's auth.uid(), satisfying the policy.
   const sessionSupabase = await createClient()
 
+  // ── TEMPORARY: Get authenticated user from session client for logging ────────
+  const { data: { user: sessionUser } } = await sessionSupabase.auth.getUser()
+
+  console.log('[createEstimate] SESSION INSERT ATTEMPT', {
+    marker: '[createEstimate] SESSION INSERT ATTEMPT',
+    clientType: 'createClient (session)',
+    sessionUserId: sessionUser?.id ?? 'NULL',
+    sessionUserEmail: sessionUser?.email ?? 'NULL',
+    ctxTenantId: ctx.tenant.id,
+    insertingTenantId: tenantId,
+    inspectionIdToInsert: input.inspection_id ?? null,
+  })
+
   const { data, error } = await sessionSupabase
     .from('estimates')
     .insert({
@@ -417,12 +430,16 @@ export async function createEstimate(
     .single()
 
   if (error) {
-    console.error('[createEstimate] INSERT FAILED', {
-      message: error.message,
-      code: error.code,
-      details: error.details,
-      hint: error.hint,
+    console.error('[createEstimate] SESSION INSERT FAILED', {
+      marker: '[createEstimate] SESSION INSERT FAILED',
+      errorMessage: error.message,
+      errorCode: error.code,
+      errorDetails: error.details,
+      errorHint: error.hint,
+      sessionUserId: sessionUser?.id ?? 'NULL',
+      sessionUserEmail: sessionUser?.email ?? 'NULL',
       tenantId,
+      insertingTenantId: tenantId,
     })
     return { error: error.message }
   }
