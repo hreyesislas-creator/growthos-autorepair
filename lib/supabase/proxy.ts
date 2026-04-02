@@ -48,14 +48,9 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  // Authenticated → bounce off the login page to prevent redirect loops
-  if (user && AUTH_PAGES.some((p) => pathname.startsWith(p))) {
-    console.log('[middleware] REDIRECTING authenticated user away from', pathname, '→ /dashboard')
-    const url = request.nextUrl.clone()
-    url.pathname = '/dashboard'
-    url.searchParams.delete('redirect')
-    return NextResponse.redirect(url)
-  }
+  // Allow auth pages to render (login form handles post-login redirect)
+  // Do NOT automatically redirect authenticated users from /auth pages
+  // to avoid redirect loops caused by session timing on preview domains.
 
   console.log('[middleware] PASSING THROUGH:', pathname)
   return supabaseResponse
