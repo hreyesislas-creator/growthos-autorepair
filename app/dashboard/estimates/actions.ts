@@ -334,8 +334,15 @@ export async function createEstimate(
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
 
-  const supabase = await createClient()
+  const supabase = await createAdminClient()
   const tenantId = ctx.tenant.id
+
+  console.log('[createEstimate] START', {
+    tenantId,
+    tenantSlug: ctx.tenant.slug,
+    inspectionId: input.inspection_id,
+    creationMode: input.creation_mode,
+  })
 
   // Guard: return existing draft for this inspection if one exists
   if (input.inspection_id) {
@@ -350,6 +357,10 @@ export async function createEstimate(
       .maybeSingle()
 
     if (existing) {
+      console.log('[createEstimate] RETURNING EXISTING DRAFT', {
+        estimateId: existing.id,
+        estimateNumber: existing.estimate_number,
+      })
       return { data: existing as Estimate }
     }
   }
@@ -364,6 +375,18 @@ export async function createEstimate(
   // recalculateEstimateTotals() will compute it correctly once items are saved.
   const defaultTaxRate     = pricingConfig?.default_tax_rate     ?? null
   const defaultMarkupPct   = pricingConfig?.parts_markup_percent ?? 0
+
+  console.log('[createEstimate] INSERT PAYLOAD', {
+    tenant_id: tenantId,
+    inspection_id: input.inspection_id ?? null,
+    customer_id: input.customer_id ?? null,
+    vehicle_id: input.vehicle_id ?? null,
+    estimate_number: estimateNumber,
+    creation_mode: input.creation_mode,
+    status: 'draft',
+    tax_rate: defaultTaxRate,
+    parts_markup_percent: defaultMarkupPct,
+  })
 
   const { data, error } = await supabase
     .from('estimates')
@@ -388,9 +411,21 @@ export async function createEstimate(
     .single()
 
   if (error) {
-    console.error('[createEstimate]', error.message)
+    console.error('[createEstimate] INSERT FAILED', {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+      tenantId,
+    })
     return { error: error.message }
   }
+
+  console.log('[createEstimate] SUCCESS', {
+    estimateId: data.id,
+    estimateNumber: data.estimate_number,
+    tenantId: data.tenant_id,
+  })
 
   return { data: data as Estimate }
 }
