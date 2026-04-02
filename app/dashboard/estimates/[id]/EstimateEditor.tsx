@@ -268,6 +268,32 @@ export default function EstimateEditor({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [partsMarkupPercent])
 
+  // ── Check for existing work order on mount ──────────────────────────────
+  // If this estimate already has a work order, populate woResult so the
+  // button shows "View Work Order" instead of "Create Work Order".
+  // This happens silently on mount and persists across refreshes.
+  useEffect(() => {
+    const checkExistingWorkOrder = async () => {
+      try {
+        const res = await fetch(
+          `/api/estimates/${estimate.id}/work-order`,
+          { method: 'GET' }
+        )
+        if (res.ok) {
+          const data = await res.json()
+          if (data.id) {
+            setWoResult({ id: data.id, work_order_number: data.work_order_number })
+          }
+        }
+      } catch (err) {
+        console.error('[EstimateEditor] failed to check for existing work order:', err)
+      } finally {
+        setWoLoading(false)
+      }
+    }
+    checkExistingWorkOrder()
+  }, [estimate.id])
+
   // ── Async state ────────────────────────────────────────────────────────────
   const [saving,     setSaving]     = useState(false)
   const [saveError,  setSaveError]  = useState<string | null>(null)
@@ -287,6 +313,11 @@ export default function EstimateEditor({
   const [woError,    setWoError]    = useState<string | null>(null)
   // Populated once a work order is successfully created or found (idempotent)
   const [woResult,   setWoResult]   = useState<{ id: string; work_order_number: string | null } | null>(null)
+  const [woLoading,  setWoLoading]  = useState(true)  // Loading state for initial check
+
+  // ── Delete line item confirmation modal state ──────────────────────────────
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [deleteConfirmKey,  setDeleteConfirmKey]  = useState<string | null>(null)  // Item key to delete
 
   // ── Void modal state ───────────────────────────────────────────────────────
   const [voidOpen,    setVoidOpen]    = useState(false)
@@ -377,6 +408,32 @@ export default function EstimateEditor({
   // OR if any decisions already exist (handles manual status overrides gracefully).
   const showDecisionSummary =
     estimate.status === 'presented' || initialDecisions.length > 0
+
+  // ── Approved totals breakdown (from DB estimate.items pre-calculated fields) ──
+  // CRITICAL: Use labor_total and parts_total from DB, not recalculated.
+  // These frozen values guarantee approved summary matches work order and invoice totals.
+  // estimate.items.labor_total = frozen labor for that item
+  // estimate.items.parts_total = frozen parts for that item
+  // estimate.items.line_total = frozen total (labor + parts)
+  const approvedItems = estimate.items.filter(i => approvedItemIds.has(i.id))
+  const approvedLabor = round2(
+    approvedItems.reduce((s, i) => s + Number(i.labor_total ?? 0), 0)
+  )
+  const approvedParts = round2(
+    approvedItems.reduce((s, i) => s + Number(i.parts_total ?? 0), 0)
+  )
+  const approvedOther = round2(
+    approvedItems
+      .filter(i => !i.service_job_id && i.category !== 'labor')
+      .reduce((s, i) => s + Number(i.line_total ?? 0), 0)
+  )
+  const approvedSubtotal = round2(approvedLabor + approvedParts + approvedOther)
+  const approvedTaxRate = rateNum ?? 0
+  const approvedTaxAmount = approvedTaxRate > 0
+    ? round2(approvedParts * approvedTaxRate)
+    : 0
+  const approvedTotal = round2(approvedSubtotal + approvedTaxAmount)
+  const showApprovedSummary = approvedItems.length > 0
 
   // ── Item mutation helpers ──────────────────────────────────────────────────
   const addItem = useCallback(() => {
@@ -856,20 +913,33 @@ export default function EstimateEditor({
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {items.map(item => (
-              <ItemRow
-                key={item._key}
-                item={item}
-                jobGroups={jobGroups}
-                serviceJobs={serviceJobs}
-                defaultLaborRate={defaultLaborRate}
-                onUpdate={field => updateItem(item._key, field)}
-                onRemove={() => removeItem(item._key)}
-                onAddPart={() => addPart(item._key)}
-                onRemovePart={partKey => removePart(item._key, partKey)}
-                onUpdatePart={(partKey, field) => updatePart(item._key, partKey, field)}
-              />
-            ))}
+            {items.map(item => {
+              // Determine decision status for this item
+              const decisionStatus: 'approved' | 'declined' | 'pending' | undefined =
+                item.id && approvedItemIds.has(item.id) ? 'approved' :
+                item.id && declinedItemIds.has(item.id) ? 'declined' :
+                showDecisionSummary ? 'pending' :
+                undefined
+              return (
+                <ItemRow
+                  key={item._key}
+                  item={item}
+                  jobGroups={jobGroups}
+                  serviceJobs={serviceJobs}
+                  defaultLaborRate={defaultLaborRate}
+                  onUpdate={field => updateItem(item._key, field)}
+                  onRemove={() => removeItem(item._key)}
+                  onRequestRemove={() => {
+                    setDeleteConfirmKey(item._key)
+                    setDeleteConfirmOpen(true)
+                  }}
+                  onAddPart={() => addPart(item._key)}
+                  onRemovePart={partKey => removePart(item._key, partKey)}
+                  onUpdatePart={(partKey, field) => updatePart(item._key, partKey, field)}
+                  decisionStatus={decisionStatus}
+                />
+              )
+            })}
           </div>
         )}
 
@@ -885,7 +955,101 @@ export default function EstimateEditor({
         </div>
       </div>
 
-      {/* ── Totals + tax ───────────────────────────────────────────────────── */}
+      {/* ── Approved Summary (when decisions exist) ────────────────────────── */}
+      {showApprovedSummary && (
+        <div className="card" style={{ marginBottom: 16, background: '#f0fdf4', padding: '16px', borderColor: '#d1fae5' }}>
+          <div style={{
+            fontSize: 13, fontWeight: 700, textTransform: 'uppercase',
+            letterSpacing: '0.06em', color: '#065f46',
+            paddingBottom: 12, borderBottom: '1px solid #d1fae5',
+            marginBottom: 14,
+          }}>
+            ✓ Approved Summary
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+            {/* Line items with normal emphasis */}
+            {approvedLabor > 0 && (
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '6px 0', borderBottom: '1px solid #d1fae5',
+              }}>
+                <span style={{ fontSize: 12, color: '#1a1a1a', fontWeight: 400 }}>Labor</span>
+                <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: '#1a1a1a', fontWeight: 500 }}>
+                  ${approvedLabor.toFixed(2)}
+                </span>
+              </div>
+            )}
+
+            {approvedParts > 0 && (
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '6px 0', borderBottom: '1px solid #d1fae5',
+              }}>
+                <span style={{ fontSize: 12, color: '#1a1a1a', fontWeight: 400 }}>Parts</span>
+                <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: '#1a1a1a', fontWeight: 500 }}>
+                  ${approvedParts.toFixed(2)}
+                </span>
+              </div>
+            )}
+
+            {approvedOther > 0 && (
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '6px 0', borderBottom: '1px solid #d1fae5',
+              }}>
+                <span style={{ fontSize: 12, color: '#1a1a1a', fontWeight: 400 }}>Other</span>
+                <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: '#1a1a1a', fontWeight: 500 }}>
+                  ${approvedOther.toFixed(2)}
+                </span>
+              </div>
+            )}
+
+            {/* Subtotal with medium emphasis */}
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              padding: '8px 0', borderBottom: '1px solid #a7f3d0',
+              marginTop: 2, marginBottom: 2,
+            }}>
+              <span style={{ fontSize: 12, color: '#1a1a1a', fontWeight: 600 }}>Subtotal</span>
+              <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: '#1a1a1a', fontWeight: 600 }}>
+                ${approvedSubtotal.toFixed(2)}
+              </span>
+            </div>
+
+            {/* Tax line with secondary styling */}
+            {approvedTaxAmount > 0 && (
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '5px 0', marginBottom: 8,
+              }}>
+                <span style={{ fontSize: 11, color: '#555', fontWeight: 400, fontStyle: 'italic' }}>
+                  Tax (parts only)
+                </span>
+                <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: '#555', fontWeight: 400 }}>
+                  +${approvedTaxAmount.toFixed(2)}
+                </span>
+              </div>
+            )}
+
+            {/* Separator before total */}
+            <div style={{ height: 2, background: '#6ee7b7', margin: '10px 0 10px 0' }} />
+
+            {/* Total with strong emphasis */}
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              padding: '10px 0',
+            }}>
+              <span style={{ fontSize: 14, color: '#047857', fontWeight: 700 }}>Total Due</span>
+              <span style={{ fontSize: 16, fontFamily: 'var(--font-mono)', color: '#047857', fontWeight: 700 }}>
+                ${approvedTotal.toFixed(2)}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Full Estimate (Reference Only) ────────────────────────────────── */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{
           fontSize: 12, fontWeight: 700, textTransform: 'uppercase',
@@ -893,7 +1057,7 @@ export default function EstimateEditor({
           paddingBottom: 10, borderBottom: '1px solid var(--border-2)',
           marginBottom: 12,
         }}>
-          Totals
+          Full Estimate {showApprovedSummary && '(Reference Only)'}
         </div>
 
         <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
@@ -1179,16 +1343,17 @@ export default function EstimateEditor({
           </button>
         )}
 
-        {/* Create Work Order — shown when at least one item is approved.
-            Idempotent: clicking again returns the existing WO, never creates a duplicate. */}
-        {decisionApprovedCount > 0 && (
+        {/* Work Order Button — shown when at least one item is approved.
+            Idempotent: clicking again returns the existing WO, never creates a duplicate.
+            woLoading: true while checking if work order already exists. */}
+        {decisionApprovedCount > 0 && !woLoading && (
           <button
             type="button"
             disabled={woCreating || saving || presenting}
             onClick={handleCreateWorkOrder}
             title={
               woResult
-                ? `Work order ${woResult.work_order_number ?? ''} already created`
+                ? `View work order ${woResult.work_order_number ?? woResult.id}`
                 : `Create work order from ${decisionApprovedCount} approved item${decisionApprovedCount !== 1 ? 's' : ''}`
             }
             style={{
@@ -1211,7 +1376,7 @@ export default function EstimateEditor({
             {woCreating
               ? 'Creating…'
               : woResult
-              ? `🔧 ${woResult.work_order_number ?? 'Work Order'} ↗`
+              ? `🔧 View Work Order ↗`
               : '🔧 Create Work Order'}
           </button>
         )}
@@ -1273,6 +1438,82 @@ export default function EstimateEditor({
         isSubmitting={voidSubmit}
         errorMessage={voidError}
       />
+
+      {/* ── Delete line item confirmation modal ───────────────────────────────── */}
+      {deleteConfirmOpen && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 50,
+        }}>
+          <div style={{
+            background: 'var(--surface)', borderRadius: 12, padding: 24,
+            maxWidth: 420, boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)',
+          }}>
+            <h3 style={{
+              fontSize: 18, fontWeight: 700, marginBottom: 12,
+              color: 'var(--text)',
+            }}>
+              Remove Line Item?
+            </h3>
+            <p style={{
+              fontSize: 14, color: 'var(--text-2)', marginBottom: 24,
+              lineHeight: 1.5,
+            }}>
+              This line item will be removed from the estimate. You can recreate it later if needed.
+            </p>
+            <div style={{
+              display: 'flex', gap: 12, justifyContent: 'flex-end',
+            }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteConfirmOpen(false)
+                  setDeleteConfirmKey(null)
+                }}
+                style={{
+                  fontSize: 12, fontWeight: 600, padding: '8px 16px',
+                  borderRadius: 6, border: '1px solid var(--border-2)',
+                  background: 'var(--surface-2)', color: 'var(--text)',
+                  cursor: 'pointer', transition: 'all 0.15s',
+                }}
+                onMouseEnter={e => {
+                  (e.currentTarget as HTMLButtonElement).style.background = 'var(--border-2)'
+                }}
+                onMouseLeave={e => {
+                  (e.currentTarget as HTMLButtonElement).style.background = 'var(--surface-2)'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (deleteConfirmKey) {
+                    removeItem(deleteConfirmKey)
+                  }
+                  setDeleteConfirmOpen(false)
+                  setDeleteConfirmKey(null)
+                }}
+                style={{
+                  fontSize: 12, fontWeight: 600, padding: '8px 16px',
+                  borderRadius: 6, border: 'none',
+                  background: '#dc2626', color: '#fff',
+                  cursor: 'pointer', transition: 'all 0.15s',
+                }}
+                onMouseEnter={e => {
+                  (e.currentTarget as HTMLButtonElement).style.background = '#b91c1c'
+                }}
+                onMouseLeave={e => {
+                  (e.currentTarget as HTMLButtonElement).style.background = '#dc2626'
+                }}
+              >
+                Remove Item
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1286,9 +1527,11 @@ interface ItemRowProps {
   defaultLaborRate: number
   onUpdate:         (field: Partial<LocalItem>) => void
   onRemove:         () => void
+  onRequestRemove?: () => void  // Called instead of onRemove to show confirmation
   onAddPart:        () => void
   onRemovePart:     (partKey: string) => void
   onUpdatePart:     (partKey: string, field: Partial<LocalPart>) => void
+  decisionStatus?:  'approved' | 'declined' | 'pending'  // Status badge
 }
 
 function ItemRow({
@@ -1298,9 +1541,11 @@ function ItemRow({
   defaultLaborRate,
   onUpdate,
   onRemove,
+  onRequestRemove,
   onAddPart,
   onRemovePart,
   onUpdatePart,
+  decisionStatus,
 }: ItemRowProps) {
   const isJobMode   = !!item.service_job_id
   // Manual labor items also use hours × rate (no service catalog needed)
@@ -1335,7 +1580,7 @@ function ItemRow({
       padding: '10px 12px',
     }}>
 
-      {/* ── Row 1: Job / mode selector + remove ─────────────────────────────── */}
+      {/* ── Row 1: Job / mode selector + status badge ─────────────────────────── */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
         <select
           value={item.service_job_id ?? ''}
@@ -1356,17 +1601,56 @@ function ItemRow({
           ))}
         </select>
 
+        {/* Status badge — shows current approval state */}
+        {decisionStatus && (
+          <span style={{
+            fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+            padding: '4px 8px', borderRadius: 4,
+            background:
+              decisionStatus === 'approved' ? '#dcfce7' :
+              decisionStatus === 'declined' ? '#fee2e2' :
+              '#f3f4f6',
+            color:
+              decisionStatus === 'approved' ? '#15803d' :
+              decisionStatus === 'declined' ? '#dc2626' :
+              '#6b7280',
+            whiteSpace: 'nowrap', flexShrink: 0,
+          }}>
+            {decisionStatus === 'pending' ? '◯ NEEDS REVIEW' : `✓ ${decisionStatus.toUpperCase()}`}
+          </span>
+        )}
+      </div>
+
+      {/* ── Row 2 Footer: Item actions (delete) ────────────────────────────────── */}
+      {/* Separated from status badge to avoid accidental deletion */}
+      <div style={{
+        display: 'flex', justifyContent: 'flex-end', gap: 8,
+        paddingTop: 8, borderTop: '1px solid var(--border-3, #e5e7eb)',
+        marginTop: 8, marginBottom: -10, marginLeft: -12, marginRight: -12,
+        paddingLeft: 12, paddingRight: 12, paddingBottom: 8,
+      }}>
         <button
           type="button"
-          onClick={onRemove}
-          title="Remove item"
+          onClick={() => {
+            if (onRequestRemove) {
+              onRequestRemove()
+            }
+          }}
+          title="Delete this line item from the estimate"
           style={{
+            fontSize: 11, fontWeight: 600,
             background: 'none', border: 'none', cursor: 'pointer',
-            fontSize: 14, color: 'var(--text-3)', padding: '4px 6px',
-            lineHeight: 1, flexShrink: 0,
+            color: '#dc2626', padding: '4px 8px',
+            borderRadius: 4, transition: 'background 0.15s',
+          }}
+          onMouseEnter={e => {
+            (e.currentTarget as HTMLButtonElement).style.background = 'rgba(220, 38, 38, 0.1)'
+          }}
+          onMouseLeave={e => {
+            (e.currentTarget as HTMLButtonElement).style.background = 'none'
           }}
         >
-          ✕
+          🗑 Delete Item
         </button>
       </div>
 

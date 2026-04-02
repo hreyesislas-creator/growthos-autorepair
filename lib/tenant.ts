@@ -60,13 +60,18 @@ export async function getDashboardTenant(): Promise<TenantContext | null> {
     .select('tenant_id')
     .eq('auth_user_id', user.id)
     .eq('is_active', true)
-    .single()
+    .maybeSingle()
 
-  console.log('[getDashboardTenant] tenantUser:', tenantUser, '| error:', tuError?.message ?? 'none')
+  if (tuError) {
+    console.error('[getDashboardTenant] tenant_users query failed:', tuError.message)
+    return null
+  }
+
+  console.log('[getDashboardTenant] tenantUser:', tenantUser?.tenant_id ?? 'null')
 
   if (!tenantUser?.tenant_id) {
-    console.log('[getDashboardTenant] no tenant_id — falling back to DEFAULT_SLUG:', DEFAULT_SLUG)
-    return getTenantBySlug(DEFAULT_SLUG)
+    console.warn('[getDashboardTenant] user has no active tenant mapping')
+    return null
   }
 
   const { data: tenant } = await supabase

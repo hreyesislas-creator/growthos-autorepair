@@ -317,10 +317,6 @@ export default function WorkOrderDetail({ workOrder, customerName, vehicleLabel 
   const subtotal      = Number(workOrder.subtotal)
   const taxAmount     = Number(workOrder.tax_amount)
   const total         = Number(workOrder.total)
-  const subtotalLabor = workOrder.items.reduce((acc, i) => acc + (Number(i.labor_total) || 0), 0)
-  const subtotalParts = workOrder.items.reduce((acc, i) => acc + (Number(i.parts_total) || 0), 0)
-  const hasLabor      = subtotalLabor > 0
-  const hasParts      = subtotalParts > 0
 
   // ── Time tracking ─────────────────────────────────────────────────────────
   const showTimeCard = status === 'in_progress' || status === 'completed' || !!startedAt || !!completedAt
@@ -554,7 +550,7 @@ export default function WorkOrderDetail({ workOrder, customerName, vehicleLabel 
         </div>
       )}
 
-      {/* ── Line items ───────────────────────────────────────────────────── */}
+      {/* ── Line items (operational view) ────────────────────────────── */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{
           fontSize: 12, fontWeight: 700, textTransform: 'uppercase',
@@ -562,7 +558,7 @@ export default function WorkOrderDetail({ workOrder, customerName, vehicleLabel 
           paddingBottom: 10, borderBottom: '1px solid var(--border-2)',
           marginBottom: 12,
         }}>
-          Line Items ({workOrder.items.length})
+          Work Items ({workOrder.items.length})
         </div>
 
         {workOrder.items.length === 0 ? (
@@ -570,92 +566,56 @@ export default function WorkOrderDetail({ workOrder, customerName, vehicleLabel 
             No items on this work order.
           </div>
         ) : (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Service / Item</th>
-                  <th style={{ whiteSpace: 'nowrap' }}>Labor</th>
-                  <th style={{ whiteSpace: 'nowrap' }}>Parts</th>
-                  <th style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>Line Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {workOrder.items.map(item => {
-                  const laborTotal = Number(item.labor_total) || 0
-                  const partsTotal = Number(item.parts_total) || 0
-                  const lineTotal  = Number(item.line_total)  || 0
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {workOrder.items.map(item => {
+              const itemParts = (item as any).parts ?? []
 
-                  return (
-                    <tr key={item.id}>
-                      <td>
-                        <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)' }}>
-                          {item.title}
-                        </div>
-                        {item.description && (
-                          <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>
-                            {item.description}
+              return (
+                <div key={item.id} style={{
+                  padding: 12,
+                  borderRadius: 'var(--r6,6px)',
+                  backgroundColor: 'var(--bg-2)',
+                  border: '1px solid var(--border-2)',
+                }}>
+                  {/* Job title */}
+                  <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text)', marginBottom: 6 }}>
+                    {item.title}
+                  </div>
+
+                  {/* Description */}
+                  {item.description && (
+                    <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 8 }}>
+                      {item.description}
+                    </div>
+                  )}
+
+                  {/* Labor estimate */}
+                  {item.labor_hours != null && item.labor_rate != null && (
+                    <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 8 }}>
+                      <span style={{ fontWeight: 500 }}>Estimated labor:</span> {Number(item.labor_hours).toFixed(1)} hr
+                    </div>
+                  )}
+
+                  {/* Parts list */}
+                  {itemParts.length > 0 && (
+                    <div style={{ marginTop: 8 }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.02em', marginBottom: 4 }}>
+                        Parts needed:
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                        {itemParts.map((part: any, idx: number) => (
+                          <div key={idx} style={{ fontSize: 12, color: 'var(--text-2)', paddingLeft: 12 }}>
+                            • {part.name} {part.quantity > 1 ? `(×${part.quantity})` : ''}
                           </div>
-                        )}
-                        {item.labor_hours != null && item.labor_rate != null && (
-                          <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>
-                            {Number(item.labor_hours).toFixed(1)} hr × ${Number(item.labor_rate).toFixed(2)}/hr
-                          </div>
-                        )}
-                      </td>
-                      <td style={{ fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text-2)' }}>
-                        {laborTotal > 0 ? `$${laborTotal.toFixed(2)}` : <span style={{ color: 'var(--text-3)' }}>—</span>}
-                      </td>
-                      <td style={{ fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--text-2)' }}>
-                        {partsTotal > 0 ? `$${partsTotal.toFixed(2)}` : <span style={{ color: 'var(--text-3)' }}>—</span>}
-                      </td>
-                      <td style={{
-                        fontSize: 13, fontFamily: 'var(--font-mono)',
-                        fontWeight: 700, color: 'var(--text)', textAlign: 'right',
-                        whiteSpace: 'nowrap',
-                      }}>
-                        ${lineTotal.toFixed(2)}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
-      </div>
-
-      {/* ── Totals ───────────────────────────────────────────────────────── */}
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div style={{
-          fontSize: 12, fontWeight: 700, textTransform: 'uppercase',
-          letterSpacing: '0.06em', color: 'var(--text-3)',
-          paddingBottom: 10, borderBottom: '1px solid var(--border-2)',
-          marginBottom: 12,
-        }}>
-          Totals
-        </div>
-
-        <div style={{ maxWidth: 320 }}>
-          {hasLabor && <TotalRow label="Labor"    amount={subtotalLabor} />}
-          {hasParts && <TotalRow label="Parts"    amount={subtotalParts} />}
-          <TotalRow label="Subtotal" amount={subtotal} bold />
-          {taxAmount > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0 3px 12px' }}>
-              <span style={{ fontSize: 12, color: 'var(--text-3)', fontStyle: 'italic' }}>
-                Tax
-                {workOrder.tax_rate != null && (
-                  <span> ({(Number(workOrder.tax_rate) * 100).toFixed(2)}%)</span>
-                )}
-              </span>
-              <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-3)' }}>
-                +${taxAmount.toFixed(2)}
-              </span>
-            </div>
-          )}
-          <div style={{ height: 1, background: 'var(--border)', margin: '6px 0' }} />
-          <TotalRow label="Total" amount={total} bold />
-        </div>
       </div>
 
       {/* ── Notes ────────────────────────────────────────────────────────── */}

@@ -81,6 +81,7 @@ interface Props {
   initialDecisions:    EstimateItemDecision[]  // pre-loaded from DB by page.tsx
   existingWorkOrderId?: string          // loaded from work_orders table in page.tsx
   profile?:            any             // business_profiles data (address, contact, warranty, footer)
+  isLocked?:           boolean         // true if authorization already completed and work order exists
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -97,6 +98,7 @@ export default function PresentationView({
   initialDecisions,
   existingWorkOrderId,
   profile,
+  isLocked,
 }: Props) {
   // ── Decisions — initialised from DB, then managed locally ─────────────────
   const [decisions, setDecisions] = useState<DecisionMap>(() => {
@@ -356,25 +358,46 @@ export default function PresentationView({
         )}
       </div>
 
-      {/* ── Instruction banner ────────────────────────────────────────────── */}
-      <div style={{
-        background: '#eff6ff',
-        border: '1px solid #bfdbfe',
-        borderRadius: 8,
-        padding: '12px 16px',
-        marginBottom: 20,
-        fontSize: 13,
-        color: '#1e40af',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-      }}>
-        <span style={{ fontSize: 16 }}>ℹ️</span>
-        <span>
-          Review each repair below and click <strong>Approve</strong> or <strong>Decline</strong> to build your work order.
-          You can change your mind at any time before submitting.
-        </span>
-      </div>
+      {/* ── Status banners ────────────────────────────────────────────────── */}
+      {isLocked ? (
+        <div style={{
+          background: '#f0fdf4',
+          border: '1px solid #86efac',
+          borderRadius: 8,
+          padding: '12px 16px',
+          marginBottom: 20,
+          fontSize: 13,
+          color: '#15803d',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+        }}>
+          <span style={{ fontSize: 16 }}>✅</span>
+          <span>
+            <strong>Authorization Complete</strong> — Your work order has been created.
+            Decisions cannot be changed at this time.
+          </span>
+        </div>
+      ) : (
+        <div style={{
+          background: '#eff6ff',
+          border: '1px solid #bfdbfe',
+          borderRadius: 8,
+          padding: '12px 16px',
+          marginBottom: 20,
+          fontSize: 13,
+          color: '#1e40af',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+        }}>
+          <span style={{ fontSize: 16 }}>ℹ️</span>
+          <span>
+            Review each repair below and click <strong>Approve</strong> or <strong>Decline</strong> to build your work order.
+            You can change your mind at any time before submitting.
+          </span>
+        </div>
+      )}
 
       {/* ── Share bar ─────────────────────────────────────────────────────── */}
       <ShareBar
@@ -395,6 +418,7 @@ export default function PresentationView({
             onUndecide={() => undecide(item.id)}
             isSaving={saving.has(item.id)}
             saveError={saveErrors[item.id] ?? null}
+            locked={isLocked ?? false}
           />
         ))}
       </div>
@@ -616,9 +640,10 @@ interface JobCardProps {
   onUndecide: () => void
   isSaving:   boolean
   saveError:  string | null
+  locked?:    boolean  // true if authorization completed and changes not allowed
 }
 
-function JobCard({ item, decision, onApprove, onDecline, onUndecide, isSaving, saveError }: JobCardProps) {
+function JobCard({ item, decision, onApprove, onDecline, onUndecide, isSaving, saveError, locked }: JobCardProps) {
   const laborCost    = round2((item.labor_hours ?? 0) * (item.labor_rate ?? 0))
   const partsSubtotal = getPartsSubtotal(item)
   const jobSubtotal  = getJobSubtotal(item)
@@ -681,17 +706,17 @@ function JobCard({ item, decision, onApprove, onDecline, onUndecide, isSaving, s
         {decision && (
           <button
             onClick={onUndecide}
-            disabled={isSaving}
-            title={isSaving ? 'Saving…' : 'Click to undo decision'}
+            disabled={isSaving || locked}
+            title={locked ? 'Authorization complete — cannot change' : isSaving ? 'Saving…' : 'Click to undo decision'}
             style={{
               flexShrink: 0,
               padding: '4px 10px',
               borderRadius: 20,
               border: 'none',
-              cursor: isSaving ? 'wait' : 'pointer',
+              cursor: locked || isSaving ? 'not-allowed' : 'pointer',
               fontSize: 12,
               fontWeight: 700,
-              opacity: isSaving ? 0.6 : 1,
+              opacity: isSaving || locked ? 0.6 : 1,
               background: decision === 'approved' ? '#dcfce7' : '#fee2e2',
               color:      decision === 'approved' ? '#15803d' : '#dc2626',
             }}
@@ -699,7 +724,7 @@ function JobCard({ item, decision, onApprove, onDecline, onUndecide, isSaving, s
             {isSaving
               ? '…'
               : decision === 'approved' ? '✓ Approved' : '✗ Declined'}
-            {!isSaving && (
+            {!isSaving && !locked && (
               <span style={{ marginLeft: 4, opacity: 0.5, fontSize: 10 }}>undo</span>
             )}
           </button>
@@ -765,8 +790,8 @@ function JobCard({ item, decision, onApprove, onDecline, onUndecide, isSaving, s
         </span>
       </div>
 
-      {/* ── Approve / Decline buttons ────────────────────────────────────── */}
-      {!decision && (
+      {/* ── Approve / Decline buttons (hidden when locked) ───────────────── */}
+      {!decision && !locked && (
         <div style={{
           display: 'flex',
           gap: 10,

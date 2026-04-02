@@ -252,6 +252,7 @@ export default async function EstimatePresentationPage({
       initialDecisions={initialDecisions}
       existingWorkOrderId={existingWorkOrderId}
       profile={profile}
+      isLocked={!!existingWorkOrderId}
     />
   )
 }

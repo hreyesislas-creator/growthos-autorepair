@@ -840,6 +840,9 @@ export interface WorkOrderItem {
   display_order:           number
   created_at:              string
   updated_at:              string
+
+  // ── Parts breakdown from source estimate (populated by getWorkOrderById) ────
+  parts?:                  EstimateItemPart[]
 }
 
 /** Convenience type — work order header + all its line items in one object. */

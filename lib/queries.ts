@@ -368,9 +368,7 @@ export async function getInspectionById(tenantId: string, id: string) {
     adminSupabase
       .from('inspection_items')
       .select('template_item_id, status, notes')
-      .eq('inspection_id', id)
-      // order by created_at — the new inspection_items table has no display_order column
-      .order('created_at', { ascending: true }),
+      .eq('inspection_id', id),
   ])
 
   if (inspRes.error) {
@@ -1173,9 +1171,47 @@ export async function getWorkOrderById(
     return { ...(woData as WorkOrder), items: [] }
   }
 
+  if (!itemsData || itemsData.length === 0) {
+    return {
+      ...(woData as WorkOrder),
+      items: [],
+    }
+  }
+
+  // Fetch parts for all items (from their source estimate items)
+  const estimateItemIds = (itemsData as WorkOrderItem[])
+    .map(item => item.estimate_item_id)
+    .filter(Boolean)
+
+  let partsMap = new Map<string, any[]>()
+  if (estimateItemIds.length > 0) {
+    const { data: partsData, error: partsError } = await supabase
+      .from('estimate_item_parts')
+      .select('*')
+      .in('estimate_item_id', estimateItemIds)
+      .order('display_order', { ascending: true })
+
+    if (partsError) {
+      console.error('[getWorkOrderById] estimate_item_parts query:', partsError.message)
+      // Graceful degradation: continue without parts data
+    } else if (partsData) {
+      for (const part of partsData) {
+        const bucket = partsMap.get(part.estimate_item_id) ?? []
+        bucket.push(part)
+        partsMap.set(part.estimate_item_id, bucket)
+      }
+    }
+  }
+
+  // Nest parts under their parent item
+  const itemsWithParts = (itemsData as WorkOrderItem[]).map(item => ({
+    ...item,
+    parts: item.estimate_item_id ? (partsMap.get(item.estimate_item_id) ?? []) : [],
+  }))
+
   return {
     ...(woData as WorkOrder),
-    items: (itemsData ?? []) as WorkOrderItem[],
+    items: itemsWithParts as any,
   }
 }
 
