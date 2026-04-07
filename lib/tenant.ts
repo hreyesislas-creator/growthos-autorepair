@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 import type { Tenant, BusinessProfile, WebsiteSettings, TenantContext } from '@/lib/types'
 
 const DEFAULT_SLUG = process.env.NEXT_PUBLIC_DEFAULT_TENANT_SLUG ?? 'ee-tires-demo'
@@ -47,21 +47,19 @@ export async function getTenantBySlug(slug?: string): Promise<TenantContext | nu
  * Reads tenant_id from the user's tenant_users record.
  */
 export async function getDashboardTenant(): Promise<TenantContext | null> {
-  const supabase = await createClient()
-
-  const { data: { user } } = await supabase.auth.getUser()
+  // Session client: needed to read auth.getUser() from the cookie session.
+  const sessionClient = await createClient()
+  const { data: { user } } = await sessionClient.auth.getUser()
 
   if (!user) return null
 
-  // TEMPORARY BYPASS - REMOVE LATER
-  // Hardcoded tenant for development while debugging tenant_users lookup
-  return getTenantBySlug('ee-tires-demo')
+  // Admin client: bypasses RLS so tenant_users and tenants reads always succeed.
+  const adminClient = createAdminClient()
 
-  // TODO: Restore tenant_users lookup later
-  const { data: tenantUser, error: tuError } = await supabase
+  const { data: tenantUser, error: tuError } = await adminClient
     .from('tenant_users')
     .select('tenant_id')
-    .eq('auth_user_id', String(user.id).toLowerCase())
+    .eq('auth_user_id', user.id)
     .eq('is_active', true)
     .maybeSingle()
 
@@ -75,7 +73,7 @@ export async function getDashboardTenant(): Promise<TenantContext | null> {
     return null
   }
 
-  const { data: tenant } = await supabase
+  const { data: tenant } = await adminClient
     .from('tenants')
     .select('*')
     .eq('id', tenantUser.tenant_id)

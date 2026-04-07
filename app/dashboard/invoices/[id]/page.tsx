@@ -17,7 +17,9 @@ export default async function InvoiceDetailPage({
   params: { id: string }
 }) {
   const ctx = await getDashboardTenant()
-  const tenantId = ctx?.tenant.id ?? ''
+  if (!ctx) return notFound()
+
+  const tenantId = ctx.tenant.id
 
   const invoice = await getInvoiceById(tenantId, params.id)
   if (!invoice) {

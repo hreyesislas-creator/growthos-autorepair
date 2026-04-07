@@ -1,6 +1,6 @@
 import { notFound }           from 'next/navigation'
 import { getDashboardTenant } from '@/lib/tenant'
-import { createClient }       from '@/lib/supabase/server'
+import { createAdminClient }  from '@/lib/supabase/server'
 import Topbar                 from '@/components/dashboard/Topbar'
 import WorkOrdersList         from './WorkOrdersList'
 
@@ -26,7 +26,7 @@ export default async function WorkOrdersPage() {
   if (!ctx) return notFound()
 
   const tenantId = ctx.tenant.id
-  const supabase = await createClient()
+  const supabase = await createAdminClient()
 
   // ── Step 1: Fetch work orders ─────────────────────────────────────────────
   const { data: rawRows, error } = await supabase

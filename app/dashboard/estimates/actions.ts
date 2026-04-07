@@ -388,8 +388,6 @@ export async function createEstimate(
     parts_markup_percent: defaultMarkupPct,
   })
 
-  const supabase = await createAdminClient()
-
   const { data, error } = await supabase
     .from('estimates')
     .insert({
@@ -913,7 +911,7 @@ export async function saveEstimateItemParts(
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
 
-  const supabase = await createClient()
+  const supabase = await createAdminClient()
   const tenantId = ctx.tenant.id
   const now      = new Date().toISOString()
 

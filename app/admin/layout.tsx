@@ -23,7 +23,16 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/auth/login?redirect=/admin')
 
-  // TODO: add role check for master admin — for now any authenticated user can see admin shell
+  // Admin allowlist: comma-separated emails in ADMIN_EMAILS env var.
+  // e.g. ADMIN_EMAILS=you@example.com,other@example.com
+  const adminEmails = (process.env.ADMIN_EMAILS ?? '')
+    .split(',')
+    .map(e => e.trim().toLowerCase())
+    .filter(Boolean)
+
+  if (adminEmails.length === 0 || !adminEmails.includes((user.email ?? '').toLowerCase())) {
+    redirect('/dashboard')
+  }
 
   return (
     <html lang="en">

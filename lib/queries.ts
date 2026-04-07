@@ -1068,7 +1068,7 @@ export async function getEstimateItemDecisions(
 ): Promise<EstimateItemDecision[]> {
   if (!hasValue(tenantId) || !hasValue(estimateId)) return []
 
-  const supabase = await createClient()
+  const supabase = await createAdminClient()
 
   const { data, error } = await supabase
     .from('estimate_item_decisions')
@@ -1113,7 +1113,7 @@ export async function getSupportTickets(tenantId?: string): Promise<SupportTicke
 export async function getWorkOrdersForTenant(tenantId: string, limit = 200): Promise<WorkOrder[]> {
   if (!hasValue(tenantId)) return []
 
-  const supabase = await createClient()
+  const supabase = await createAdminClient()
 
   const { data, error } = await supabase
     .from('work_orders')
@@ -1141,7 +1141,7 @@ export async function getWorkOrderById(
 ): Promise<WorkOrderWithItems | null> {
   if (!hasValue(tenantId) || !hasValue(workOrderId)) return null
 
-  const supabase = await createClient()
+  const supabase = await createAdminClient()
 
   // Fetch work order header
   const { data: woData, error: woError } = await supabase
