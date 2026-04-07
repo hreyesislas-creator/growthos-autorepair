@@ -1,6 +1,6 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { getDashboardTenant } from '@/lib/tenant'
 import type { TenantPricingConfig } from '@/lib/types'
 
@@ -23,7 +23,7 @@ export async function savePricingConfig(
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
 
-  const supabase   = await createClient()
+  const supabase   = await createAdminClient()
   const tenantId   = ctx.tenant.id
 
   // ── Parse and validate tax rate ──────────────────────────────────────────

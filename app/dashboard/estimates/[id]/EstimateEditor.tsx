@@ -259,13 +259,12 @@ export default function EstimateEditor({
   // This fires when the advisor edits the markup field so every part's
   // sell price and line total update instantly — no save required.
   useEffect(() => {
-    setItems(prev =>
-      prev.map(item => ({
-        ...item,
-        parts: item.parts.map(p => computePart(p, partsMarkupPercent)),
-      })),
-    )
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    setItems(prev => prev.map(item => ({
+      ...item,
+      parts: item.parts.map(({ profit_amount: _a, unit_sell_price: _b, line_total: _c, ...base }) =>
+        computePart(base, partsMarkupPercent),
+      ),
+    })))
   }, [partsMarkupPercent])
 
   // ── Check for existing work order on mount ──────────────────────────────
@@ -496,7 +495,9 @@ export default function EstimateEditor({
         ...i,
         parts: i.parts.map(p => {
           if (p._key !== partKey) return p
-          const merged = { ...p, ...field }
+          // Strip previously-computed fields so computePart always starts from base data.
+          const { profit_amount: _a, unit_sell_price: _b, line_total: _c, ...baseP } = p
+          const merged = { ...baseP, ...field }
           // Recompute sell price and line total whenever name/qty/cost changes.
           // Markup % comes from estimate-level setting — not per-part.
           return computePart(merged, partsMarkupPercent)
@@ -510,8 +511,17 @@ export default function EstimateEditor({
     setSaving(true)
     setSaveError(null)
 
+    // Ensure all parts are recalculated with the current markup % before save
+    // (guards against stale computed values if part fields or markup changed)
+    const itemsWithFreshParts = items.map(i => ({
+      ...i,
+      parts: i.parts.map(({ profit_amount: _a, unit_sell_price: _b, line_total: _c, ...base }) =>
+        computePart(base, partsMarkupPercent),
+      ),
+    }))
+
     // Build items payload — parts_total pre-computed from local parts
-    const itemsPayload: EstimateItemInput[] = items.map((i, idx) => {
+    const itemsPayload: EstimateItemInput[] = itemsWithFreshParts.map((i, idx) => {
       const isJobMode   = !!i.service_job_id
       // Manual labor items also use labor_hours × labor_rate for pricing
       const isLaborItem = isJobMode || i.category === 'labor'
@@ -546,7 +556,7 @@ export default function EstimateEditor({
 
     // Build parts payload — match new items by display_order
     const allParts: EstimateItemPartInput[] = []
-    items.forEach((localItem, idx) => {
+    itemsWithFreshParts.forEach((localItem, idx) => {
       // Find the saved item: existing ones by ID, new ones by display_order
       const dbItemId = localItem.id
         ? localItem.id
@@ -606,8 +616,16 @@ export default function EstimateEditor({
     setPresenting(true)
     setPresentError(null)
 
+    // Ensure all parts are recalculated with the current markup % before present
+    const itemsWithFreshParts = items.map(i => ({
+      ...i,
+      parts: i.parts.map(({ profit_amount: _a, unit_sell_price: _b, line_total: _c, ...base }) =>
+        computePart(base, partsMarkupPercent),
+      ),
+    }))
+
     // Build items payload — parts_total pre-computed from local parts
-    const itemsPayload: EstimateItemInput[] = items.map((i, idx) => {
+    const itemsPayload: EstimateItemInput[] = itemsWithFreshParts.map((i, idx) => {
       const isJobMode   = !!i.service_job_id
       // Manual labor items also use labor_hours × labor_rate for pricing
       const isLaborItem = isJobMode || i.category === 'labor'
@@ -642,7 +660,7 @@ export default function EstimateEditor({
 
     // Build parts payload — match new items by display_order
     const allParts: EstimateItemPartInput[] = []
-    items.forEach((localItem, idx) => {
+    itemsWithFreshParts.forEach((localItem, idx) => {
       const dbItemId = localItem.id
         ? localItem.id
         : itemsResult.data.find(si => si.display_order === idx)?.id
@@ -672,12 +690,6 @@ export default function EstimateEditor({
     }
 
     const taxRateToSave = taxRate.trim() !== '' ? parseFloat(taxRate) / 100 : null
-    console.log('[handlePresent] About to save estimate', {
-      estimateId: estimate.id,
-      statusBeingSaved: 'presented',
-      taxRate: taxRateToSave,
-      hasNotes: !!notes,
-    })
     const headerErr = await saveEstimate(estimate.id, {
       status:               'presented',
       notes:                notes         || null,
@@ -1571,6 +1583,8 @@ function ItemRow({
   }
 
   const partsSubtotal = getItemPartsTotal(item.parts)
+  // For labor mode items: Job Subtotal = labor + parts (lineTotal alone doesn't include parts for manual labor)
+  const jobSubtotal = isLaborMode ? round2(laborTotal + partsSubtotal) : lineTotal
 
   return (
     <div style={{
@@ -1772,7 +1786,7 @@ function ItemRow({
               borderTop: '1px solid var(--border-2)',
               marginTop: 6, paddingTop: 6,
             }}>
-              <TotalRow label="Job Subtotal" amount={lineTotal} bold />
+              <TotalRow label="Job Subtotal" amount={jobSubtotal} bold />
             </div>
           </div>
         </div>

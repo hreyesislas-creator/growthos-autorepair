@@ -1,6 +1,6 @@
 import { notFound }            from 'next/navigation'
 import { getDashboardTenant }  from '@/lib/tenant'
-import { createClient }        from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 import Topbar                  from '@/components/dashboard/Topbar'
 import EstimatesList           from './EstimatesList'
 import { deriveDisplayStatus } from '@/lib/estimateDisplayStatus'
@@ -28,7 +28,7 @@ export default async function EstimatesPage() {
   if (!ctx) return notFound()           // auth guard — same pattern as all other pages
 
   const tenantId = ctx.tenant.id
-  const supabase = await createClient()
+  const supabase = await createAdminClient()
 
   // ── Step 1: Fetch estimates without embedded joins ────────────────────────
   //

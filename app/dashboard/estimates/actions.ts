@@ -123,7 +123,7 @@ export async function recalculateEstimateTotals(
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
 
-  const supabase   = await createClient()
+  const supabase   = await createAdminClient()
   const tenantId   = ctx.tenant.id
 
   // 1. Fetch all non-tax line items.
@@ -388,26 +388,9 @@ export async function createEstimate(
     parts_markup_percent: defaultMarkupPct,
   })
 
-  // ── Use session client for INSERT to satisfy RLS policy ────────────────────
-  // The estimates RLS policy checks auth.uid() via tenant_users.
-  // Service role (createAdminClient) lacks auth.uid() context, so RLS fails.
-  // Session client has the authenticated user's auth.uid(), satisfying the policy.
-  const sessionSupabase = await createClient()
+  const supabase = await createAdminClient()
 
-  // ── TEMPORARY: Get authenticated user from session client for logging ────────
-  const { data: { user: sessionUser } } = await sessionSupabase.auth.getUser()
-
-  console.log('[createEstimate] SESSION INSERT ATTEMPT', {
-    marker: '[createEstimate] SESSION INSERT ATTEMPT',
-    clientType: 'createClient (session)',
-    sessionUserId: sessionUser?.id ?? 'NULL',
-    sessionUserEmail: sessionUser?.email ?? 'NULL',
-    ctxTenantId: ctx.tenant.id,
-    insertingTenantId: tenantId,
-    inspectionIdToInsert: input.inspection_id ?? null,
-  })
-
-  const { data, error } = await sessionSupabase
+  const { data, error } = await supabase
     .from('estimates')
     .insert({
       tenant_id:            tenantId,
@@ -430,25 +413,9 @@ export async function createEstimate(
     .single()
 
   if (error) {
-    console.error('[createEstimate] SESSION INSERT FAILED', {
-      marker: '[createEstimate] SESSION INSERT FAILED',
-      errorMessage: error.message,
-      errorCode: error.code,
-      errorDetails: error.details,
-      errorHint: error.hint,
-      sessionUserId: sessionUser?.id ?? 'NULL',
-      sessionUserEmail: sessionUser?.email ?? 'NULL',
-      tenantId,
-      insertingTenantId: tenantId,
-    })
+    console.error('[createEstimate] INSERT FAILED', error.message)
     return { error: error.message }
   }
-
-  console.log('[createEstimate] SUCCESS', {
-    estimateId: data.id,
-    estimateNumber: data.estimate_number,
-    tenantId: data.tenant_id,
-  })
 
   return { data: data as Estimate }
 }
@@ -768,7 +735,7 @@ export async function createEstimateFromInspection(input: {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
 
-  const supabase = await createClient()
+  const supabase = await createAdminClient()
   const tenantId = ctx.tenant.id
 
   console.log('[createEstimateFromInspection] start', {

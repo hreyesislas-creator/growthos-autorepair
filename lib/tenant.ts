@@ -51,14 +51,17 @@ export async function getDashboardTenant(): Promise<TenantContext | null> {
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  console.log('[getDashboardTenant] AUTH CHECK:', 'user:', user?.id ?? 'null', '| email:', user?.email ?? 'null')
-
   if (!user) return null
 
+  // TEMPORARY BYPASS - REMOVE LATER
+  // Hardcoded tenant for development while debugging tenant_users lookup
+  return getTenantBySlug('ee-tires-demo')
+
+  // TODO: Restore tenant_users lookup later
   const { data: tenantUser, error: tuError } = await supabase
     .from('tenant_users')
     .select('tenant_id')
-    .eq('auth_user_id', user.id)
+    .eq('auth_user_id', String(user.id).toLowerCase())
     .eq('is_active', true)
     .maybeSingle()
 
@@ -66,8 +69,6 @@ export async function getDashboardTenant(): Promise<TenantContext | null> {
     console.error('[getDashboardTenant] tenant_users query failed:', tuError.message)
     return null
   }
-
-  console.log('[getDashboardTenant] tenantUser:', tenantUser?.tenant_id ?? 'null')
 
   if (!tenantUser?.tenant_id) {
     console.warn('[getDashboardTenant] user has no active tenant mapping')
@@ -79,8 +80,6 @@ export async function getDashboardTenant(): Promise<TenantContext | null> {
     .select('*')
     .eq('id', tenantUser.tenant_id)
     .single<Tenant>()
-
-  console.log('[getDashboardTenant] tenant row:', tenant?.slug ?? 'null')
 
   if (!tenant) return null
   return getTenantBySlug(tenant.slug)

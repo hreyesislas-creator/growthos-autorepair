@@ -877,7 +877,7 @@ export async function getEstimateWithItems(
 ): Promise<EstimateWithItems | null> {
   if (!hasValue(tenantId) || !hasValue(estimateId)) return null
 
-  const supabase = await createClient()
+  const supabase = await createAdminClient()
 
   const [estimateRes, itemsRes, partsRes] = await Promise.all([
     supabase
@@ -1041,7 +1041,7 @@ export async function getTenantPricingConfig(
 ): Promise<TenantPricingConfig | null> {
   if (!hasValue(tenantId)) return null
 
-  const supabase = await createClient()
+  const supabase = await createAdminClient()
 
   const { data, error } = await supabase
     .from('tenant_pricing_configs')
