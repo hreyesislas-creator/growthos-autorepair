@@ -199,7 +199,7 @@ export default function InvoicesList({ invoices }: Props) {
                       padding: '12px 16px', fontSize: 13, fontWeight: 600, color: 'var(--text)',
                       textAlign: 'right',
                     }}>
-                      ${invoice.total.toFixed(2)}
+                      ${(invoice.total ?? 0).toFixed(2)}
                     </td>
                     <td style={{
                       padding: '12px 16px', textAlign: 'center',
