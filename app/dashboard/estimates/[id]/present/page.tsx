@@ -9,7 +9,7 @@ import { createClient } from '@/lib/supabase/server'
 import Topbar from '@/components/dashboard/Topbar'
 import PresentationView from './PresentationView'
 
-export const metadata = { title: 'Customer Presentation' }
+export const metadata = { title: 'Internal Review (Advisor Only)' }
 
 export default async function EstimatePresentPage({
   params,
@@ -66,7 +66,7 @@ export default async function EstimatePresentPage({
   return (
     <>
       <Topbar
-        title="Customer Presentation"
+        title="Internal Review (Advisor Only)"
         subtitle={[estimate.estimate_number, customerName, vehicleLabel]
           .filter(Boolean)
           .join(' · ') || undefined}

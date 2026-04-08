@@ -1237,7 +1237,7 @@ export default function EstimateEditor({
                 ? 'Customer approved this estimate'
                 : status === 'declined'
                 ? 'Customer declined this estimate'
-                : 'Estimate sent — share this link with your customer'}
+                : 'Ready to send — share this link with your customer'}
             </div>
             <div style={{
               fontSize: 11, color: '#166534', fontFamily: 'var(--font-mono)',
@@ -1351,7 +1351,7 @@ export default function EstimateEditor({
               boxShadow: '0 2px 8px rgba(22,163,74,0.3)',
             }}
           >
-            {presenting ? 'Presenting…' : '📋 Present to Customer'}
+            {presenting ? 'Presenting…' : '📋 Send to Customer for Approval'}
           </button>
         )}
 
@@ -1407,7 +1407,7 @@ export default function EstimateEditor({
             whiteSpace: 'nowrap',
           }}
         >
-          Preview ↗
+          Review (Internal) ↗
         </a>
 
         <button

@@ -338,6 +338,23 @@ export default function PresentationView({
         )}
       </div>
 
+      {/* ── Internal warning message ──────────────────────────────────────── */}
+      <div style={{
+        background: '#eef2ff',
+        border: '1px solid #c7d2fe',
+        borderRadius: 8,
+        padding: '12px 16px',
+        marginBottom: 20,
+        fontSize: 13,
+        color: '#3730a3',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+      }}>
+        <span style={{ fontSize: 16 }}>ℹ️</span>
+        <span>This is an internal preview. Customers will see a separate approval screen.</span>
+      </div>
+
       {/* ── Instruction banner ────────────────────────────────────────────── */}
       <div style={{
         background: '#0f2847',
@@ -754,7 +771,7 @@ function JobCard({ item, decision, onApprove, onDecline, onUndecide, isSaving, s
       {/* ── Approve / Decline buttons ────────────────────────────────────── */}
       {!decision && (
         <div style={{
-          display: 'flex',
+          display: 'none',
           gap: 10,
           padding: '12px 18px',
           borderTop: '1px solid var(--border-2)',
