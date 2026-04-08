@@ -173,7 +173,6 @@ export default function InvoicesList({ invoices }: Props) {
                     key={invoice.id}
                     style={{
                       borderBottom: idx < filtered.length - 1 ? '1px solid var(--border-2)' : 'none',
-                      hoverBackground: 'var(--surface-2)',
                     }}
                   >
                     <td style={{
