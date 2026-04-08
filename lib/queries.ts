@@ -1302,6 +1302,41 @@ export async function getInvoiceByWorkOrderId(
 }
 
 /**
+ * Fetch all invoices for a tenant.
+ * Used for the invoices list page.
+ * Returns invoices with customer_id and vehicle_id for bulk resolution.
+ */
+export async function getInvoicesForTenant(
+  tenantId: string,
+): Promise<Array<{
+  id: string
+  invoice_number: string | null
+  status: string
+  total: number
+  created_at: string
+  customer_id: string | null
+  vehicle_id: string | null
+}>> {
+  if (!hasValue(tenantId)) return []
+
+  const supabase = await createAdminClient()
+
+  const { data, error } = await supabase
+    .from('invoices')
+    .select('id, invoice_number, status, total, created_at, customer_id, vehicle_id')
+    .eq('tenant_id', tenantId)
+    .order('created_at', { ascending: false })
+    .limit(200)
+
+  if (error) {
+    console.error('[getInvoicesForTenant]', error.message)
+    return []
+  }
+
+  return (data ?? []) as any[]
+}
+
+/**
  * Fetch customer name by ID.
  * Used to display customer name on invoices.
  * Combines first_name and last_name into display format.
