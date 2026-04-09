@@ -539,8 +539,10 @@ export type EstimateCreationMode =
 export type EstimateStatus =
   | 'draft'
   | 'presented'
+  | 'authorized'
   | 'approved'
   | 'declined'
+  | 'reopened'
 
 /**
  * How a specific line item was produced within an estimate.

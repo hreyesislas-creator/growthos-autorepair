@@ -7,6 +7,7 @@ interface FinalAuthorizationBlockProps {
   workOrderId?: string
   onAuthorize: (customerName: string | null) => Promise<string | void>
   onViewWorkOrder?: (workOrderId: string) => void
+  isReopening?: boolean
 }
 
 export default function FinalAuthorizationBlock({
@@ -14,6 +15,7 @@ export default function FinalAuthorizationBlock({
   workOrderId,
   onAuthorize,
   onViewWorkOrder,
+  isReopening,
 }: FinalAuthorizationBlockProps) {
   const [checked, setChecked] = useState(false)
   const [customerName, setCustomerName] = useState('')
@@ -106,7 +108,7 @@ export default function FinalAuthorizationBlock({
         textTransform: 'uppercase',
         letterSpacing: '0.08em',
       }}>
-        Final Authorization
+        {isReopening ? 'Re-authorize Approved Repairs' : 'Final Authorization'}
       </h3>
 
       {approvedItemsCount === 0 && (
@@ -241,7 +243,7 @@ export default function FinalAuthorizationBlock({
             }
           }}
         >
-          {isLoading ? '…Processing' : 'Authorize Approved Repairs'}
+          {isLoading ? '…Processing' : (isReopening ? 'Re-authorize Approved Repairs' : 'Authorize Approved Repairs')}
         </button>
       </div>
     </div>

@@ -35,14 +35,16 @@ const CATEGORIES = [
 ] as const
 
 const STATUSES = [
-  { value: 'draft',     label: 'Draft',      style: { background: '#f1f5f9', color: '#475569' } },
-  { value: 'presented', label: 'Presented', style: { background: '#eff6ff', color: '#1d4ed8' } },
-  { value: 'approved',  label: 'Approved',  style: { background: '#f0fdf4', color: '#15803d' } },
-  { value: 'declined',  label: 'Declined',  style: { background: '#fff7ed', color: '#c2410c' } },
+  { value: 'draft',      label: 'Draft',       style: { background: '#f1f5f9', color: '#475569' } },
+  { value: 'presented',  label: 'Presented',   style: { background: '#eff6ff', color: '#1d4ed8' } },
+  { value: 'authorized', label: 'Authorized',  style: { background: '#fef3c7', color: '#92400e' } },
+  { value: 'approved',   label: 'Approved',    style: { background: '#f0fdf4', color: '#15803d' } },
+  { value: 'declined',   label: 'Declined',    style: { background: '#fff7ed', color: '#c2410c' } },
+  { value: 'reopened',   label: 'Reopened',    style: { background: '#fef3c7', color: '#92400e' } },
 ] as const
 
 type Category = 'labor' | 'part' | 'fee' | 'misc'
-type Status   = 'draft' | 'presented' | 'approved' | 'declined'
+type Status   = 'draft' | 'presented' | 'authorized' | 'approved' | 'declined' | 'reopened'
 
 // ── Local part shape ──────────────────────────────────────────────────────────
 
@@ -850,6 +852,84 @@ export default function EstimateEditor({
         </div>
       </div>
 
+      {/* ── Re-authorization Required banner (Phase 2) ───────────────────────── */}
+      {estimate.status === 'reopened' && (
+        <div style={{
+          marginBottom: 16, padding: '16px 20px',
+          background: 'linear-gradient(135deg, #fef3c7, #fcd34d)',
+          border: '2px solid #f59e0b',
+          borderRadius: 'var(--r12,12px)',
+        }}>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+            <span style={{ fontSize: 20, flexShrink: 0 }}>⚠️</span>
+            <div style={{ flex: 1 }}>
+              <h3 style={{
+                fontSize: 14, fontWeight: 700, color: '#92400e', marginBottom: 6,
+              }}>
+                Re-authorization Required
+              </h3>
+              <p style={{
+                fontSize: 13, color: '#92400e', marginBottom: 12, lineHeight: 1.5,
+              }}>
+                Customer decisions can now be edited again. Open the customer approval page to review and re-authorize the approved repairs.
+              </p>
+              <p style={{
+                fontSize: 12, color: '#b45309', fontStyle: 'italic', marginBottom: 12,
+              }}>
+                💡 If the approval page was already open, refresh it to load the reopened state.
+              </p>
+              <div style={{
+                display: 'flex', gap: 8, flexWrap: 'wrap',
+              }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const approvalUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/e/${estimate.id}`
+                    window.open(approvalUrl, '_blank')
+                  }}
+                  style={{
+                    fontSize: 13, fontWeight: 700, padding: '10px 16px',
+                    borderRadius: 'var(--r8,8px)', border: 'none',
+                    background: '#f59e0b', color: '#fff',
+                    cursor: 'pointer', transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => {
+                    (e.currentTarget as HTMLButtonElement).style.background = '#d97706'
+                  }}
+                  onMouseLeave={e => {
+                    (e.currentTarget as HTMLButtonElement).style.background = '#f59e0b'
+                  }}
+                >
+                  ↗ Open Customer Approval Page
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const approvalUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/e/${estimate.id}`
+                    navigator.clipboard.writeText(approvalUrl)
+                    alert('Approval link copied to clipboard')
+                  }}
+                  style={{
+                    fontSize: 13, fontWeight: 700, padding: '10px 16px',
+                    borderRadius: 'var(--r8,8px)',
+                    border: '1px solid #f59e0b', background: '#fff', color: '#f59e0b',
+                    cursor: 'pointer', transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => {
+                    (e.currentTarget as HTMLButtonElement).style.background = '#fffbeb'
+                  }}
+                  onMouseLeave={e => {
+                    (e.currentTarget as HTMLButtonElement).style.background = '#fff'
+                  }}
+                >
+                  📋 Copy Approval Link
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Line items ─────────────────────────────────────────────────────── */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{
@@ -1309,6 +1389,27 @@ export default function EstimateEditor({
         </div>
       )}
 
+      {/* ── Work order out of sync warning (Phase 2) ────────────────────── */}
+      {/* Shown when authorization has been reopened with an existing work order. */}
+      {estimate.status === 'reopened' && woResult && (
+        <div style={{
+          marginBottom: 12, padding: '12px 16px',
+          background: '#fef3c7', border: '1px solid #fcd34d',
+          borderRadius: 'var(--r8,8px)',
+          display: 'flex', alignItems: 'center', gap: 10,
+        }}>
+          <span style={{ fontSize: 14 }}>⚠️</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', marginBottom: 2 }}>
+              Work Order Out of Sync
+            </div>
+            <div style={{ fontSize: 11, color: '#92400e' }}>
+              This estimate is being re-authorized. Changes here won't affect the existing work order until you sync them in Phase 3.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Sticky save bar ────────────────────────────────────────────────── */}
       <div style={{
         position: 'sticky', bottom: 16,
@@ -1355,10 +1456,45 @@ export default function EstimateEditor({
           </button>
         )}
 
+        {/* Reopen Authorization Button — shown when estimate is authorized or approved (Phase 2).
+            Allows reopening authorization to change customer decisions again.
+            Shows warning if work order exists (will be out of sync). */}
+        {(estimate.status === 'authorized' || estimate.status === 'approved') && (
+          <button
+            type="button"
+            disabled={saving || presenting}
+            onClick={async () => {
+              try {
+                const { reopenEstimateAuthorization } = await import('./actions')
+                await reopenEstimateAuthorization(estimate.id)
+                router.refresh()
+              } catch (err) {
+                const message = err instanceof Error ? err.message : 'Failed to reopen authorization'
+                alert(message)
+              }
+            }}
+            title={woResult ? 'Reopen authorization — existing work order will be out of sync' : 'Reopen authorization to change customer decisions'}
+            style={{
+              fontSize: 12, fontWeight: 700, padding: '8px 14px',
+              borderRadius: 'var(--r8,8px)',
+              border: '1px solid #f59e0b',
+              background: '#fffbeb',
+              color: '#92400e',
+              cursor: (saving || presenting) ? 'default' : 'pointer',
+              opacity: (saving || presenting) ? 0.6 : 1,
+              transition: 'all 0.15s',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            ↺ Reopen Authorization
+          </button>
+        )}
+
         {/* Work Order Button — shown when estimate is authorized (Phase 1).
             Idempotent: clicking again returns the existing WO, never creates a duplicate.
-            woLoading: true while checking if work order already exists. */}
-        {estimate.status === 'authorized' && !woLoading && (
+            woLoading: true while checking if work order already exists.
+            Hidden when reopened (Phase 2) to prevent creating additional work orders. */}
+        {estimate.status === 'authorized' && !woLoading && estimate.status !== 'reopened' && (
           <button
             type="button"
             disabled={woCreating || saving || presenting}

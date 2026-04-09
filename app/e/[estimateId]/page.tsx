@@ -265,7 +265,7 @@ export default async function EstimatePresentationPage({
       initialDecisions={initialDecisions}
       existingWorkOrderId={existingWorkOrderId}
       profile={profile}
-      isLocked={estimate.status === 'authorized' || estimate.status === 'approved'}
+      isLocked={estimate.status === 'authorized' || estimate.status === 'approved' || estimate.status === 'declined'}
     />
   )
 }

@@ -386,7 +386,26 @@ export default function PresentationView({
       </div>
 
       {/* ── Status banners ────────────────────────────────────────────────── */}
-      {isLocked && workOrderId ? (
+      {estimate.status === 'reopened' ? (
+        <div style={{
+          background: '#fffbeb',
+          border: '1px solid #fbbf24',
+          borderRadius: 8,
+          padding: '12px 16px',
+          marginBottom: 20,
+          fontSize: 13,
+          color: '#92400e',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+        }}>
+          <span style={{ fontSize: 16 }}>⚠️</span>
+          <span>
+            <strong>Re-authorization Needed</strong> — Please review and confirm your approved repairs again.
+            You can change your selections before submitting.
+          </span>
+        </div>
+      ) : isLocked && workOrderId ? (
         <div style={{
           background: '#f0fdf4',
           border: '1px solid #86efac',
@@ -494,6 +513,7 @@ export default function PresentationView({
         approvedItemsCount={approvedItems.length}
         workOrderId={workOrderId}
         onAuthorize={handleAuthorizeEstimate}
+        isReopening={estimate.status === 'reopened'}
       />
 
       {/* ── Warranty & Footer sections ─────────────────────────────────────────────── */}

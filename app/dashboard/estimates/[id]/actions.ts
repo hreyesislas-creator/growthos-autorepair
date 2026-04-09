@@ -359,3 +359,73 @@ export async function voidEstimate(
 
   return null
 }
+
+// ── Reopen Authorization ──────────────────────────────────────────────────
+
+/**
+ * Reopens authorization for an estimate that was already authorized or approved.
+ * Changes status to 'reopened', which makes the public page editable again.
+ *
+ * Steps:
+ *   1. Auth check — resolve tenantId
+ *   2. Load estimate to validate current status
+ *   3. Load decisions to ensure at least one approved item
+ *   4. Update estimate status to 'reopened'
+ *   5. Note: Does NOT delete or modify existing work order (remains "out of sync" until Phase 3)
+ *
+ * Returns success or error.
+ * Validation: estimate must be 'authorized' or 'approved', and have at least one approved decision.
+ */
+export async function reopenEstimateAuthorization(
+  estimateId: string,
+): Promise<{ data?: { success: boolean }; error?: string }> {
+
+  // ── Step 1: Auth check ──────────────────────────────────────────
+  const ctx = await getDashboardTenant()
+  if (!ctx) return { error: 'Not authenticated' }
+
+  const tenantId = ctx.tenant.id
+
+  // ── Step 2: Load estimate ──────────────────────────────────────
+  const estimate = await getEstimateWithItems(tenantId, estimateId)
+  if (!estimate) {
+    return { error: 'Estimate not found.' }
+  }
+
+  // ── Validate current status ────────────────────────────────────
+  const currentStatus = estimate.status
+  if (currentStatus !== 'authorized' && currentStatus !== 'approved') {
+    return { error: `Cannot reopen: estimate is currently ${currentStatus}. Only authorized or approved estimates can be reopened.` }
+  }
+
+  // ── Step 3: Load decisions to ensure at least one approved ────
+  const decisions = await getEstimateItemDecisions(tenantId, estimateId)
+  if (!decisions || decisions.length === 0) {
+    return { error: 'Cannot reopen: no item decisions found.' }
+  }
+
+  const approvedDecisions = decisions.filter(d => d.decision === 'approved')
+  if (approvedDecisions.length === 0) {
+    return { error: 'Cannot reopen: at least one item must be approved.' }
+  }
+
+  // ── Step 4: Update estimate status to 'reopened' ──────────────
+  const adminClient = createAdminClient()
+  const now = new Date().toISOString()
+
+  const { error: updateErr } = await adminClient
+    .from('estimates')
+    .update({
+      status: 'reopened',
+      updated_at: now,
+    })
+    .eq('id', estimateId)
+    .eq('tenant_id', tenantId)
+
+  if (updateErr) {
+    console.error('[reopenEstimateAuthorization] Update failed:', updateErr)
+    return { error: 'Failed to reopen authorization.' }
+  }
+
+  return { data: { success: true } }
+}
