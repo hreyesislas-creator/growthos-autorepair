@@ -1490,30 +1490,20 @@ export default function EstimateEditor({
           </button>
         )}
 
-        {/* Work Order Button — shown when estimate is authorized (Phase 1).
-            Idempotent: clicking again returns the existing WO, never creates a duplicate.
-            woLoading: true while checking if work order already exists.
-            Hidden when reopened (Phase 2) to prevent creating additional work orders. */}
-        {estimate.status === 'authorized' && !woLoading && estimate.status !== 'reopened' && (
+        {/* Create Work Order Button (Phase 1+3) — shown when authorized and no WO exists.
+            Only show when no woResult. */}
+        {estimate.status === 'authorized' && !woLoading && !woResult && (
           <button
             type="button"
             disabled={woCreating || saving || presenting}
             onClick={handleCreateWorkOrder}
-            title={
-              woResult
-                ? `View work order ${woResult.work_order_number ?? woResult.id}`
-                : `Create work order from ${decisionApprovedCount} approved item${decisionApprovedCount !== 1 ? 's' : ''}`
-            }
+            title={`Create work order from ${decisionApprovedCount} approved item${decisionApprovedCount !== 1 ? 's' : ''}`}
             style={{
               fontSize: 12, fontWeight: 700, padding: '8px 14px',
               borderRadius: 'var(--r8,8px)',
               border: 'none',
               cursor: (woCreating || saving || presenting) ? 'default' : 'pointer',
-              background: woResult
-                ? '#1d4ed8'
-                : woCreating
-                ? '#1d4ed8'
-                : 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+              background: woCreating ? '#1d4ed8' : 'linear-gradient(135deg, #2563eb, #1d4ed8)',
               color: '#fff',
               opacity: (woCreating || saving || presenting) ? 0.7 : 1,
               transition: 'all 0.15s',
@@ -1521,12 +1511,71 @@ export default function EstimateEditor({
               whiteSpace: 'nowrap',
             }}
           >
-            {woCreating
-              ? 'Creating…'
-              : woResult
-              ? `🔧 View Work Order ↗`
-              : '🔧 Create Work Order'}
+            {woCreating ? 'Creating…' : '🔧 Create Work Order'}
           </button>
+        )}
+
+        {/* Update Work Order Button (Phase 3) — shown when authorized and WO exists.
+            Only show when woResult exists. */}
+        {estimate.status === 'authorized' && !woLoading && woResult && (
+          <button
+            type="button"
+            disabled={woCreating || saving || presenting}
+            onClick={async () => {
+              try {
+                setWoCreating(true)
+                setWoError(null)
+                const { updateWorkOrderFromEstimate } = await import('./actions')
+                const result = await updateWorkOrderFromEstimate(estimate.id)
+                if ('error' in result && result.error) {
+                  setWoError(result.error)
+                } else {
+                  setWoResult({ id: result.data?.workOrderId || woResult.id, work_order_number: result.data?.workOrderNumber || woResult.work_order_number })
+                  router.refresh()
+                }
+              } catch (err) {
+                const message = err instanceof Error ? err.message : 'Failed to update work order'
+                setWoError(message)
+              } finally {
+                setWoCreating(false)
+              }
+            }}
+            title={`Update work order ${woResult.work_order_number ?? woResult.id} from latest approved items`}
+            style={{
+              fontSize: 12, fontWeight: 700, padding: '8px 14px',
+              borderRadius: 'var(--r8,8px)',
+              border: 'none',
+              cursor: (woCreating || saving || presenting) ? 'default' : 'pointer',
+              background: woCreating ? '#059669' : 'linear-gradient(135deg, #10b981, #059669)',
+              color: '#fff',
+              opacity: (woCreating || saving || presenting) ? 0.7 : 1,
+              transition: 'all 0.15s',
+              boxShadow: '0 2px 8px rgba(16,185,129,0.3)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {woCreating ? 'Updating…' : '🔄 Update Work Order'}
+          </button>
+        )}
+
+        {/* View Work Order Link — shown when WO exists and status is not authorized.
+            (i.e., after work order is created, not in update flow) */}
+        {woResult && estimate.status !== 'authorized' && (
+          <a
+            href={`/dashboard/work-orders/${woResult.id}`}
+            style={{
+              fontSize: 12, fontWeight: 700, padding: '8px 14px',
+              borderRadius: 'var(--r8,8px)',
+              border: '1px solid #bfdbfe',
+              background: '#eff6ff',
+              color: '#1d4ed8',
+              textDecoration: 'none',
+              flexShrink: 0,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            🔧 View Work Order ↗
+          </a>
         )}
 
         {/* Preview — links to the advisor presentation view */}

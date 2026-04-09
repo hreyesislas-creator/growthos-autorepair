@@ -429,3 +429,182 @@ export async function reopenEstimateAuthorization(
 
   return { data: { success: true } }
 }
+
+// ── Update Work Order from Estimate ───────────────────────────────────────
+
+/**
+ * Updates an existing work order from the latest approved estimate decisions.
+ * Called after estimate is reopened, re-authorized, and decisions changed.
+ *
+ * Steps:
+ *   1. Auth check — resolve tenantId
+ *   2. Load estimate + items + decisions
+ *   3. Validate current status is 'authorized'
+ *   4. Load existing work order (exactly one, error if 0 or >1)
+ *   5. Filter for approved items only — throw if none
+ *   6. Load existing work_order_items (for comparison/audit)
+ *   7. Delete all work_order_items
+ *   8. Insert new work_order_items from approved items
+ *   9. Recalculate totals
+ *   10. Update work_orders row (preserve id, number, created_at; update totals and updated_at)
+ *   11. Update estimate status to 'approved' (only if not already 'approved')
+ *   12. Return success
+ *
+ * Returns success or error.
+ * Safe failure states: if delete/insert fails, WO items missing but WO exists (recoverable).
+ */
+export async function updateWorkOrderFromEstimate(
+  estimateId: string,
+): Promise<{ data?: { success: boolean; workOrderId: string; workOrderNumber: string | null }; error?: string }> {
+
+  // ── Step 1: Auth check ──────────────────────────────────────────
+  const ctx = await getDashboardTenant()
+  if (!ctx) return { error: 'Not authenticated' }
+
+  const tenantId = ctx.tenant.id
+
+  // ── Step 2: Load estimate, items, decisions ─────────────────────
+  const estimate = await getEstimateWithItems(tenantId, estimateId)
+  if (!estimate) {
+    return { error: 'Estimate not found.' }
+  }
+
+  // ── Step 3: Validate status ─────────────────────────────────────
+  if (estimate.status !== 'authorized') {
+    return { error: `Cannot update work order: estimate must be authorized. Current status: ${estimate.status}` }
+  }
+
+  // ── Step 4: Load existing work order (exactly one) ───────────────
+  const adminClient = createAdminClient()
+  const { data: workOrders, error: woQueryErr } = await adminClient
+    .from('work_orders')
+    .select('id, work_order_number, subtotal, tax_amount, total')
+    .eq('tenant_id', tenantId)
+    .eq('estimate_id', estimateId)
+    .eq('is_archived', false)
+
+  if (woQueryErr) {
+    console.error('[updateWorkOrderFromEstimate] WO query failed:', woQueryErr)
+    return { error: 'Failed to load work order.' }
+  }
+
+  if (!workOrders || workOrders.length === 0) {
+    return { error: 'No work order found for this estimate.' }
+  }
+
+  if (workOrders.length > 1) {
+    console.error('[updateWorkOrderFromEstimate] Multiple active WOs found:', {
+      estimateId,
+      count: workOrders.length,
+    })
+    return { error: 'Unexpected: multiple work orders linked to estimate.' }
+  }
+
+  const existingWO = workOrders[0]
+
+  // ── Step 5: Load decisions and validate approved items ──────────
+  const decisions = await getEstimateItemDecisions(tenantId, estimateId)
+  if (!decisions || decisions.length === 0) {
+    return { error: 'Cannot update work order: no item decisions found.' }
+  }
+
+  const approvedItemIds = new Set(
+    decisions
+      .filter(d => d.decision === 'approved')
+      .map(d => d.estimate_item_id)
+  )
+
+  const approvedItems = estimate.items.filter(i => approvedItemIds.has(i.id))
+
+  if (approvedItems.length === 0) {
+    return { error: 'Cannot update work order: no approved items.' }
+  }
+
+  const now = new Date().toISOString()
+
+  // ── Step 6: Delete all existing work order items ─────────────────
+  const { error: deleteErr } = await adminClient
+    .from('work_order_items')
+    .delete()
+    .eq('work_order_id', existingWO.id)
+
+  if (deleteErr) {
+    console.error('[updateWorkOrderFromEstimate] Delete items failed:', deleteErr)
+    return { error: 'Failed to remove old work order items.' }
+  }
+
+  // ── Step 7: Insert new work order items from approved items ──────
+  const workOrderItems = approvedItems.map((item, idx) => ({
+    tenant_id: tenantId,
+    work_order_id: existingWO.id,
+    estimate_item_id: item.id,
+    service_job_id: item.service_job_id ?? null,
+    title: item.title,
+    description: item.description ?? null,
+    category: item.category,
+    labor_hours: item.labor_hours ?? null,
+    labor_rate: item.labor_rate ?? null,
+    labor_total: item.labor_total || 0,
+    parts_total: item.parts_total || 0,
+    line_total: item.line_total,
+    inspection_item_id: item.inspection_item_id ?? null,
+    service_recommendation_id: item.service_recommendation_id ?? null,
+    display_order: idx,
+    status: 'draft',
+    created_at: now,
+    updated_at: now,
+  }))
+
+  const { error: insertErr } = await adminClient
+    .from('work_order_items')
+    .insert(workOrderItems)
+
+  if (insertErr) {
+    console.error('[updateWorkOrderFromEstimate] Insert items failed:', insertErr)
+    return { error: 'Failed to add updated items to work order.' }
+  }
+
+  // ── Step 8: Recalculate totals ──────────────────────────────────
+  // Same logic as create: sum items, calculate proportional tax
+  const newSubtotal = Number(estimate.subtotal) || 0
+  const newTaxRate = estimate.tax_rate ?? 0
+  const newTaxAmount = Number(estimate.tax_amount) || 0
+  const newTotal = Number(estimate.total) || 0
+
+  // ── Step 9: Update work order row ───────────────────────────────
+  const { error: updateWoErr } = await adminClient
+    .from('work_orders')
+    .update({
+      subtotal: newSubtotal,
+      tax_amount: newTaxAmount,
+      total: newTotal,
+      updated_at: now,
+    })
+    .eq('id', existingWO.id)
+    .eq('tenant_id', tenantId)
+
+  if (updateWoErr) {
+    console.error('[updateWorkOrderFromEstimate] Update WO failed:', updateWoErr)
+    return { error: 'Failed to update work order.' }
+  }
+
+  // ── Step 10: Update estimate status (only if not already 'approved') ──
+  if (estimate.status !== 'approved') {
+    const { error: updateEstErr } = await adminClient
+      .from('estimates')
+      .update({
+        status: 'approved',
+        updated_at: now,
+      })
+      .eq('id', estimateId)
+      .eq('tenant_id', tenantId)
+
+    if (updateEstErr) {
+      console.error('[updateWorkOrderFromEstimate] Update estimate failed:', updateEstErr)
+      return { error: 'Failed to update estimate status.' }
+    }
+  }
+
+  // ── Success ─────────────────────────────────────────────────────
+  return { data: { success: true, workOrderId: existingWO.id, workOrderNumber: existingWO.work_order_number } }
+}

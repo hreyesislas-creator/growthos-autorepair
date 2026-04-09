@@ -21,27 +21,31 @@ export default function FinalAuthorizationBlock({
   const [customerName, setCustomerName] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [authorizationComplete, setAuthorizationComplete] = useState(false)
 
   const canAuthorize = approvedItemsCount > 0 && checked && !isLoading
 
   const handleAuthorize = async () => {
     setError(null)
     setIsLoading(true)
+    setAuthorizationComplete(false)
 
     try {
       const resultWorkOrderId = await onAuthorize(customerName || null)
+      setAuthorizationComplete(true)
       if (resultWorkOrderId && onViewWorkOrder) {
         onViewWorkOrder(resultWorkOrderId)
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Authorization failed'
       setError(message)
+      setAuthorizationComplete(false)
     } finally {
       setIsLoading(false)
     }
   }
 
-  if (workOrderId) {
+  if (workOrderId || authorizationComplete) {
     return (
       <div style={{
         marginTop: 24,

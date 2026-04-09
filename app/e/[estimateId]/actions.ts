@@ -364,13 +364,10 @@ export async function finalizeEstimateApproval(
     return { error: 'Failed to check for existing work order.' }
   }
 
-  if (existingWorkOrder) {
-    // Work order already exists (created by pre-Phase 1 code path)
-    // Estimate is already approved, return as authorized
-    return { data: { authorized: true, workOrderId: existingWorkOrder.id } }
-  }
-
-  // ── Phase 1: Mark estimate as 'authorized' (no work order creation) ────
+  // ── Phase 1+3: Mark estimate as 'authorized' ──────────────────────────
+  // This applies whether or not a work order already exists.
+  // If WO exists (pre-Phase 1 code path), we still update status so the internal
+  // UI can show "Update Work Order" button when appropriate (Phase 3).
   const { error: updateEstimateErr } = await supabase
     .from('estimates')
     .update({
@@ -386,5 +383,10 @@ export async function finalizeEstimateApproval(
   }
 
   // ── Success ─────────────────────────────────────────────────────────────
+  // If an existing work order was found, return it; otherwise null (Phase 1 flow)
+  if (existingWorkOrder) {
+    return { data: { authorized: true, workOrderId: existingWorkOrder.id } }
+  }
+
   return { data: { authorized: true, workOrderId: null } }
 }
