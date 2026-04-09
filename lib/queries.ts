@@ -1391,6 +1391,147 @@ export async function getVehicleDisplay(vehicleId: string): Promise<string | nul
   return parts.length > 0 ? parts.join(' ') : null
 }
 
+// ── Vehicle service history (for detail page) ──────────────────
+
+/**
+ * Fetch appointments for a specific vehicle.
+ * Ordered by appointment_date desc (most recent first).
+ */
+export async function getAppointmentsForVehicle(
+  tenantId: string,
+  vehicleId: string,
+): Promise<Appointment[]> {
+  if (!hasValue(tenantId) || !hasValue(vehicleId)) return []
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('appointments')
+    .select('id, vehicle_id, appointment_date, appointment_time, status, requested_service, created_at')
+    .eq('tenant_id', tenantId)
+    .eq('vehicle_id', vehicleId)
+    .order('appointment_date', { ascending: false })
+
+  if (error) {
+    console.error('[getAppointmentsForVehicle]', error.message)
+    return []
+  }
+
+  return (data ?? []) as Appointment[]
+}
+
+/**
+ * Fetch inspections for a specific vehicle.
+ * Excludes archived records.
+ * Ordered by completed_at desc, fallback to created_at.
+ */
+export async function getInspectionsForVehicle(
+  tenantId: string,
+  vehicleId: string,
+): Promise<Inspection[]> {
+  if (!hasValue(tenantId) || !hasValue(vehicleId)) return []
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('inspections')
+    .select('id, vehicle_id, status, completed_at, created_at, total_items, critical_count')
+    .eq('tenant_id', tenantId)
+    .eq('vehicle_id', vehicleId)
+    .eq('is_archived', false)
+    .order('completed_at', { ascending: false})
+
+  if (error) {
+    console.error('[getInspectionsForVehicle]', error.message)
+    return []
+  }
+
+  return (data ?? []) as Inspection[]
+}
+
+/**
+ * Fetch estimates for a specific vehicle.
+ * Ordered by created_at desc (most recent first).
+ */
+export async function getEstimatesForVehicle(
+  tenantId: string,
+  vehicleId: string,
+): Promise<Estimate[]> {
+  if (!hasValue(tenantId) || !hasValue(vehicleId)) return []
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('estimates')
+    .select('id, vehicle_id, estimate_number, status, total, created_at')
+    .eq('tenant_id', tenantId)
+    .eq('vehicle_id', vehicleId)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('[getEstimatesForVehicle]', error.message)
+    return []
+  }
+
+  return (data ?? []) as Estimate[]
+}
+
+/**
+ * Fetch work orders for a specific vehicle.
+ * Excludes archived records.
+ * Ordered by created_at desc (most recent first).
+ */
+export async function getWorkOrdersForVehicle(
+  tenantId: string,
+  vehicleId: string,
+): Promise<WorkOrder[]> {
+  if (!hasValue(tenantId) || !hasValue(vehicleId)) return []
+
+  const supabase = await createAdminClient()
+
+  const { data, error } = await supabase
+    .from('work_orders')
+    .select('id, vehicle_id, work_order_number, status, total, created_at, completed_at')
+    .eq('tenant_id', tenantId)
+    .eq('vehicle_id', vehicleId)
+    .eq('is_archived', false)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('[getWorkOrdersForVehicle]', error.message)
+    return []
+  }
+
+  return (data ?? []) as WorkOrder[]
+}
+
+/**
+ * Fetch invoices for a specific vehicle.
+ * Ordered by created_at desc (most recent first).
+ */
+export async function getInvoicesForVehicle(
+  tenantId: string,
+  vehicleId: string,
+): Promise<Invoice[]> {
+  if (!hasValue(tenantId) || !hasValue(vehicleId)) return []
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('invoices')
+    .select('id, vehicle_id, invoice_number, status, total, created_at')
+    .eq('tenant_id', tenantId)
+    .eq('vehicle_id', vehicleId)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('[getInvoicesForVehicle]', error.message)
+    return []
+  }
+
+  return (data ?? []) as Invoice[]
+}
+
 // ── Estimate Approval Queries ────────────────────────────────────────
 
 /**

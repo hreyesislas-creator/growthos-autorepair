@@ -1404,7 +1404,7 @@ export default function EstimateEditor({
               Work Order Out of Sync
             </div>
             <div style={{ fontSize: 11, color: '#92400e' }}>
-              This estimate is being re-authorized. Changes here won't affect the existing work order until you sync them in Phase 3.
+              This estimate is being re-authorized. Changes here won&apos;t affect the existing work order until you sync them in Phase 3.
             </div>
           </div>
         </div>

@@ -63,7 +63,7 @@ export default function FinalAuthorizationBlock({
           Your work order has been created.
           We&apos;ll get started right away!
         </p>
-        {onViewWorkOrder && (
+        {onViewWorkOrder && workOrderId && (
           <button
             onClick={() => onViewWorkOrder(workOrderId)}
             style={{

@@ -51,13 +51,22 @@ export default async function VehiclesPage() {
                       {format(new Date(v.created_at), 'MMM d, yyyy')}
                     </td>
                     <td>
-                      <Link
-                        href={`/dashboard/vehicles/${v.id}/edit`}
-                        className="btn-ghost"
-                        style={{ padding: '3px 10px', fontSize: '12px' }}
-                      >
-                        Edit
-                      </Link>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <Link
+                          href={`/dashboard/vehicles/${v.id}`}
+                          className="btn-ghost"
+                          style={{ padding: '3px 10px', fontSize: '12px' }}
+                        >
+                          View
+                        </Link>
+                        <Link
+                          href={`/dashboard/vehicles/${v.id}/edit`}
+                          className="btn-ghost"
+                          style={{ padding: '3px 10px', fontSize: '12px' }}
+                        >
+                          Edit
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 ))}

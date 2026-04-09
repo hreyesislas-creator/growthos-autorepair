@@ -589,21 +589,21 @@ export async function updateWorkOrderFromEstimate(
   }
 
   // ── Step 10: Update estimate status (only if not already 'approved') ──
-  if (estimate.status !== 'approved') {
-    const { error: updateEstErr } = await adminClient
-      .from('estimates')
-      .update({
-        status: 'approved',
-        updated_at: now,
-      })
-      .eq('id', estimateId)
-      .eq('tenant_id', tenantId)
+  // Step 10: Update estimate status
+
+  const { error: updateEstErr } = await adminClient
+  .from('estimates')
+  .update({
+    status: 'authorized',
+    updated_at: new Date().toISOString(),
+  })
+  .eq('id', estimateId)
 
     if (updateEstErr) {
       console.error('[updateWorkOrderFromEstimate] Update estimate failed:', updateEstErr)
       return { error: 'Failed to update estimate status.' }
     }
-  }
+  
 
   // ── Success ─────────────────────────────────────────────────────
   return { data: { success: true, workOrderId: existingWO.id, workOrderNumber: existingWO.work_order_number } }
