@@ -134,6 +134,11 @@ export default async function EstimatePresentationPage({
   const estimate = estimateRes.data as EstimateData | null
   if (!estimate) return notFound()
 
+  // Log decision query errors (critical for rehydrating saved state)
+  if (decisionRes.error) {
+    console.error('[EstimatePresentationPage] decision query failed:', decisionRes.error.message)
+  }
+
   // Extract existing work order ID if one exists
   const existingWorkOrderId = workOrderRes.data?.id ?? undefined
 
@@ -241,6 +246,14 @@ export default async function EstimatePresentationPage({
   // Convert decisions to initial state
   const initialDecisions = (decisionRes.data ?? []) as unknown as Parameters<typeof PresentationView>[0]['initialDecisions']
 
+  // Log decision state for debugging (helps detect silent failures on reload)
+  console.log('[EstimatePresentationPage] decisions loaded:', {
+    estimateId: params.estimateId,
+    decisionCount: Array.isArray(initialDecisions) ? initialDecisions.length : 0,
+    hasError: !!decisionRes.error,
+    workOrderExists: !!existingWorkOrderId,
+  })
+
   return (
     <PresentationView
       estimate={estimateWithItems}
@@ -252,7 +265,7 @@ export default async function EstimatePresentationPage({
       initialDecisions={initialDecisions}
       existingWorkOrderId={existingWorkOrderId}
       profile={profile}
-      isLocked={!!existingWorkOrderId}
+      isLocked={estimate.status === 'authorized' || estimate.status === 'approved'}
     />
   )
 }

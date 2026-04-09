@@ -126,15 +126,22 @@ export default function PresentationView({
     // error should roll back to 'declined', not to pending.
     const previous = decisions[id] ?? null
 
+    // ── DIAGNOSTIC: Log client action ───────────────────────────────────────
+    console.log('[PresentationView] approve() called:', { estimateId, itemId: id })
+
     setDecisions(prev => ({ ...prev, [id]: 'approved' }))
     setSaving(prev => new Set(prev).add(id))
     setSaveErrors(prev => { const n = { ...prev }; delete n[id]; return n })
 
     const err = await approveEstimateItem(estimateId, id)
 
+    // ── DIAGNOSTIC: Log server result ───────────────────────────────────────
+    console.log('[PresentationView] approveEstimateItem returned:', { itemId: id, error: err?.error ?? null })
+
     setSaving(prev => { const n = new Set(prev); n.delete(id); return n })
     if (err) {
       // Restore to previous state (null = pending, 'declined' = was declined)
+      console.error('[PresentationView] approval failed, restoring state:', { itemId: id, errorMsg: err.error })
       setDecisions(prev => {
         const n = { ...prev }
         if (previous === null) delete n[id]
@@ -142,6 +149,8 @@ export default function PresentationView({
         return n
       })
       setSaveErrors(prev => ({ ...prev, [id]: err.error }))
+    } else {
+      console.log('[PresentationView] approval succeeded:', { itemId: id })
     }
   }, [estimateId, decisions])
 
@@ -149,14 +158,22 @@ export default function PresentationView({
     // Same snapshot-and-restore pattern as approve.
     const previous = decisions[id] ?? null
 
+    // ── DIAGNOSTIC: Log client action ───────────────────────────────────────
+    console.log('[PresentationView] decline() called:', { estimateId, itemId: id })
+
     setDecisions(prev => ({ ...prev, [id]: 'declined' }))
     setSaving(prev => new Set(prev).add(id))
     setSaveErrors(prev => { const n = { ...prev }; delete n[id]; return n })
 
     const err = await declineEstimateItem(estimateId, id)
 
+    // ── DIAGNOSTIC: Log server result ───────────────────────────────────────
+    console.log('[PresentationView] declineEstimateItem returned:', { itemId: id, error: err?.error ?? null })
+
     setSaving(prev => { const n = new Set(prev); n.delete(id); return n })
     if (err) {
+      // Restore to previous state
+      console.error('[PresentationView] decline failed, restoring state:', { itemId: id, errorMsg: err.error })
       setDecisions(prev => {
         const n = { ...prev }
         if (previous === null) delete n[id]
@@ -164,6 +181,8 @@ export default function PresentationView({
         return n
       })
       setSaveErrors(prev => ({ ...prev, [id]: err.error }))
+    } else {
+      console.log('[PresentationView] decline succeeded:', { itemId: id })
     }
   }, [estimateId, decisions])
 
@@ -192,13 +211,21 @@ export default function PresentationView({
       throw new Error(result.error)
     }
 
+    // Phase 1: Check for authorized flag (may or may not have workOrderId)
+    const authorized = result.data?.authorized
+    if (!authorized) {
+      throw new Error('Authorization failed')
+    }
+
+    // If a work order was created, update state; otherwise return empty string
     const woId = result.data?.workOrderId
     if (woId) {
       setWorkOrderId(woId)
       return woId
     }
 
-    throw new Error('No work order ID returned')
+    // Phase 1: Authorization succeeded without work order (will be created internally)
+    return ''
   }, [estimateId])
 
   // ── Decision buckets ────────────────────────────────────────────────────────
@@ -359,7 +386,7 @@ export default function PresentationView({
       </div>
 
       {/* ── Status banners ────────────────────────────────────────────────── */}
-      {isLocked ? (
+      {isLocked && workOrderId ? (
         <div style={{
           background: '#f0fdf4',
           border: '1px solid #86efac',
@@ -375,6 +402,25 @@ export default function PresentationView({
           <span style={{ fontSize: 16 }}>✅</span>
           <span>
             <strong>Authorization Complete</strong> — Your work order has been created.
+            Decisions cannot be changed at this time.
+          </span>
+        </div>
+      ) : isLocked && !workOrderId ? (
+        <div style={{
+          background: '#f0fdf4',
+          border: '1px solid #86efac',
+          borderRadius: 8,
+          padding: '12px 16px',
+          marginBottom: 20,
+          fontSize: 13,
+          color: '#15803d',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+        }}>
+          <span style={{ fontSize: 16 }}>✅</span>
+          <span>
+            <strong>Authorization Submitted</strong> — Thank you. The shop will create your work order and contact you.
             Decisions cannot be changed at this time.
           </span>
         </div>

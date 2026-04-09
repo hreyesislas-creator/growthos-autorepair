@@ -1355,10 +1355,10 @@ export default function EstimateEditor({
           </button>
         )}
 
-        {/* Work Order Button — shown when at least one item is approved.
+        {/* Work Order Button — shown when estimate is authorized (Phase 1).
             Idempotent: clicking again returns the existing WO, never creates a duplicate.
             woLoading: true while checking if work order already exists. */}
-        {decisionApprovedCount > 0 && !woLoading && (
+        {estimate.status === 'authorized' && !woLoading && (
           <button
             type="button"
             disabled={woCreating || saving || presenting}

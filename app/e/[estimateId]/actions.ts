@@ -118,15 +118,38 @@ export async function approveEstimateItem(
   const supabase = createAdminClient()
   const now      = new Date().toISOString()
 
+  // ── DIAGNOSTIC: Log incoming params ──────────────────────────────────────
+  console.log('[approveEstimateItem] incoming:', {
+    estimateId,
+    itemId,
+    timestamp: now,
+  })
+
   // Validate item belongs to this estimate + get tenant_id
-  const { data: item } = await supabase
+  const { data: item, error: validationError } = await supabase
     .from('estimate_items')
-    .select('id, tenant_id')
+    .select('id, tenant_id, estimate_id')
     .eq('id', itemId)
     .eq('estimate_id', estimateId)
     .maybeSingle()
 
-  if (!item) return { error: 'Item not found.' }
+  // ── DIAGNOSTIC: Log validation result ────────────────────────────────────
+  console.log('[approveEstimateItem] validation query result:', {
+    itemFound: !!item,
+    itemId: item?.id ?? null,
+    itemEstimateId: item?.estimate_id ?? null,
+    itemTenantId: item?.tenant_id ?? null,
+    validationError: validationError?.message ?? null,
+  })
+
+  if (!item) {
+    const errorMsg = `Item not found. (itemId: ${itemId}, estimateId: ${estimateId})`
+    console.error('[approveEstimateItem] validation failed:', errorMsg)
+    return { error: errorMsg }
+  }
+
+  // ── DIAGNOSTIC: About to upsert ──────────────────────────────────────────
+  console.log('[approveEstimateItem] attempting upsert...')
 
   const { error } = await supabase
     .from('estimate_item_decisions')
@@ -143,11 +166,17 @@ export async function approveEstimateItem(
       { onConflict: 'estimate_id,estimate_item_id' },
     )
 
+  // ── DIAGNOSTIC: Log upsert result ────────────────────────────────────────
   if (error) {
-    console.error('[approveEstimateItem]', error.message)
-    return { error: error.message }
+    console.error('[approveEstimateItem] upsert failed:', {
+      error: error.message,
+      code: (error as any).code,
+      details: (error as any).details,
+    })
+    return { error: `Upsert failed: ${error.message}` }
   }
 
+  console.log('[approveEstimateItem] upsert succeeded')
   return null
 }
 
@@ -163,15 +192,38 @@ export async function declineEstimateItem(
   const supabase = createAdminClient()
   const now      = new Date().toISOString()
 
+  // ── DIAGNOSTIC: Log incoming params ──────────────────────────────────────
+  console.log('[declineEstimateItem] incoming:', {
+    estimateId,
+    itemId,
+    timestamp: now,
+  })
+
   // Validate item belongs to this estimate + get tenant_id
-  const { data: item } = await supabase
+  const { data: item, error: validationError } = await supabase
     .from('estimate_items')
-    .select('id, tenant_id')
+    .select('id, tenant_id, estimate_id')
     .eq('id', itemId)
     .eq('estimate_id', estimateId)
     .maybeSingle()
 
-  if (!item) return { error: 'Item not found.' }
+  // ── DIAGNOSTIC: Log validation result ────────────────────────────────────
+  console.log('[declineEstimateItem] validation query result:', {
+    itemFound: !!item,
+    itemId: item?.id ?? null,
+    itemEstimateId: item?.estimate_id ?? null,
+    itemTenantId: item?.tenant_id ?? null,
+    validationError: validationError?.message ?? null,
+  })
+
+  if (!item) {
+    const errorMsg = `Item not found. (itemId: ${itemId}, estimateId: ${estimateId})`
+    console.error('[declineEstimateItem] validation failed:', errorMsg)
+    return { error: errorMsg }
+  }
+
+  // ── DIAGNOSTIC: About to upsert ──────────────────────────────────────────
+  console.log('[declineEstimateItem] attempting upsert...')
 
   const { error } = await supabase
     .from('estimate_item_decisions')
@@ -188,11 +240,17 @@ export async function declineEstimateItem(
       { onConflict: 'estimate_id,estimate_item_id' },
     )
 
+  // ── DIAGNOSTIC: Log upsert result ────────────────────────────────────────
   if (error) {
-    console.error('[declineEstimateItem]', error.message)
-    return { error: error.message }
+    console.error('[declineEstimateItem] upsert failed:', {
+      error: error.message,
+      code: (error as any).code,
+      details: (error as any).details,
+    })
+    return { error: `Upsert failed: ${error.message}` }
   }
 
+  console.log('[declineEstimateItem] upsert succeeded')
   return null
 }
 
@@ -247,7 +305,7 @@ export async function undecideEstimateItem(
 export async function finalizeEstimateApproval(
   estimateId: string,
   approvedByName: string | null,
-): Promise<{ data?: { workOrderId: string }; error?: string }> {
+): Promise<{ data?: { authorized: boolean; workOrderId: string | null }; error?: string }> {
   const supabase = createAdminClient()
   const now = new Date().toISOString()
 
@@ -291,10 +349,10 @@ export async function finalizeEstimateApproval(
   const approvedItems = items.filter(i => approvedItemIds.has(i.id))
 
   if (approvedItems.length === 0) {
-    return { error: 'No approved items to create work order.' }
+    return { error: 'No approved items to authorize estimate.' }
   }
 
-  // ── Step 4: Check for existing work order (idempotency) ─────────────────
+  // ── Step 4: Check for existing work order (backward compat) ────────────
   const { data: existingWorkOrder, error: fetchWoErr } = await supabase
     .from('work_orders')
     .select('id')
@@ -307,102 +365,26 @@ export async function finalizeEstimateApproval(
   }
 
   if (existingWorkOrder) {
-    // Work order already exists — return it (idempotent)
-    return { data: { workOrderId: existingWorkOrder.id } }
+    // Work order already exists (created by pre-Phase 1 code path)
+    // Estimate is already approved, return as authorized
+    return { data: { authorized: true, workOrderId: existingWorkOrder.id } }
   }
 
-  // ── Step 4b: Generate work order number ─────────────────────────────────
-  const { count: woCount } = await supabase
-    .from('work_orders')
-    .select('*', { count: 'exact', head: true })
-    .eq('tenant_id', estimate.tenant_id)
-
-  const year = new Date().getFullYear()
-  const seq = (woCount ?? 0) + 1
-  const workOrderNumber = `WO-${year}-${String(seq).padStart(4, '0')}`
-
-  // ── Step 5: Create new work order ──────────────────────────────────────
-  const { data: newWorkOrder, error: createWoErr } = await supabase
-    .from('work_orders')
-    .insert({
-      tenant_id: estimate.tenant_id,
-      customer_id: estimate.customer_id,
-      estimate_id: estimateId,
-      vehicle_id: estimate.vehicle_id ?? null,
-      inspection_id: estimate.inspection_id ?? null,
-      work_order_number: workOrderNumber,
-      estimate_number: estimate.estimate_number,
-      creation_mode: 'from_estimate',
-      status: 'draft',
-      subtotal: Number(estimate.subtotal) || 0,
-      tax_rate: estimate.tax_rate ?? null,
-      tax_amount: Number(estimate.tax_amount) || 0,
-      total: Number(estimate.total) || 0,
-      parts_markup_percent: estimate.parts_markup_percent ?? null,
-      created_at: now,
-      updated_at: now,
-    })
-    .select('id')
-    .single()
-
-  if (createWoErr || !newWorkOrder) {
-    console.error('[finalizeEstimateApproval] Create WO failed:', createWoErr)
-    return { error: 'Failed to create work order.' }
-  }
-
-  // ── Step 6: Create work order items from approved items ────────────────
-  const workOrderItems = approvedItems.map((item, idx) => ({
-    tenant_id: estimate.tenant_id,
-    work_order_id: newWorkOrder.id,
-    estimate_item_id: item.id,
-    service_job_id: item.service_job_id ?? null,
-    title: item.title,
-    description: item.description ?? null,
-    category: item.category,
-    labor_hours: item.labor_hours ?? null,
-    labor_rate: item.labor_rate ?? null,
-    labor_total: item.labor_total || 0,
-    parts_total: item.parts_total || 0,
-    line_total: item.line_total,
-    inspection_item_id: item.inspection_item_id ?? null,
-    service_recommendation_id: item.service_recommendation_id ?? null,
-    display_order: idx,
-    status: 'draft',
-    created_at: now,
-    updated_at: now,
-  }))
-
-  const { error: createItemsErr } = await supabase
-    .from('work_order_items')
-    .insert(workOrderItems)
-
-  if (createItemsErr) {
-    console.error('[finalizeEstimateApproval] Create items failed:', createItemsErr)
-    // Rollback: delete orphaned work order
-    await supabase.from('work_orders').delete().eq('id', newWorkOrder.id)
-    return { error: 'Failed to create work order items.' }
-  }
-
-  // ── Step 7: Update estimate with approval metadata ────────────────────
+  // ── Phase 1: Mark estimate as 'authorized' (no work order creation) ────
   const { error: updateEstimateErr } = await supabase
     .from('estimates')
     .update({
-      status: 'approved',
+      status: 'authorized',
       approved_by_name: approvedByName,
-      approval_method: 'in_person',
-      approved_at: now,
       updated_at: now,
     })
     .eq('id', estimateId)
 
   if (updateEstimateErr) {
     console.error('[finalizeEstimateApproval] Update estimate failed:', updateEstimateErr)
-    // Rollback: delete work order and items
-    await supabase.from('work_order_items').delete().eq('work_order_id', newWorkOrder.id)
-    await supabase.from('work_orders').delete().eq('id', newWorkOrder.id)
-    return { error: 'Failed to update estimate.' }
+    return { error: 'Failed to authorize estimate.' }
   }
 
   // ── Success ─────────────────────────────────────────────────────────────
-  return { data: { workOrderId: newWorkOrder.id } }
+  return { data: { authorized: true, workOrderId: null } }
 }

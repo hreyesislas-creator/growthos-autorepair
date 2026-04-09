@@ -5,7 +5,7 @@ import { useState } from 'react'
 interface FinalAuthorizationBlockProps {
   approvedItemsCount: number
   workOrderId?: string
-  onAuthorize: (customerName: string | null) => Promise<string>
+  onAuthorize: (customerName: string | null) => Promise<string | void>
   onViewWorkOrder?: (workOrderId: string) => void
 }
 
@@ -241,7 +241,7 @@ export default function FinalAuthorizationBlock({
             }
           }}
         >
-          {isLoading ? '…Processing' : 'Authorize Approved Repairs & Create Work Order'}
+          {isLoading ? '…Processing' : 'Authorize Approved Repairs'}
         </button>
       </div>
     </div>
