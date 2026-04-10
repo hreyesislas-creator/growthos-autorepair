@@ -13,6 +13,14 @@ import VehicleServiceHistory from './VehicleServiceHistory'
 
 export const metadata = { title: 'Vehicle Details' }
 
+type VehicleIntelligenceSummary = {
+  totalRevenue: number
+  totalVisits: number
+  averageTicket: number | null
+  lastVisit: string | null
+  lastServiceTitle: string | null
+}
+
 export default async function VehicleDetailPage({ params }: { params: { id: string } }) {
   const ctx = await getDashboardTenant()
   if (!ctx) return notFound()
@@ -32,6 +40,44 @@ export default async function VehicleDetailPage({ params }: { params: { id: stri
     getWorkOrdersForVehicle(tenantId, vehicleId),
     getInvoicesForVehicle(tenantId, vehicleId),
   ])
+
+  // ── Compute Vehicle Intelligence Summary ──────────────────────────────────
+  // Total Revenue: sum of non-void invoices
+  const billableInvoices = invoices.filter(i => i.status !== 'void')
+  const totalRevenue = billableInvoices.reduce((sum, i) => sum + Number(i.total), 0)
+
+  // Total Visits: count of work orders
+  const totalVisits = workOrders.length
+
+  // Average Ticket: revenue / visits (or null if no visits)
+  const averageTicket = totalVisits > 0 ? totalRevenue / totalVisits : null
+
+  // Last Visit: priority order
+  // 1) most recent non-void invoice.created_at
+  // 2) else most recent work_order.created_at
+  // 3) else most recent inspection (completed_at ?? created_at)
+  // 4) else null
+  let lastVisit: string | null = null
+  if (billableInvoices.length > 0) {
+    lastVisit = billableInvoices[0].created_at
+  } else if (workOrders.length > 0) {
+    lastVisit = workOrders[0].created_at
+  } else if (inspections.length > 0) {
+    lastVisit = inspections[0].completed_at || inspections[0].created_at
+  }
+
+  // Last Service: most recent work order number
+  const lastServiceTitle = workOrders.length > 0 && workOrders[0].work_order_number
+    ? `Work Order #${workOrders[0].work_order_number}`
+    : null
+
+  const summary: VehicleIntelligenceSummary = {
+    totalRevenue,
+    totalVisits,
+    averageTicket,
+    lastVisit,
+    lastServiceTitle,
+  }
 
   // Build unified timeline
   type TimelineEntry = {
@@ -57,7 +103,7 @@ export default async function VehicleDetailPage({ params }: { params: { id: stri
       date: new Date(a.appointment_date ? `${a.appointment_date}T${a.appointment_time || '00:00'}` : a.created_at),
       dateString: dateStr,
       status: a.status,
-      title: a.requested_service || 'Appointment',
+      title: 'Appointment',
       detailUrl: `/dashboard/appointments/${a.id}/edit`,
     })
   })
@@ -132,7 +178,7 @@ export default async function VehicleDetailPage({ params }: { params: { id: stri
   return (
     <>
       <Topbar title={vehicleLabel} />
-      <VehicleServiceHistory vehicle={vehicle} entries={entries} />
+      <VehicleServiceHistory vehicle={vehicle} entries={entries} summary={summary} />
     </>
   )
 }

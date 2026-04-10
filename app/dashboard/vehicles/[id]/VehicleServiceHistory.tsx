@@ -16,9 +16,18 @@ type TimelineEntry = {
   recordNumber?: string
 }
 
+type VehicleIntelligenceSummary = {
+  totalRevenue: number
+  totalVisits: number
+  averageTicket: number | null
+  lastVisit: string | null
+  lastServiceTitle: string | null
+}
+
 interface VehicleServiceHistoryProps {
   vehicle: Vehicle
   entries: TimelineEntry[]
+  summary?: VehicleIntelligenceSummary
 }
 
 const recordTypeLabels: Record<TimelineEntry['recordType'], string> = {
@@ -82,7 +91,7 @@ function formatRecordTime(entry: TimelineEntry): string | null {
   return null
 }
 
-export default function VehicleServiceHistory({ vehicle, entries }: VehicleServiceHistoryProps) {
+export default function VehicleServiceHistory({ vehicle, entries, summary }: VehicleServiceHistoryProps) {
   const vehicleLabel = [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(' ') || 'Vehicle'
   const mileage = vehicle.mileage ? `${vehicle.mileage.toLocaleString()} mi` : null
 
@@ -125,6 +134,65 @@ export default function VehicleServiceHistory({ vehicle, entries }: VehicleServi
           )}
         </div>
       </div>
+
+      {/* Vehicle Intelligence Summary */}
+      {summary && (
+        <div style={{
+          marginBottom: 32,
+          padding: '16px',
+          background: 'var(--surface)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--r8)',
+        }}>
+          <h3 style={{
+            fontSize: 16,
+            fontWeight: 700,
+            color: 'var(--text)',
+            marginBottom: 16,
+            marginTop: 0,
+            textTransform: 'uppercase',
+            letterSpacing: '0.08em',
+          }}>
+            Vehicle Intelligence
+          </h3>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gap: 16,
+          }}>
+            <div>
+              <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 4 }}>Total Revenue</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>
+                {summary.totalRevenue > 0 ? `$${summary.totalRevenue.toFixed(2)}` : '—'}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 4 }}>Total Visits</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>
+                {summary.totalVisits}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 4 }}>Average Ticket</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>
+                {summary.averageTicket !== null ? `$${summary.averageTicket.toFixed(2)}` : '—'}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 4 }}>Last Visit</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>
+                {summary.lastVisit ? format(new Date(summary.lastVisit), 'MMM d, yyyy') : '—'}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 4 }}>Last Service</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>
+                {summary.lastServiceTitle ?? '—'}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Service History Timeline */}
       <div style={{

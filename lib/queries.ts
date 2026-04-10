@@ -1407,7 +1407,7 @@ export async function getAppointmentsForVehicle(
 
   const { data, error } = await supabase
     .from('appointments')
-    .select('id, vehicle_id, appointment_date, appointment_time, status, requested_service, created_at')
+    .select('id, vehicle_id, appointment_date, appointment_time, status, created_at')
     .eq('tenant_id', tenantId)
     .eq('vehicle_id', vehicleId)
     .order('appointment_date', { ascending: false })
