@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
     const webhookUrl = process.env.TWILIO_WEBHOOK_URL || 'https://localhost:3000'
     const dialActionUrl = `${webhookUrl}/api/webhooks/twilio/dial-result`
     const shopNumber = process.env.TWILIO_SHOP_NUMBER
-    const dialTimeout = process.env.TWILIO_DIAL_TIMEOUT || '20'
+    const dialTimeout = process.env.TWILIO_DIAL_TIMEOUT || '5'
 
     if (!shopNumber) {
       console.error('[Twilio Inbound] TWILIO_SHOP_NUMBER not configured')
