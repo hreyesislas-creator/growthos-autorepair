@@ -96,12 +96,16 @@ export async function POST(request: NextRequest) {
 
     // Send missed-call SMS if conditions are met
     // SOURCE OF TRUTH: DialCallStatus must be one of: no-answer, busy, failed
-    if (
-      ['no-answer', 'busy', 'failed'].includes(dialCallStatus) &&
-      !callLog.missed_call_sms_sent &&
-      callLog.from_number &&
-      process.env.TWILIO_SMS_ENABLED === 'true'
-    ) {
+    const isMissed =
+  ['no-answer', 'busy', 'failed'].includes(dialCallStatus) ||
+  (dialCallStatus === 'completed' && Number(dialCallDuration || 0) < 10)
+
+if (
+  isMissed &&
+  !callLog.missed_call_sms_sent &&
+  callLog.from_number &&
+  process.env.TWILIO_SMS_ENABLED === 'true'
+) {
       // Phase 1: Atomic claim-first approach for duplicate prevention
       // TODO (Phase 2): Separate "claimed" vs "sent" state to allow retries on SMS provider failures
       // Current approach: claim first to prevent duplicate SMS on concurrent callbacks.
