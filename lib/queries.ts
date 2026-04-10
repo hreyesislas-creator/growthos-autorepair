@@ -42,6 +42,7 @@ import type {
   Invoice,
   InvoiceItem,
   InvoiceWithItems,
+  CallLog,
 } from '@/lib/types'
 
 const APPOINTMENT_DATE_COLUMN = 'appointment_date'
@@ -1530,6 +1531,32 @@ export async function getInvoicesForVehicle(
   }
 
   return (data ?? []) as Invoice[]
+}
+
+// ── Call logs (Twilio) ─────────────────────────────────────────
+
+/**
+ * Fetch all call logs for a tenant, ordered by most recent first.
+ * Used by the calls dashboard page.
+ */
+export async function getCallsForTenant(tenantId: string): Promise<CallLog[]> {
+  if (!hasValue(tenantId)) return []
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('call_logs')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .order('initiated_at', { ascending: false })
+    .limit(200)
+
+  if (error) {
+    console.error('[getCallsForTenant]', error.message)
+    return []
+  }
+
+  return (data ?? []) as CallLog[]
 }
 
 // ── Estimate Approval Queries ────────────────────────────────────────

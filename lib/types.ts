@@ -900,6 +900,42 @@ export interface InvoiceWithItems extends Invoice {
   items: InvoiceItem[]
 }
 
+// ── Call logs (Twilio) ────────────────────────────────────────
+//
+// Records inbound calls from Twilio and tracks missed-call SMS follow-ups.
+// Phase 1: Single-tenant, basic logging. Multi-tenant lookup deferred to Phase 2.
+//
+export interface CallLog {
+  id: string
+  tenant_id: string
+
+  // Twilio identifiers
+  twilio_call_sid: string          // unique per call
+  twilio_account_sid: string | null
+
+  // Phone numbers (E.164 format)
+  from_number: string              // caller's number
+  to_number: string                // shop's number
+
+  // Call state
+  call_status: string | null       // queued | ringing | in-progress | completed
+  disposition: string | null       // null | answered | missed | failed
+  call_duration_seconds: number | null
+
+  // Timestamps
+  initiated_at: string             // when call arrived
+  connected_at: string | null      // when answered
+  ended_at: string | null          // when call ended
+
+  // SMS tracking
+  missed_call_sms_sent: boolean
+  missed_call_sms_sent_at: string | null
+
+  // System
+  created_at: string
+  updated_at: string
+}
+
 // ── Tenant pricing config ─────────────────────────────────────
 //
 // One row per tenant in `tenant_pricing_configs`.
