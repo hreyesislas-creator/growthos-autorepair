@@ -115,7 +115,7 @@ function groupSections(
     if (!sectionMap.has(key)) sectionMap.set(key, { section_name: key, items: [] })
     const itemPhotos = photosByItemId.get(si.id) ?? []
     sectionMap.get(key)!.items.push({
-      templateItem: { id: si.template_item_id ?? si.id, section_name: key, label: 'Inspection Item', sort_order: 0 },
+      templateItem: { id: si.template_item_id ?? si.id, section_name: key, label: si.notes?.trim() || 'Inspection Item', sort_order: 0 },
       savedItem: si,
       photos: itemPhotos,
     })
