@@ -108,14 +108,19 @@ function groupSections(
 
   // Fallback: if template items are missing (template_id null or template has no rows),
   // render saved inspection items directly so the page is never empty.
+  const templateItemById = new Map<string, TemplateItem>()
+  for (const ti of templateItems) templateItemById.set(ti.id, ti)
+
   const coveredTemplateIds = new Set(templateItems.map(ti => ti.id))
   for (const si of savedItems) {
     if (si.template_item_id && coveredTemplateIds.has(si.template_item_id)) continue
     const key = 'General'
     if (!sectionMap.has(key)) sectionMap.set(key, { section_name: key, items: [] })
     const itemPhotos = photosByItemId.get(si.id) ?? []
+    const matchedTemplate = si.template_item_id ? templateItemById.get(si.template_item_id) : undefined
+    const label = matchedTemplate?.label || matchedTemplate?.item_name || si.notes?.trim() || 'Inspection Item'
     sectionMap.get(key)!.items.push({
-      templateItem: { id: si.template_item_id ?? si.id, section_name: key, label: si.notes?.trim() || 'Inspection Item', sort_order: 0 },
+      templateItem: { id: si.template_item_id ?? si.id, section_name: key, label, sort_order: 0 },
       savedItem: si,
       photos: itemPhotos,
     })
