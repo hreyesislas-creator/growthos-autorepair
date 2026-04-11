@@ -106,6 +106,21 @@ function groupSections(
     sectionMap.get(key)!.items.push({ templateItem: ti, savedItem, photos: itemPhotos })
   }
 
+  // Fallback: if template items are missing (template_id null or template has no rows),
+  // render saved inspection items directly so the page is never empty.
+  const coveredTemplateIds = new Set(templateItems.map(ti => ti.id))
+  for (const si of savedItems) {
+    if (si.template_item_id && coveredTemplateIds.has(si.template_item_id)) continue
+    const key = 'General'
+    if (!sectionMap.has(key)) sectionMap.set(key, { section_name: key, items: [] })
+    const itemPhotos = photosByItemId.get(si.id) ?? []
+    sectionMap.get(key)!.items.push({
+      templateItem: { id: si.template_item_id ?? si.id, section_name: key, label: 'Inspection Item', sort_order: 0 },
+      savedItem: si,
+      photos: itemPhotos,
+    })
+  }
+
   const severityRank: Record<string, number> = {
     urgent:      0,
     attention:   1,
