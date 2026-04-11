@@ -96,6 +96,7 @@ export default async function InspectionDetailPage({
   //
   // The component's dbToUi() translates status → UI result internally.
   const existingItems = existingItemsRaw.map(row => ({
+    id:               row.id,
     template_item_id: row.template_item_id,
     status:           row.status,
     notes:            row.notes,
@@ -104,6 +105,18 @@ export default async function InspectionDetailPage({
   // ── DEBUG ─────────────────────────────────────────────────────────────────
   console.log('[PAGE] existingItemsMapped:', existingItems)
   // ─────────────────────────────────────────────────────────────────────────
+
+  // ── Load existing photos for saved inspection item rows ──────────────────
+  const existingItemIds = existingItemsRaw.map(row => row.id).filter(Boolean)
+
+  const existingPhotos = existingItemIds.length === 0
+    ? []
+    : await supabase
+        .from('inspection_item_photos')
+        .select('id, inspection_item_id, image_url, caption')
+        .in('inspection_item_id', existingItemIds)
+        .order('created_at', { ascending: true })
+        .then(({ data }) => data ?? [])
 
   // ── Step 2: Resolve template ID ──────────────────────────────────────────
   let templateId = inspection.template_id ?? null
@@ -135,6 +148,7 @@ export default async function InspectionDetailPage({
         inspection={inspection}
         sections={sections}
         existingItems={existingItems}
+        existingPhotos={existingPhotos}
         initialRecommendations={recommendations}
         technician={technician}
         linkedEstimate={linkedEstimate}

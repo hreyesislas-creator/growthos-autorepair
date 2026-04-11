@@ -20,6 +20,7 @@ import {
 } from '@/app/dashboard/estimates/actions'
 import ArchiveConfirmModal from '@/components/dashboard/ArchiveConfirmModal'
 import type { ReasonOption } from '@/components/dashboard/ArchiveConfirmModal'
+import { uploadInspectionPhoto, saveInspectionPhoto } from '@/lib/storage'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -50,10 +51,19 @@ interface Section {
 }
 
 interface ExistingItem {
+  /** DB primary key of the inspection_items row — required for photo upload FK */
+  id:               string
   template_item_id: string | null
   /** Raw value from DB — may be DbStatus or any legacy string */
   status:           string | null
   notes:            string | null
+}
+
+interface ExistingPhoto {
+  id: string
+  inspection_item_id: string
+  image_url: string | null
+  caption?: string | null
 }
 
 interface LinkedEstimate {
@@ -67,6 +77,7 @@ interface Props {
   inspection:             Inspection
   sections:               Section[]
   existingItems:          ExistingItem[]
+  existingPhotos?:        ExistingPhoto[]
   initialRecommendations: ServiceRecommendation[]
   technician?:            TenantUser | null
   linkedEstimate?:        LinkedEstimate | null
@@ -229,6 +240,7 @@ export default function InspectionChecklist({
   inspection,
   sections,
   existingItems,
+  existingPhotos = [],
   initialRecommendations,
   technician,
   linkedEstimate = null,
@@ -358,6 +370,63 @@ export default function InspectionChecklist({
       next.has(itemId) ? next.delete(itemId) : next.add(itemId)
       return next
     })
+  }
+
+  // ── Photo upload ───────────────────────────────────────────────────────────
+
+  // Maps inspection_item_id → saved photos for that item.
+  const photosByItemId = useMemo(() => {
+    const map = new Map<string, ExistingPhoto[]>()
+    for (const photo of existingPhotos) {
+      if (!photo.inspection_item_id) continue
+      const arr = map.get(photo.inspection_item_id) ?? []
+      arr.push(photo)
+      map.set(photo.inspection_item_id, arr)
+    }
+    return map
+  }, [existingPhotos])
+
+  // Maps template_item_id → inspection_items.id so the upload handler can
+  // resolve the correct FK without prop drilling into each item row.
+  const existingItemIdMap = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const ei of existingItems) {
+      if (ei.template_item_id && ei.id) map.set(ei.template_item_id, ei.id)
+    }
+    return map
+  }, [existingItems])
+
+  async function handlePhotoUpload(templateItemId: string, file: File) {
+    console.log('[handlePhotoUpload] called', { templateItemId, fileName: file.name, fileSize: file.size, fileType: file.type })
+
+    const inspectionItemId = existingItemIdMap.get(templateItemId)
+    console.log('[handlePhotoUpload] resolved inspectionItemId:', inspectionItemId ?? '(not found)')
+
+    if (!inspectionItemId) {
+      console.error(
+        '[handlePhotoUpload] No saved inspection_items row for template item',
+        templateItemId,
+        '— save the checklist first so the row exists before attaching a photo.',
+        { existingItemIdMapSize: existingItemIdMap.size, existingItemIdMapKeys: [...existingItemIdMap.keys()] },
+      )
+      return
+    }
+
+    try {
+      console.log('[handlePhotoUpload] calling uploadInspectionPhoto…')
+      const { url } = await uploadInspectionPhoto(file, inspectionItemId)
+      console.log('[handlePhotoUpload] uploadInspectionPhoto succeeded, url:', url)
+
+      console.log('[handlePhotoUpload] calling saveInspectionPhoto…')
+      await saveInspectionPhoto(inspectionItemId, url)
+      console.log('[handlePhotoUpload] saveInspectionPhoto succeeded — photo uploaded and saved')
+    } catch (err) {
+      console.error('[handlePhotoUpload] caught error:', err)
+      if (err instanceof Error) {
+        console.error('[handlePhotoUpload] message:', err.message)
+        console.error('[handlePhotoUpload] stack:', err.stack)
+      }
+    }
   }
 
   // ── Save handler ───────────────────────────────────────────────────────────
@@ -770,6 +839,72 @@ export default function InspectionChecklist({
                     )}
                   </div>
                 )}
+
+                {/* Add Photo */}
+                {!isReadOnly && (
+                  <div style={{ marginTop: 6, paddingLeft: 14 }}>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      style={{ fontSize: 12 }}
+                      onChange={e => {
+                        const file = e.target.files?.[0]
+                        console.log('[photo input onChange] templateItemId:', item.id, '| file:', file ? `${file.name} (${file.size}B, ${file.type})` : 'none')
+                        if (file) handlePhotoUpload(item.id, file)
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* Saved photos */}
+                {(() => {
+                  const inspectionItemId = existingItemIdMap.get(item.id)
+                  const photos = inspectionItemId ? (photosByItemId.get(inspectionItemId) ?? []) : []
+                  if (photos.length === 0) return null
+                  return (
+                    <div
+                      style={{
+                        marginTop: 8,
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        gap: 8,
+                      }}
+                    >
+                      {photos.map(photo => {
+                        if (!photo.image_url) return null
+                        return (
+                          <div
+                            key={photo.id}
+                            style={{
+                              width: 80,
+                              height: 80,
+                              minWidth: 80,
+                              minHeight: 80,
+                              maxWidth: 80,
+                              maxHeight: 80,
+                              overflow: 'hidden',
+                              borderRadius: 8,
+                              border: '1px solid rgba(255,255,255,0.1)',
+                              flexShrink: 0,
+                              display: 'block',
+                            }}
+                          >
+                            <img
+                              src={photo.image_url}
+                              alt="Inspection photo"
+                              style={{
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'cover',
+                                display: 'block',
+                              }}
+                            />
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
               </div>
             )
           })}
