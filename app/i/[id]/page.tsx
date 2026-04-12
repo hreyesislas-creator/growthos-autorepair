@@ -43,6 +43,29 @@ function statusBg(status: string | null): string {
   }
 }
 
+// STEP 1: Customer-friendly status mapping ─────────────────────────────────────
+
+interface CustomerStatus {
+  category: 'urgent' | 'recommended' | 'monitor' | 'ok'
+  label:    string
+  color:    string
+  bg:       string
+  border:   string
+}
+
+function customerStatus(result: string | null): CustomerStatus {
+  switch (result) {
+    case 'urgent':
+      return { category: 'urgent',      label: 'Needs Immediate Attention', color: '#b91c1c', bg: '#fef2f2', border: '#fca5a5' }
+    case 'attention':
+      return { category: 'recommended', label: 'Recommended Service',       color: '#b45309', bg: '#fffbeb', border: '#fcd34d' }
+    case 'pass':
+      return { category: 'ok',          label: 'Looks Good',                color: '#15803d', bg: '#f0fdf4', border: '#86efac' }
+    default:
+      return { category: 'monitor',     label: 'Not Checked',               color: '#6b7280', bg: '#f9fafb', border: '#e5e7eb' }
+  }
+}
+
 // ── Section grouping ───────────────────────────────────────────────────────────
 
 interface TemplateItem {
@@ -235,6 +258,24 @@ export default async function PublicInspectionReportPage({ params }: { params: {
     templateItemsCount: templateItems.length,
   })
 
+  // ── STEP 1: Fetch related estimate — inspection_id match ONLY.
+  // Never fall back to vehicle_id: an older vehicle estimate is NOT the estimate
+  // for this specific inspection, and surfacing it would be incorrect / misleading.
+  let estimate: { id: string; status: string } | null = null
+  try {
+    const { data: estByInspection } = await supabase
+      .from('estimates')
+      .select('id, status')
+      .eq('inspection_id', inspection.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    estimate = estByInspection ?? null
+  } catch {
+    // Non-fatal — page renders fine without estimate
+  }
+
   // ── 3. Load photos for all saved item ids ────────────────────────────────
   console.log('[PHOTO FETCH INPUT]', {
     savedItemsLength: savedItems.length,
@@ -259,6 +300,12 @@ export default async function PublicInspectionReportPage({ params }: { params: {
       else if (si.result === 'attention') counts.warning++
       else if (si.result === 'urgent')    counts.critical++
     else                                counts.notChecked++
+  }
+
+  // STEP 2: Customer-facing category counts
+  const custCounts = { urgent: 0, recommended: 0, monitor: 0, ok: 0 }
+  for (const si of savedItems) {
+    custCounts[customerStatus(si.result).category]++
   }
 
   // ── 5. Derived display values ────────────────────────────────────────────
@@ -331,34 +378,46 @@ export default async function PublicInspectionReportPage({ params }: { params: {
 
       <div style={{ maxWidth: 720, margin: '0 auto', padding: '20px 20px 48px' }}>
 
-        {/* Summary counts */}
+        {/* STEP 4 intro — short professional tagline */}
+        <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 20, lineHeight: 1.6 }}>
+          Below is a summary of your vehicle inspection and the items that may need attention.
+        </p>
+
+        {/* STEP 3: Customer-friendly summary card */}
         {savedItems.length > 0 && (
           <div style={{
-            display: 'flex', flexWrap: 'wrap', gap: 10,
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+            gap: 10,
             marginBottom: 24,
-            padding: '16px 20px',
+            padding: '16px',
             background: '#fff',
             borderRadius: 10,
             border: '1px solid #e5e7eb',
           }}>
-            {counts.critical > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', background: '#fef2f2', borderRadius: 20 }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#dc2626', display: 'inline-block' }} />
-                <span style={{ fontSize: 13, fontWeight: 600, color: '#dc2626' }}>{counts.critical} Critical</span>
+            {([
+              { key: 'urgent',      label: 'Needs Attention', color: '#b91c1c', bg: '#fef2f2', border: '#fca5a5' },
+              { key: 'recommended', label: 'Recommended',     color: '#b45309', bg: '#fffbeb', border: '#fcd34d' },
+              { key: 'monitor',     label: 'Not Checked',     color: '#6b7280', bg: '#f9fafb', border: '#e5e7eb' },
+              { key: 'ok',          label: 'Looks Good',      color: '#15803d', bg: '#f0fdf4', border: '#86efac' },
+            ] as const).map(({ key, label, color, bg, border }) => (
+              <div key={key} style={{
+                padding: '12px 14px',
+                background: bg,
+                border: `1px solid ${border}`,
+                borderRadius: 8,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4,
+              }}>
+                <span style={{ fontSize: 22, fontWeight: 800, color, lineHeight: 1 }}>
+                  {custCounts[key]}
+                </span>
+                <span style={{ fontSize: 11, fontWeight: 600, color, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  {label}
+                </span>
               </div>
-            )}
-            {counts.warning > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', background: '#fffbeb', borderRadius: 20 }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#d97706', display: 'inline-block' }} />
-                <span style={{ fontSize: 13, fontWeight: 600, color: '#d97706' }}>{counts.warning} Warning</span>
-              </div>
-            )}
-            {counts.ok > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', background: '#f0fdf4', borderRadius: 20 }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#16a34a', display: 'inline-block' }} />
-                <span style={{ fontSize: 13, fontWeight: 600, color: '#16a34a' }}>{counts.ok} OK</span>
-              </div>
-            )}
+            ))}
           </div>
         )}
 
@@ -387,12 +446,10 @@ export default async function PublicInspectionReportPage({ params }: { params: {
 
             {/* Items */}
             {section.items.map(({ templateItem, savedItem, photos: itemPhotos }, idx) => {
-              console.log('[PHOTOS DEBUG]', {
-                savedItemId: savedItem?.id,
-                photos:      itemPhotos.length,
-              })
-              const isLast = idx === section.items.length - 1
-              const status  = savedItem?.result ?? null
+              const isLast   = idx === section.items.length - 1
+              const status   = savedItem?.result ?? null
+              // STEP 4: use customer-friendly mapping for display
+              const cs       = customerStatus(status)
               const rawTitle = templateItem?.label || templateItem?.item_name || ''
               const finding  = savedItem?.note?.trim()
               const title    = rawTitle && rawTitle !== 'Inspection Item'
@@ -404,7 +461,7 @@ export default async function PublicInspectionReportPage({ params }: { params: {
                   style={{
                     padding: '12px 16px',
                     borderBottom: isLast ? 'none' : '1px solid #f3f4f6',
-                    background: statusBg(status),
+                    background: cs.bg,
                   }}
                 >
                   {/* Item row */}
@@ -421,16 +478,16 @@ export default async function PublicInspectionReportPage({ params }: { params: {
                     </div>
                     <div style={{
                       flexShrink: 0,
-                      fontSize: 12,
+                      fontSize: 11,
                       fontWeight: 700,
                       padding: '3px 10px',
                       borderRadius: 20,
-                      color: statusColor(status),
+                      color: cs.color,
                       background: '#fff',
-                      border: `1px solid ${statusColor(status)}`,
+                      border: `1px solid ${cs.border}`,
                       whiteSpace: 'nowrap',
                     }}>
-                      {statusLabel(status)}
+                      {cs.label}
                     </div>
                   </div>
 
@@ -477,6 +534,57 @@ export default async function PublicInspectionReportPage({ params }: { params: {
             color: '#6b7280', fontSize: 14,
           }}>
             No inspection items found.
+          </div>
+        )}
+
+        {/* STEP 2: Estimate CTA ─────────────────────────────────────────────── */}
+        {estimate ? (
+          <div style={{
+            marginTop: 24,
+            padding: '24px',
+            background: '#fff',
+            borderRadius: 10,
+            border: '1px solid #e5e7eb',
+          }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#6b7280', marginBottom: 8 }}>
+              Next Step
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#111827', marginBottom: 6 }}>
+              Review Your Repair Estimate
+            </div>
+            <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 16, lineHeight: 1.5 }}>
+              We&apos;ve prepared a detailed repair estimate based on this inspection.
+            </div>
+            <a
+              href={`/e/${estimate.id}`}
+              style={{
+                display: 'inline-block',
+                padding: '10px 20px',
+                background: '#111827',
+                color: '#fff',
+                borderRadius: 8,
+                fontSize: 13,
+                fontWeight: 600,
+                textDecoration: 'none',
+              }}
+            >
+              View Repair Estimate →
+            </a>
+          </div>
+        ) : (
+          <div style={{
+            marginTop: 24,
+            padding: '20px 24px',
+            background: '#fff',
+            borderRadius: 10,
+            border: '1px solid #e5e7eb',
+          }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginBottom: 4 }}>
+              Repair Estimate
+            </div>
+            <div style={{ fontSize: 13, color: '#6b7280', lineHeight: 1.5 }}>
+              Your repair estimate will be shared shortly. Please contact the shop if you have questions.
+            </div>
           </div>
         )}
 

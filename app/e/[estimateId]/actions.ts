@@ -341,7 +341,7 @@ export async function finalizeEstimateApproval(
   }
 
   const approvedItemIds = new Set(
-    decisions
+    (decisions ?? [])
       .filter(d => d.decision === 'approved')
       .map(d => d.estimate_item_id)
   )

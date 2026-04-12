@@ -126,17 +126,11 @@ export default function PresentationView({
     // error should roll back to 'declined', not to pending.
     const previous = decisions[id] ?? null
 
-    // ── DIAGNOSTIC: Log client action ───────────────────────────────────────
-    console.log('[PresentationView] approve() called:', { estimateId, itemId: id })
-
     setDecisions(prev => ({ ...prev, [id]: 'approved' }))
     setSaving(prev => new Set(prev).add(id))
     setSaveErrors(prev => { const n = { ...prev }; delete n[id]; return n })
 
     const err = await approveEstimateItem(estimateId, id)
-
-    // ── DIAGNOSTIC: Log server result ───────────────────────────────────────
-    console.log('[PresentationView] approveEstimateItem returned:', { itemId: id, error: err?.error ?? null })
 
     setSaving(prev => { const n = new Set(prev); n.delete(id); return n })
     if (err) {
@@ -149,8 +143,6 @@ export default function PresentationView({
         return n
       })
       setSaveErrors(prev => ({ ...prev, [id]: err.error }))
-    } else {
-      console.log('[PresentationView] approval succeeded:', { itemId: id })
     }
   }, [estimateId, decisions])
 
@@ -158,17 +150,11 @@ export default function PresentationView({
     // Same snapshot-and-restore pattern as approve.
     const previous = decisions[id] ?? null
 
-    // ── DIAGNOSTIC: Log client action ───────────────────────────────────────
-    console.log('[PresentationView] decline() called:', { estimateId, itemId: id })
-
     setDecisions(prev => ({ ...prev, [id]: 'declined' }))
     setSaving(prev => new Set(prev).add(id))
     setSaveErrors(prev => { const n = { ...prev }; delete n[id]; return n })
 
     const err = await declineEstimateItem(estimateId, id)
-
-    // ── DIAGNOSTIC: Log server result ───────────────────────────────────────
-    console.log('[PresentationView] declineEstimateItem returned:', { itemId: id, error: err?.error ?? null })
 
     setSaving(prev => { const n = new Set(prev); n.delete(id); return n })
     if (err) {
@@ -181,8 +167,6 @@ export default function PresentationView({
         return n
       })
       setSaveErrors(prev => ({ ...prev, [id]: err.error }))
-    } else {
-      console.log('[PresentationView] decline succeeded:', { itemId: id })
     }
   }, [estimateId, decisions])
 
@@ -464,6 +448,103 @@ export default function PresentationView({
         </div>
       )}
 
+      {/* ── STEP 1: Customer-facing intro card ───────────────────────────── */}
+      <div style={{
+        background: '#fff',
+        border: '1px solid var(--border-2)',
+        borderRadius: 10,
+        padding: '20px 24px',
+        marginBottom: 20,
+      }}>
+        <div style={{ fontSize: 17, fontWeight: 700, color: '#0f172a', marginBottom: 6 }}>
+          Recommended Repairs
+        </div>
+        <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.6, margin: 0 }}>
+          This repair estimate is based on the completed vehicle inspection. Review the
+          recommendations below and approve the repairs you would like us to complete.
+        </p>
+
+        {/* STEP 3: Decision summary grid ─────────────────────────────────── */}
+        {estimate.items.length > 0 && (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+            gap: 10,
+            marginTop: 16,
+          }}>
+            {/* Approved */}
+            <div style={{
+              padding: '12px 14px',
+              background: approvedItems.length > 0 ? '#f0fdf4' : '#f9fafb',
+              border: `1px solid ${approvedItems.length > 0 ? '#86efac' : '#e5e7eb'}`,
+              borderRadius: 8,
+            }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: '#15803d', lineHeight: 1 }}>
+                {approvedItems.length}
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 3 }}>
+                Approved
+              </div>
+              {approvedItems.length > 0 && (
+                <div style={{ fontSize: 11, color: '#166534', marginTop: 2 }}>
+                  ${approvedTotal.toFixed(2)}
+                </div>
+              )}
+            </div>
+
+            {/* Pending */}
+            <div style={{
+              padding: '12px 14px',
+              background: remainingItems.length > 0 ? '#eff6ff' : '#f9fafb',
+              border: `1px solid ${remainingItems.length > 0 ? '#bfdbfe' : '#e5e7eb'}`,
+              borderRadius: 8,
+            }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: '#1d4ed8', lineHeight: 1 }}>
+                {remainingItems.length}
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#1d4ed8', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 3 }}>
+                Pending Review
+              </div>
+            </div>
+
+            {/* Declined */}
+            <div style={{
+              padding: '12px 14px',
+              background: declinedItems.length > 0 ? '#fef2f2' : '#f9fafb',
+              border: `1px solid ${declinedItems.length > 0 ? '#fca5a5' : '#e5e7eb'}`,
+              borderRadius: 8,
+            }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: '#dc2626', lineHeight: 1 }}>
+                {declinedItems.length}
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#dc2626', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 3 }}>
+                Declined
+              </div>
+            </div>
+
+            {/* Estimate total */}
+            <div style={{
+              padding: '12px 14px',
+              background: '#f8fafc',
+              border: '1px solid #e5e7eb',
+              borderRadius: 8,
+            }}>
+              <div style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>
+                ${round2(Number(estimate.total)).toFixed(2)}
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 3 }}>
+                Estimate Total
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 3: Trust / next-step line */}
+        <p style={{ fontSize: 12, color: '#94a3b8', margin: '12px 0 0', lineHeight: 1.5 }}>
+          You can review each recommended repair below and choose which items to approve.
+        </p>
+      </div>
+
       {/* ── Share bar ─────────────────────────────────────────────────────── */}
       <ShareBar
         estimateId={estimate.id}
@@ -471,22 +552,121 @@ export default function PresentationView({
         shopName={shopName}
       />
 
-      {/* ── Job cards ─────────────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {estimate.items.map(item => (
-          <JobCard
-            key={item.id}
-            item={item}
-            decision={decisions[item.id] ?? null}
-            onApprove={() => approve(item.id)}
-            onDecline={() => decline(item.id)}
-            onUndecide={() => undecide(item.id)}
-            isSaving={saving.has(item.id)}
-            saveError={saveErrors[item.id] ?? null}
-            locked={isLocked ?? false}
-          />
-        ))}
-      </div>
+      {/* ── Job cards — grouped by decision state ────────────────────────── */}
+
+      {/* STEP 2: Pending Review section */}
+      {remainingItems.length > 0 && (
+        <div style={{ marginBottom: 24 }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            marginBottom: 8,
+          }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#1d4ed8' }}>
+              Pending Review
+            </span>
+            <span style={{
+              fontSize: 11, fontWeight: 600,
+              padding: '1px 7px', borderRadius: 20,
+              background: '#eff6ff', color: '#1d4ed8',
+              border: '1px solid #bfdbfe',
+            }}>
+              {remainingItems.length}
+            </span>
+          </div>
+          <p style={{ fontSize: 12, color: '#94a3b8', margin: '0 0 10px', lineHeight: 1.5 }}>
+            Please review the items below and choose which repairs you would like us to complete.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {remainingItems.map(item => (
+              <JobCard
+                key={item.id}
+                item={item}
+                decision={decisions[item.id] ?? null}
+                onApprove={() => approve(item.id)}
+                onDecline={() => decline(item.id)}
+                onUndecide={() => undecide(item.id)}
+                isSaving={saving.has(item.id)}
+                saveError={saveErrors[item.id] ?? null}
+                locked={isLocked ?? false}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* STEP 3: Approved section */}
+      {approvedItems.length > 0 && (
+        <div style={{ marginBottom: 24 }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            marginBottom: 10,
+          }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#15803d' }}>
+              Approved Repairs
+            </span>
+            <span style={{
+              fontSize: 11, fontWeight: 600,
+              padding: '1px 7px', borderRadius: 20,
+              background: '#f0fdf4', color: '#15803d',
+              border: '1px solid #86efac',
+            }}>
+              {approvedItems.length}
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {approvedItems.map(item => (
+              <JobCard
+                key={item.id}
+                item={item}
+                decision={decisions[item.id] ?? null}
+                onApprove={() => approve(item.id)}
+                onDecline={() => decline(item.id)}
+                onUndecide={() => undecide(item.id)}
+                isSaving={saving.has(item.id)}
+                saveError={saveErrors[item.id] ?? null}
+                locked={isLocked ?? false}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* STEP 4: Declined section */}
+      {declinedItems.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            marginBottom: 10,
+          }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#dc2626' }}>
+              Declined Repairs
+            </span>
+            <span style={{
+              fontSize: 11, fontWeight: 600,
+              padding: '1px 7px', borderRadius: 20,
+              background: '#fef2f2', color: '#dc2626',
+              border: '1px solid #fca5a5',
+            }}>
+              {declinedItems.length}
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {declinedItems.map(item => (
+              <JobCard
+                key={item.id}
+                item={item}
+                decision={decisions[item.id] ?? null}
+                onApprove={() => approve(item.id)}
+                onDecline={() => decline(item.id)}
+                onUndecide={() => undecide(item.id)}
+                isSaving={saving.has(item.id)}
+                saveError={saveErrors[item.id] ?? null}
+                locked={isLocked ?? false}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Totals summary ────────────────────────────────────────────────── */}
       <div style={{ marginTop: 28 }}>
@@ -511,6 +691,9 @@ export default function PresentationView({
       {/* ── Final Authorization Block ─────────────────────────────────────── */}
       <FinalAuthorizationBlock
         approvedItemsCount={approvedItems.length}
+        declinedItemsCount={declinedItems.length}
+        pendingItemsCount={remainingItems.length}
+        approvedTotal={approvedTotal}
         workOrderId={workOrderId}
         onAuthorize={handleAuthorizeEstimate}
         isReopening={estimate.status === 'reopened'}
@@ -710,12 +893,12 @@ interface JobCardProps {
 }
 
 function JobCard({ item, decision, onApprove, onDecline, onUndecide, isSaving, saveError, locked }: JobCardProps) {
-  const laborCost    = round2((item.labor_hours ?? 0) * (item.labor_rate ?? 0))
+  const laborCost     = round2((item.labor_hours ?? 0) * (item.labor_rate ?? 0))
   const partsSubtotal = getPartsSubtotal(item)
-  const jobSubtotal  = getJobSubtotal(item)
-  const hasParts     = (item.parts ?? []).length > 0
+  const jobSubtotal   = getJobSubtotal(item)
+  const hasParts      = (item.parts ?? []).length > 0
 
-  // ── Card visual state ──────────────────────────────────────────────────────
+  // ── Card visual state (unchanged) ─────────────────────────────────────────
   const borderColor =
     decision === 'approved' ? '#16a34a' :
     decision === 'declined' ? '#dc2626' :
@@ -739,103 +922,122 @@ function JobCard({ item, decision, onApprove, onDecline, onUndecide, isSaving, s
       transition: 'all 0.15s ease',
     }}>
 
-      {/* ── Card header ─────────────────────────────────────────────────── */}
-      <div style={{
-        padding: '14px 18px 10px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        gap: 12,
-      }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>
-              {item.title || 'Repair Job'}
-            </span>
-            {item.needs_review && (
+      {/* STEP 1+2+3: Card header — title / description / price / decision badge */}
+      <div style={{ padding: '16px 18px 12px' }}>
+
+        {/* Top row: title area + price column */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 14 }}>
+
+          {/* STEP 1: Title hierarchy */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: item.description ? 6 : 0 }}>
+              {/* STEP 1: Prominent title */}
+              <span style={{ fontSize: 16, fontWeight: 700, color: '#111827', lineHeight: 1.2 }}>
+                {item.title || 'Repair Job'}
+              </span>
+              {item.needs_review && (
+                <span style={{
+                  fontSize: 10, fontWeight: 600, color: '#92400e',
+                  background: '#fffbeb', padding: '2px 6px', borderRadius: 3,
+                }}>
+                  Needs Advisor Review
+                </span>
+              )}
+            </div>
+            {/* STEP 1: Description as supportive text */}
+            {item.description && (
+              <div style={{ fontSize: 13, color: '#4B5563', lineHeight: 1.55 }}>
+                {item.description}
+              </div>
+            )}
+          </div>
+
+          {/* STEP 2+3: Right column — price (prominent) + decision state */}
+          <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+            {/* STEP 2: Total price front-and-center */}
+            <div style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: 20,
+              fontWeight: 800,
+              color: decision === 'approved' ? '#15803d' : '#111827',
+              lineHeight: 1,
+            }}>
+              ${jobSubtotal.toFixed(2)}
+            </div>
+
+            {/* STEP 3: Decision badge — Pending / Approved (undoable) / Declined (undoable) */}
+            {decision ? (
+              <button
+                onClick={onUndecide}
+                disabled={isSaving || locked}
+                title={locked ? 'Authorization complete — cannot change' : isSaving ? 'Saving…' : 'Click to undo decision'}
+                style={{
+                  padding: '3px 10px',
+                  borderRadius: 20,
+                  border: 'none',
+                  cursor: locked || isSaving ? 'not-allowed' : 'pointer',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  opacity: isSaving || locked ? 0.6 : 1,
+                  background: decision === 'approved' ? '#dcfce7' : '#fee2e2',
+                  color:      decision === 'approved' ? '#15803d' : '#dc2626',
+                }}
+              >
+                {isSaving ? '…' : decision === 'approved' ? '✓ Approved' : '✗ Declined'}
+                {!isSaving && !locked && (
+                  <span style={{ marginLeft: 4, opacity: 0.5, fontSize: 10 }}>undo</span>
+                )}
+              </button>
+            ) : (
               <span style={{
-                fontSize: 10, fontWeight: 600, color: '#92400e',
-                background: '#fffbeb', padding: '2px 6px', borderRadius: 3,
+                fontSize: 11, fontWeight: 600,
+                padding: '3px 10px', borderRadius: 20,
+                background: '#eff6ff', color: '#1d4ed8',
+                border: '1px solid #bfdbfe',
               }}>
-                Needs Advisor Review
+                Pending Review
               </span>
             )}
           </div>
-          {item.description && (
-            <div style={{ fontSize: 13, color: '#374151', marginTop: 3 }}>
-              {item.description}
-            </div>
-          )}
         </div>
-
-        {/* Decision badge */}
-        {decision && (
-          <button
-            onClick={onUndecide}
-            disabled={isSaving || locked}
-            title={locked ? 'Authorization complete — cannot change' : isSaving ? 'Saving…' : 'Click to undo decision'}
-            style={{
-              flexShrink: 0,
-              padding: '4px 10px',
-              borderRadius: 20,
-              border: 'none',
-              cursor: locked || isSaving ? 'not-allowed' : 'pointer',
-              fontSize: 12,
-              fontWeight: 700,
-              opacity: isSaving || locked ? 0.6 : 1,
-              background: decision === 'approved' ? '#dcfce7' : '#fee2e2',
-              color:      decision === 'approved' ? '#15803d' : '#dc2626',
-            }}
-          >
-            {isSaving
-              ? '…'
-              : decision === 'approved' ? '✓ Approved' : '✗ Declined'}
-            {!isSaving && !locked && (
-              <span style={{ marginLeft: 4, opacity: 0.5, fontSize: 10 }}>undo</span>
-            )}
-          </button>
-        )}
       </div>
 
-      {/* ── Labor row ───────────────────────────────────────────────────── */}
+      {/* ── Labor row (secondary detail) ────────────────────────────────── */}
       {(item.labor_hours ?? 0) > 0 && (
         <div style={{
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          padding: '6px 18px',
+          padding: '5px 18px',
           borderTop: '1px solid var(--border-2)',
           background: 'var(--surface-2,#f8fafc)',
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 12, color: '#64748b' }}>🔧</span>
-            <span style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
-              Labor&nbsp;&nbsp;
-              <span style={{ color: '#4B5563', fontSize: 12, fontWeight: 400 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 12, color: '#94a3b8' }}>🔧</span>
+            <span style={{ fontSize: 12, color: '#64748b' }}>
+              Labor&nbsp;
+              <span style={{ fontSize: 11 }}>
                 {item.labor_hours} hrs @ ${Number(item.labor_rate ?? 0).toFixed(2)}/hr
               </span>
             </span>
           </div>
-          <span style={{
-            fontFamily: 'var(--font-mono)', fontWeight: 700,
-            fontSize: 13, color: '#111827',
-          }}>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: '#64748b', fontWeight: 600 }}>
             ${laborCost.toFixed(2)}
           </span>
         </div>
       )}
 
-      {/* ── Parts list ──────────────────────────────────────────────────── */}
+      {/* ── Parts list (secondary detail, unchanged) ─────────────────────── */}
       {hasParts && (
         <PartsList parts={item.parts ?? []} partsSubtotal={partsSubtotal} />
       )}
 
-      {/* ── Job total bar ───────────────────────────────────────────────── */}
+      {/* ── Job total bar (context row) ──────────────────────────────────── */}
       <div style={{
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        padding: '10px 18px',
+        padding: '8px 18px',
         borderTop: '1px solid var(--border-2)',
         background: decision === 'approved'
           ? '#dcfce7'
@@ -843,73 +1045,80 @@ function JobCard({ item, decision, onApprove, onDecline, onUndecide, isSaving, s
           ? '#fee2e2'
           : 'var(--surface-2,#f8fafc)',
       }}>
-        <span style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>
-          Job Total
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>
+          Repair Total
         </span>
         <span style={{
           fontFamily: 'var(--font-mono)',
-          fontSize: 15,
-          fontWeight: 800,
-          color: decision === 'approved' ? '#15803d' : '#111827',
+          fontSize: 13,
+          fontWeight: 700,
+          color: decision === 'approved' ? '#15803d' : '#374151',
         }}>
           ${jobSubtotal.toFixed(2)}
         </span>
       </div>
 
-      {/* ── Approve / Decline buttons (hidden when locked) ───────────────── */}
+      {/* STEP 4: Action area — "Your decision" label + Approve (filled) / Decline (outline) */}
       {!decision && !locked && (
         <div style={{
-          display: 'flex',
-          gap: 10,
-          padding: '12px 18px',
+          padding: '12px 18px 14px',
           borderTop: '1px solid var(--border-2)',
         }}>
-          <button
-            onClick={onApprove}
-            disabled={isSaving}
-            style={{
-              flex: 1,
-              padding: '10px 0',
-              borderRadius: 7,
-              border: '2px solid #16a34a',
-              background: '#fff',
-              color: '#15803d',
-              fontWeight: 700,
-              fontSize: 14,
-              cursor: isSaving ? 'wait' : 'pointer',
-              opacity: isSaving ? 0.55 : 1,
-              transition: 'background 0.1s',
-            }}
-            onMouseEnter={e => { if (!isSaving) e.currentTarget.style.background = '#f0fdf4' }}
-            onMouseLeave={e => (e.currentTarget.style.background = '#fff')}
-          >
-            {isSaving ? '…' : '✓ Approve'}
-          </button>
-          <button
-            onClick={onDecline}
-            disabled={isSaving}
-            style={{
-              flex: 1,
-              padding: '10px 0',
-              borderRadius: 7,
-              border: '2px solid #dc2626',
-              background: '#fff',
-              color: '#dc2626',
-              fontWeight: 700,
-              fontSize: 14,
-              cursor: isSaving ? 'wait' : 'pointer',
-              opacity: isSaving ? 0.55 : 1,
-              transition: 'background 0.1s',
-            }}
-            onMouseEnter={e => { if (!isSaving) e.currentTarget.style.background = '#fff7f7' }}
-            onMouseLeave={e => (e.currentTarget.style.background = '#fff')}
-          >
-            {isSaving ? '…' : '✗ Decline'}
-          </button>
+          <div style={{
+            fontSize: 11, fontWeight: 600, color: '#94a3b8',
+            textTransform: 'uppercase', letterSpacing: '0.07em',
+            marginBottom: 8,
+          }}>
+            Your decision
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button
+              onClick={onApprove}
+              disabled={isSaving}
+              style={{
+                flex: 2,
+                padding: '11px 0',
+                borderRadius: 7,
+                border: '2px solid #16a34a',
+                background: '#16a34a',
+                color: '#fff',
+                fontWeight: 700,
+                fontSize: 14,
+                cursor: isSaving ? 'wait' : 'pointer',
+                opacity: isSaving ? 0.55 : 1,
+                transition: 'background 0.1s',
+              }}
+              onMouseEnter={e => { if (!isSaving) e.currentTarget.style.background = '#15803d' }}
+              onMouseLeave={e => (e.currentTarget.style.background = '#16a34a')}
+            >
+              {isSaving ? '…' : '✓ Approve'}
+            </button>
+            <button
+              onClick={onDecline}
+              disabled={isSaving}
+              style={{
+                flex: 1,
+                padding: '11px 0',
+                borderRadius: 7,
+                border: '2px solid #e2e8f0',
+                background: '#fff',
+                color: '#64748b',
+                fontWeight: 600,
+                fontSize: 14,
+                cursor: isSaving ? 'wait' : 'pointer',
+                opacity: isSaving ? 0.55 : 1,
+                transition: 'background 0.1s',
+              }}
+              onMouseEnter={e => { if (!isSaving) e.currentTarget.style.background = '#fff7f7' }}
+              onMouseLeave={e => (e.currentTarget.style.background = '#fff')}
+            >
+              {isSaving ? '…' : '✗ Decline'}
+            </button>
+          </div>
         </div>
       )}
 
-      {/* ── Save error ───────────────────────────────────────────────────── */}
+      {/* ── Save error (unchanged) ───────────────────────────────────────── */}
       {saveError && (
         <div style={{
           padding: '8px 18px',

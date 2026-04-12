@@ -37,11 +37,8 @@ export async function updateSession(request: NextRequest) {
 
   const { pathname } = request.nextUrl
 
-  console.log('[middleware] pathname:', pathname, '| user:', user?.id ?? 'null')
-
   // Unauthenticated → redirect away from protected routes
   if (!user && PROTECTED_PREFIXES.some((p) => pathname.startsWith(p))) {
-    console.log('[middleware] BLOCKING unauthenticated request to', pathname, '→ /auth/login')
     const url = request.nextUrl.clone()
     url.pathname = '/auth/login'
     url.searchParams.set('redirect', pathname)
@@ -50,13 +47,11 @@ export async function updateSession(request: NextRequest) {
 
   // Authenticated → bounce off the login page to prevent redirect loops
   if (user && AUTH_PAGES.some((p) => pathname.startsWith(p))) {
-    console.log('[middleware] REDIRECTING authenticated user away from', pathname, '→ /dashboard')
     const url = request.nextUrl.clone()
     url.pathname = '/dashboard'
     url.searchParams.delete('redirect')
     return NextResponse.redirect(url)
   }
 
-  console.log('[middleware] PASSING THROUGH:', pathname)
   return supabaseResponse
 }

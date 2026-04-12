@@ -82,9 +82,6 @@ export default async function InvoicePrintPage({
 }) {
   const supabase = createAdminClient()
 
-  // DIAGNOSTIC LOG
-  console.log('[print/page.tsx] params.id:', params.id)
-
   // ── 1. Fetch invoice header ────────────────────────────────────────────
   const invoiceRes = await supabase
     .from('invoices')
@@ -96,17 +93,10 @@ export default async function InvoicePrintPage({
     .eq('id', params.id)
     .maybeSingle()
 
-  console.log('[print/page.tsx] invoiceRes.data:', invoiceRes.data)
-  console.log('[print/page.tsx] invoiceRes.error:', invoiceRes.error)
-
   const invoice = invoiceRes.data as InvoiceData | null
-  if (!invoice) {
-    console.log('[print/page.tsx] NOTFOUND: invoice not found')
-    return notFound()
-  }
+  if (!invoice) return notFound()
 
   const tenantId = invoice.tenant_id
-  console.log('[print/page.tsx] tenantId:', tenantId)
 
   // ── 2. Fetch related data using invoice's FKs ─────────────────────────
   const [itemsRes, customerRes, vehicleRes, tenantRes, profileRes] =
@@ -155,13 +145,6 @@ export default async function InvoicePrintPage({
         .eq('tenant_id', tenantId)
         .maybeSingle(),
     ])
-
-  console.log('[print/page.tsx] itemsRes.data count:', itemsRes.data?.length ?? 0)
-  console.log('[print/page.tsx] customerRes.data:', customerRes.data)
-  console.log('[print/page.tsx] vehicleRes.data:', vehicleRes.data)
-  console.log('[print/page.tsx] tenantRes.data:', tenantRes.data)
-  console.log('[print/page.tsx] tenantRes.error:', tenantRes.error)
-  console.log('[print/page.tsx] profileRes.data:', profileRes.data)
 
   const items = itemsRes.data ?? []
   const customer = customerRes.data
