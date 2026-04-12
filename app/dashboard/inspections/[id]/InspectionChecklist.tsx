@@ -301,6 +301,7 @@ export default function InspectionChecklist({
   const [saving,           setSaving]           = useState(false)
   const [completing,       setCompleting]       = useState(false)
   const [reopening,        setReopening]        = useState(false)
+  const [linkCopied,       setLinkCopied]       = useState(false)
   const [generating,       setGenerating]       = useState(false)
   const [creatingEstimate, setCreatingEstimate] = useState(false)
   const [estimateError,    setEstimateError]    = useState<string | null>(null)
@@ -525,6 +526,14 @@ export default function InspectionChecklist({
   }
 
   // ── Archive handlers ───────────────────────────────────────────────────────
+
+  function handleCopyLink() {
+    const url = `${window.location.origin}/i/${inspection.id}`
+    navigator.clipboard.writeText(url).then(() => {
+      setLinkCopied(true)
+      setTimeout(() => setLinkCopied(false), 2000)
+    }).catch(() => alert(`Inspection link: ${url}`))
+  }
 
   function openArchiveModal() {
     setArchiveError(null)
@@ -1202,6 +1211,23 @@ export default function InspectionChecklist({
             <a href="/dashboard/inspections" className="btn-ghost" style={{ fontSize: 12 }}>
               ← Back
             </a>
+            <button
+              type="button"
+              className="btn-ghost"
+              style={{ fontSize: 12 }}
+              onClick={handleCopyLink}
+            >
+              {linkCopied ? '✓ Copied!' : '🔗 Copy Report Link'}
+            </button>
+            <a
+              href={`/i/${inspection.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-ghost"
+              style={{ fontSize: 12 }}
+            >
+              Open Report ↗
+            </a>
             {/* Archive — always available, destructive */}
             <button
               type="button"
@@ -1270,6 +1296,23 @@ export default function InspectionChecklist({
 
             <a href="/dashboard/inspections" className="btn-ghost" style={{ fontSize: 12 }}>
               Cancel
+            </a>
+            <button
+              type="button"
+              className="btn-ghost"
+              style={{ fontSize: 12 }}
+              onClick={handleCopyLink}
+            >
+              {linkCopied ? '✓ Copied!' : '🔗 Copy Report Link'}
+            </button>
+            <a
+              href={`/i/${inspection.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-ghost"
+              style={{ fontSize: 12 }}
+            >
+              Open Report ↗
             </a>
             {/* Archive — always available, destructive */}
             <button

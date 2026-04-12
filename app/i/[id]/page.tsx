@@ -9,6 +9,7 @@
 import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import { createAdminClient } from '@/lib/supabase/server'
+import { ReportActions } from './ReportActions'
 
 export const dynamic = 'force-dynamic'
 
@@ -290,36 +291,41 @@ export default async function PublicInspectionReportPage({ params }: { params: {
         padding: '24px 20px 20px',
       }}>
         <div style={{ maxWidth: 720, margin: '0 auto' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#6b7280', marginBottom: 6 }}>
-            Vehicle Inspection Report
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#6b7280', marginBottom: 6 }}>
+                Vehicle Inspection Report
+              </div>
+              {dateDisplay && (
+                <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 12 }}>
+                  {dateDisplay}
+                </div>
+              )}
+              {(customerName || vehicleLabel) && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginTop: 8 }}>
+                  {customerName && (
+                    <div>
+                      <div style={{ fontSize: 11, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>Customer</div>
+                      <div style={{ fontSize: 15, fontWeight: 600 }}>{customerName}</div>
+                    </div>
+                  )}
+                  {vehicleLabel && (
+                    <div>
+                      <div style={{ fontSize: 11, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>Vehicle</div>
+                      <div style={{ fontSize: 15, fontWeight: 600 }}>{vehicleLabel}</div>
+                    </div>
+                  )}
+                  {vehicle?.mileage && (
+                    <div>
+                      <div style={{ fontSize: 11, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>Mileage</div>
+                      <div style={{ fontSize: 15, fontWeight: 600 }}>{vehicle.mileage.toLocaleString()} mi</div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <ReportActions inspectionId={inspection.id} />
           </div>
-          {dateDisplay && (
-            <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 12 }}>
-              {dateDisplay}
-            </div>
-          )}
-          {(customerName || vehicleLabel) && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginTop: 8 }}>
-              {customerName && (
-                <div>
-                  <div style={{ fontSize: 11, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>Customer</div>
-                  <div style={{ fontSize: 15, fontWeight: 600 }}>{customerName}</div>
-                </div>
-              )}
-              {vehicleLabel && (
-                <div>
-                  <div style={{ fontSize: 11, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>Vehicle</div>
-                  <div style={{ fontSize: 15, fontWeight: 600 }}>{vehicleLabel}</div>
-                </div>
-              )}
-              {vehicle?.mileage && (
-                <div>
-                  <div style={{ fontSize: 11, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>Mileage</div>
-                  <div style={{ fontSize: 15, fontWeight: 600 }}>{vehicle.mileage.toLocaleString()} mi</div>
-                </div>
-              )}
-            </div>
-          )}
         </div>
       </div>
 
