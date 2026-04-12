@@ -14,6 +14,7 @@ import {
   reopenInspection,
   generateRecommendations,
   archiveInspection,
+  createInspectionItemRow,
 } from '../actions'
 import {
   createEstimateFromInspection,
@@ -396,20 +397,47 @@ export default function InspectionChecklist({
     return map
   }, [existingItems])
 
+  // Tracks inspection_items rows created on-the-fly this session (before Save).
+  // Allows photo uploads on unsaved items without a full page reload.
+  const [sessionCreatedItemIds, setSessionCreatedItemIds] = useState<Map<string, string>>(
+    () => new Map(),
+  )
+
   async function handlePhotoUpload(templateItemId: string, file: File) {
     console.log('[handlePhotoUpload] called', { templateItemId, fileName: file.name, fileSize: file.size, fileType: file.type })
 
-    const inspectionItemId = existingItemIdMap.get(templateItemId)
-    console.log('[handlePhotoUpload] resolved inspectionItemId:', inspectionItemId ?? '(not found)')
+    // Resolve from already-saved rows first, then fall back to rows created
+    // during this session before the user has clicked Save.
+    let inspectionItemId =
+      existingItemIdMap.get(templateItemId) ??
+      sessionCreatedItemIds.get(templateItemId)
+
+    console.log('[handlePhotoUpload] resolved inspectionItemId:', inspectionItemId ?? '(not found — will create)')
 
     if (!inspectionItemId) {
-      console.error(
-        '[handlePhotoUpload] No saved inspection_items row for template item',
-        templateItemId,
-        '— save the checklist first so the row exists before attaching a photo.',
-        { existingItemIdMapSize: existingItemIdMap.size, existingItemIdMapKeys: [...existingItemIdMap.keys()] },
-      )
-      return
+      // Row doesn't exist yet — create it on the fly so the photo FK is valid.
+      const currentState = itemState[templateItemId]
+      const dbStatus     = currentState ? uiToDb(currentState.result) : 'not_checked'
+      const notes        = currentState?.note?.trim() || null
+
+      console.log('[handlePhotoUpload] creating inspection_items row', { templateItemId, dbStatus, notes })
+
+      const result = await createInspectionItemRow(inspection.id, templateItemId, dbStatus, notes)
+
+      if ('error' in result) {
+        console.error('[handlePhotoUpload] failed to create inspection_items row:', result.error)
+        return
+      }
+
+      inspectionItemId = result.id
+      console.log('[handlePhotoUpload] created inspection_items row, id:', inspectionItemId)
+
+      // Remember for subsequent uploads in this session without requiring a reload.
+      setSessionCreatedItemIds(prev => {
+        const next = new Map(prev)
+        next.set(templateItemId, inspectionItemId!)
+        return next
+      })
     }
 
     try {

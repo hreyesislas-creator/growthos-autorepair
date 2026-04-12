@@ -91,15 +91,15 @@ export default async function InspectionDetailPage({
 
   // Map raw DB rows → ExistingItem shape expected by InspectionChecklist.
   //   template_item_id  → template_item_id  (unchanged)
-  //   status            → status            (DB value: pass | attention | urgent | not_checked)
-  //   notes             → notes             (unchanged)
+  //   result            → status            (DB col "result" maps to local prop "status")
+  //   note              → notes             (DB col "note" maps to local prop "notes")
   //
   // The component's dbToUi() translates status → UI result internally.
   const existingItems = existingItemsRaw.map(row => ({
     id:               row.id,
     template_item_id: row.template_item_id,
-    status:           row.status,
-    notes:            row.notes,
+    status:           row.result,
+    notes:            row.note,
   }))
 
   // ── DEBUG ─────────────────────────────────────────────────────────────────

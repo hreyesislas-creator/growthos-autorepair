@@ -57,8 +57,8 @@ interface TemplateItem {
 interface SavedItem {
   id: string
   template_item_id: string | null
-  status: string | null
-  notes: string | null
+  result: string | null
+  note: string | null
 }
 
 interface Photo {
@@ -124,7 +124,7 @@ function groupSections(
     if (!sectionMap.has(key)) sectionMap.set(key, { section_name: key, items: [] })
     const itemPhotos = photosByItemId.get(si.id) ?? []
     const matchedTemplate = si.template_item_id ? templateItemById.get(si.template_item_id) : undefined
-    const label = matchedTemplate?.label || matchedTemplate?.item_name || si.notes?.trim() || 'Inspection Item'
+        const label = matchedTemplate?.label || matchedTemplate?.item_name || si.note?.trim() || 'Inspection Item'
     sectionMap.get(key)!.items.push({
       templateItem: { id: si.template_item_id ?? si.id, section_name: key, label, sort_order: 0 },
       savedItem: si,
@@ -142,8 +142,8 @@ function groupSections(
   const ranked = Array.from(sectionMap.values())
   for (const section of ranked) {
     section.items.sort((a, b) => {
-      const ra = severityRank[a.savedItem?.status ?? ''] ?? 4
-      const rb = severityRank[b.savedItem?.status ?? ''] ?? 4
+        const ra = severityRank[a.savedItem?.result ?? ''] ?? 4
+        const rb = severityRank[b.savedItem?.result ?? ''] ?? 4
       return ra - rb
     })
   }
@@ -196,7 +196,7 @@ export default async function PublicInspectionReportPage({ params }: { params: {
   ] = await Promise.all([
     supabase
       .from('inspection_items')
-      .select('id, template_item_id, status, notes')
+      .select('id, template_item_id, result, note')
       .eq('inspection_id', params.id),
     inspection.customer_id
       ? supabase
@@ -254,9 +254,9 @@ export default async function PublicInspectionReportPage({ params }: { params: {
 
   const counts = { ok: 0, warning: 0, critical: 0, notChecked: 0 }
   for (const si of savedItems) {
-    if (si.status === 'pass')        counts.ok++
-    else if (si.status === 'attention') counts.warning++
-    else if (si.status === 'urgent')    counts.critical++
+      if (si.result === 'pass')        counts.ok++
+      else if (si.result === 'attention') counts.warning++
+      else if (si.result === 'urgent')    counts.critical++
     else                                counts.notChecked++
   }
 
@@ -386,9 +386,9 @@ export default async function PublicInspectionReportPage({ params }: { params: {
                 photos:      itemPhotos.length,
               })
               const isLast = idx === section.items.length - 1
-              const status  = savedItem?.status ?? null
+              const status  = savedItem?.result ?? null
               const rawTitle = templateItem?.label || templateItem?.item_name || ''
-              const finding  = savedItem?.notes?.trim()
+              const finding  = savedItem?.note?.trim()
               const title    = rawTitle && rawTitle !== 'Inspection Item'
                 ? rawTitle
                 : finding || 'Inspection Item'

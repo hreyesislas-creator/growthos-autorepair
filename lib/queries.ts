@@ -368,7 +368,7 @@ export async function getInspectionById(tenantId: string, id: string) {
     supabase.from('inspections').select('*').eq('tenant_id', tenantId).eq('id', id).single(),
     adminSupabase
       .from('inspection_items')
-      .select('template_item_id, status, notes')
+      .select('template_item_id, result, note')
       .eq('inspection_id', id),
   ])
 
@@ -404,8 +404,8 @@ export async function getInspectionItemsByInspectionId(
   id:               string
   inspection_id:    string
   template_item_id: string | null
-  status:           string | null
-  notes:            string | null
+  result:           string | null
+  note:             string | null
   updated_at:       string
 }>> {
   if (!hasValue(inspectionId)) {
@@ -426,7 +426,7 @@ export async function getInspectionItemsByInspectionId(
 
   const { data, error } = await adminSupabase
     .from('inspection_items')
-    .select('id, inspection_id, template_item_id, status, notes, updated_at')
+    .select('id, inspection_id, template_item_id, result, note, updated_at')
     .eq('inspection_id', inspectionId)
 
   // ── DEBUG: remove after confirming data flows correctly ──────────────────

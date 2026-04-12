@@ -389,8 +389,8 @@ export interface InspectionItem {
   inspection_id: string
   template_item_id: string | null
   /** Result value — 'pass' | 'attention' | 'urgent' | 'not_checked' */
-  status: 'pass' | 'attention' | 'urgent' | 'not_checked'
-  notes: string | null
+  result: 'pass' | 'attention' | 'urgent' | 'not_checked'
+  note: string | null
   created_at: string
   updated_at: string
 }

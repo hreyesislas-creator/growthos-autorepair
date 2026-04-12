@@ -118,7 +118,7 @@ export async function completeInspection(
   // ── Step 3: Fetch all inspection_items for this inspection ────────────────
   const { data: items, error: itemsErr } = await supabase
     .from('inspection_items')
-    .select('id, template_item_id, status, notes')
+    .select('id, template_item_id, result, note')
     .eq('inspection_id', inspectionId)
 
   if (itemsErr) {
@@ -134,12 +134,12 @@ export async function completeInspection(
   // DB values: 'pass' | 'attention' | 'urgent' | 'not_checked'
   // We create recommendations for: 'attention' (Warning) and 'urgent' (Critical)
   const flaggedItems = allItems.filter(
-    item => item.status === 'attention' || item.status === 'urgent'
+    item => item.result === 'attention' || item.result === 'urgent'
   )
 
   console.log('[completeInspection] flagged items found', {
-    critical: allItems.filter(i => i.status === 'urgent').length,
-    warning:  allItems.filter(i => i.status === 'attention').length,
+    critical: allItems.filter(i => i.result === 'urgent').length,
+    warning:  allItems.filter(i => i.result === 'attention').length,
     total: flaggedItems.length,
   })
 
@@ -172,10 +172,10 @@ export async function completeInspection(
       customer_id:      inspection.customer_id ?? null,
       vehicle_id:       inspection.vehicle_id ?? null,
       title:            itemName,  // Use template label as title
-      description:      item.notes ?? null,  // Use technician notes as description
+      description:      item.note ?? null,  // Use technician notes as description
       recommendation_type: 'service',
       status:           'pending',
-      priority:         item.status === 'urgent' ? 'high' : 'medium',  // urgent → high, attention → medium
+      priority:         item.result === 'urgent' ? 'high' : 'medium',  // urgent → high, attention → medium
       created_at:       now,
       updated_at:       now,
     }
@@ -484,7 +484,11 @@ export async function saveInspectionResults(
   // Upsert was replaced with an explicit fetch → update/insert pattern so that
   // inspection_items.id is never changed. Stable IDs are required to keep
   // inspection_item_photos linked correctly.
-  const { data: existingItems, error: fetchExistingError } = await supabase
+  // Must use adminClient — inspection_items has RLS that silently returns []
+  // for the regular client, which would cause every item to be INSERTed as a
+  // new row (new ID) on every save, breaking inspection_item_photos links.
+  const adminSupabase = createAdminClient()
+  const { data: existingItems, error: fetchExistingError } = await adminSupabase
     .from('inspection_items')
     .select('id, template_item_id')
     .eq('inspection_id', inspectionId)
@@ -510,8 +514,8 @@ export async function saveInspectionResults(
       const { error: updateError } = await supabase
         .from('inspection_items')
         .update({
-          status: item.status,
-          notes:  item.notes ?? null,
+          result: item.status,
+          note:   item.notes ?? null,
         })
         .eq('id', existingId)
 
@@ -526,8 +530,8 @@ export async function saveInspectionResults(
           tenant_id:        tenantId,
           inspection_id:    inspectionId,
           template_item_id: item.template_item_id,
-          status:           item.status,
-          notes:            item.notes ?? null,
+          result:           item.status,
+          note:             item.notes ?? null,
         })
 
       if (insertError) {
@@ -542,7 +546,7 @@ export async function saveInspectionResults(
 
   const { data: savedItems, error: fetchItemsError } = await supabase
     .from('inspection_items')
-    .select('id, template_item_id, status')
+    .select('id, template_item_id, result')
     .eq('tenant_id', tenantId)
     .eq('inspection_id', inspectionId)
     .in('template_item_id', templateItemIds)
@@ -552,11 +556,11 @@ export async function saveInspectionResults(
     return { error: fetchItemsError.message }
   }
 
-  // template_item_id → { id, status }
-  const savedItemMap = new Map<string, { id: string; status: string }>(
+  // template_item_id → { id, result }
+  const savedItemMap = new Map<string, { id: string; result: string }>(
     (savedItems ?? []).map(r => [
       r.template_item_id as string,
-      { id: r.id as string, status: r.status as string },
+      { id: r.id as string, result: r.result as string },
     ])
   )
 
@@ -708,6 +712,55 @@ export async function saveInspectionResults(
   return null
 }
 
+// ── Create a single inspection_items row (used by photo upload on new items) ──
+
+/**
+ * Ensures an inspection_items row exists for the given template item.
+ * If a row already exists (race condition / double-tap), returns its id.
+ * Uses the admin client so RLS never silently blocks the insert or the guard read.
+ */
+export async function createInspectionItemRow(
+  inspectionId:   string,
+  templateItemId: string,
+  status:         string,
+  notes:          string | null,
+): Promise<{ id: string } | { error: string }> {
+  const ctx = await getDashboardTenant()
+  if (!ctx) return { error: 'Not authorized' }
+
+  const tenantId    = ctx.tenant.id
+  const adminClient = createAdminClient()
+
+  // Guard: return existing row id if it already exists
+  const { data: existing } = await adminClient
+    .from('inspection_items')
+    .select('id')
+    .eq('inspection_id', inspectionId)
+    .eq('template_item_id', templateItemId)
+    .maybeSingle()
+
+  if (existing?.id) return { id: existing.id }
+
+  const { data, error } = await adminClient
+    .from('inspection_items')
+    .insert({
+      tenant_id:        tenantId,
+      inspection_id:    inspectionId,
+      template_item_id: templateItemId,
+      result:           status || 'not_checked',
+      note:             notes ?? null,
+    })
+    .select('id')
+    .single()
+
+  if (error) {
+    console.error('[createInspectionItemRow]', error.message)
+    return { error: error.message }
+  }
+
+  return { id: data.id }
+}
+
 // ── Generate recommendations (standalone) ────────────────────────────────────
 
 /**
@@ -753,13 +806,13 @@ export async function generateRecommendations(
   type RawInspItem = {
     id:               string
     template_item_id: string | null
-    status:           string | null
-    notes:            string | null
+    result:           string | null
+    note:             string | null
   }
 
   const { data: rawInspItems, error: itemsError } = await adminSupabase
     .from('inspection_items')
-    .select('id, template_item_id, status, notes')
+    .select('id, template_item_id, result, note')
     .eq('inspection_id', inspectionId)
 
   if (itemsError) {
@@ -795,10 +848,10 @@ export async function generateRecommendations(
 
   // ── 4. Separate flagged vs cleared items ──────────────────────────────────
   const flaggedItems = inspItems.filter(
-    i => i.status === 'attention' || i.status === 'urgent',
+    i => i.result === 'attention' || i.result === 'urgent',
   )
   const clearedItemIds = inspItems
-    .filter(i => i.status === 'pass' || i.status === 'not_checked')
+    .filter(i => i.result === 'pass' || i.result === 'not_checked')
     .map(i => i.id)
 
   // If nothing is flagged, clean up any stale recs and return
@@ -841,7 +894,7 @@ export async function generateRecommendations(
     .map(f => {
       const tpl    = templateMap.get(f.template_item_id ?? '')
       const label  = tpl?.label ?? (f.template_item_id ?? f.id)
-      const status = f.status as 'attention' | 'urgent'
+      const status = f.result as 'attention' | 'urgent'
       return {
         tenant_id:          tenantId,
         inspection_id:      inspectionId,
@@ -853,7 +906,7 @@ export async function generateRecommendations(
         description:        deriveDescription(status),
         item_name:          label,
         source_status:      status,
-        technician_notes:   f.notes ?? null,
+        technician_notes:   f.note ?? null,
         section_name:       tpl?.section_name ?? null,
         priority:           status === 'urgent' ? 'high' : 'medium',
         status:             'pending',
@@ -880,7 +933,7 @@ export async function generateRecommendations(
     const existing = existingRecMap.get(f.id)!
     const tpl      = templateMap.get(f.template_item_id ?? '')
     const label    = tpl?.label ?? (f.template_item_id ?? f.id)
-    const status   = f.status as 'attention' | 'urgent'
+    const status   = f.result as 'attention' | 'urgent'
 
     const { error: updateError } = await supabase
       .from('service_recommendations')
@@ -889,7 +942,7 @@ export async function generateRecommendations(
         description:      deriveDescription(status),
         item_name:        label,
         source_status:    status,
-        technician_notes: f.notes ?? null,
+        technician_notes: f.note ?? null,
         section_name:     tpl?.section_name ?? null,
         priority:         status === 'urgent' ? 'high' : 'medium',
         updated_at:       now,
