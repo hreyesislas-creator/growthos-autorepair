@@ -102,6 +102,12 @@ function groupSections(
 
     const savedItem = savedByTemplateId.get(ti.id) ?? null
     const itemPhotos = savedItem ? (photosByItemId.get(savedItem.id) ?? []) : []
+    if (savedItem) {
+      console.log('[PHOTO MATCH]', {
+        itemId:      savedItem.id,
+        photosFound: itemPhotos.length,
+      })
+    }
 
     sectionMap.get(key)!.items.push({ templateItem: ti, savedItem, photos: itemPhotos })
   }
@@ -182,10 +188,9 @@ export default async function PublicInspectionReportPage({ params }: { params: {
 
   if (!inspection) return notFound()
 
-  // ── 2. Load saved items, template items, customer, vehicle, photos in parallel
+  // ── 2. Load saved items, customer, vehicle in parallel ───────────────────
   const [
     savedItemsRes,
-    templateItemsRes,
     customerRes,
     vehicleRes,
   ] = await Promise.all([
@@ -193,14 +198,6 @@ export default async function PublicInspectionReportPage({ params }: { params: {
       .from('inspection_items')
       .select('id, template_item_id, status, notes')
       .eq('inspection_id', params.id),
-    inspection.template_id
-      ? supabase
-          .from('inspection_template_items')
-          .select('id, section_name, section, category, label, item_name, sort_order')
-          .eq('template_id', inspection.template_id)
-          .order('section_name', { ascending: true })
-          .order('sort_order',   { ascending: true })
-      : Promise.resolve({ data: [] }),
     inspection.customer_id
       ? supabase
           .from('customers')
@@ -217,21 +214,40 @@ export default async function PublicInspectionReportPage({ params }: { params: {
       : Promise.resolve({ data: null }),
   ])
 
-  const savedItems    = (savedItemsRes.data    ?? []) as SavedItem[]
-  const templateItems = (templateItemsRes.data ?? []) as TemplateItem[]
-  const customer      = customerRes.data  as { first_name: string; last_name: string } | null
-  const vehicle       = vehicleRes.data   as { year: number | null; make: string | null; model: string | null; trim: string | null; color: string | null; mileage: number | null; license_plate: string | null } | null
+  const savedItems = (savedItemsRes.data ?? []) as SavedItem[]
+  const customer   = customerRes.data as { first_name: string; last_name: string } | null
+  const vehicle    = vehicleRes.data  as { year: number | null; make: string | null; model: string | null; trim: string | null; color: string | null; mileage: number | null; license_plate: string | null } | null
+
+  // ── 2b. Load template items separately so errors are visible ─────────────
+  const templateItems = inspection.template_id
+    ? await supabase
+        .from('inspection_template_items')
+        .select('*')
+        .eq('template_id', inspection.template_id)
+        .order('sort_order', { ascending: true })
+        .then(({ data }) => data ?? [])
+    : []
+
+  console.log('[PUBLIC INSPECTION]', {
+    inspectionId:       inspection.id,
+    templateId:         inspection.template_id,
+    templateItemsCount: templateItems.length,
+  })
 
   // ── 3. Load photos for all saved item ids ────────────────────────────────
-  const savedItemIds = savedItems.map(si => si.id).filter(Boolean)
-  const photos: Photo[] = savedItemIds.length === 0
-    ? []
+  console.log('[PHOTO FETCH INPUT]', {
+    savedItemsLength: savedItems.length,
+    ids: savedItems.map(i => i.id),
+  })
+
+  const { data: photosData } = savedItems.length === 0
+    ? { data: [] }
     : await supabase
         .from('inspection_item_photos')
         .select('id, inspection_item_id, image_url')
-        .in('inspection_item_id', savedItemIds)
-        .order('created_at', { ascending: true })
-        .then(({ data }) => (data ?? []) as Photo[])
+        .in('inspection_item_id', savedItems.map(si => si.id))
+
+  const photos: Photo[] = (photosData ?? []) as Photo[]
 
   // ── 4. Group and count ───────────────────────────────────────────────────
   const sections = groupSections(templateItems, savedItems, photos)
@@ -365,8 +381,17 @@ export default async function PublicInspectionReportPage({ params }: { params: {
 
             {/* Items */}
             {section.items.map(({ templateItem, savedItem, photos: itemPhotos }, idx) => {
+              console.log('[PHOTOS DEBUG]', {
+                savedItemId: savedItem?.id,
+                photos:      itemPhotos.length,
+              })
               const isLast = idx === section.items.length - 1
-              const status = savedItem?.status ?? null
+              const status  = savedItem?.status ?? null
+              const rawTitle = templateItem?.label || templateItem?.item_name || ''
+              const finding  = savedItem?.notes?.trim()
+              const title    = rawTitle && rawTitle !== 'Inspection Item'
+                ? rawTitle
+                : finding || 'Inspection Item'
               return (
                 <div
                   key={templateItem.id}
@@ -378,13 +403,13 @@ export default async function PublicInspectionReportPage({ params }: { params: {
                 >
                   {/* Item row */}
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 14, fontWeight: 500, color: '#111827' }}>
-                        {templateItem.label || templateItem.item_name || '(unlabeled)'}
+                    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>
+                        {title}
                       </div>
-                      {savedItem?.notes && (
-                        <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4, lineHeight: 1.5, fontStyle: 'italic' }}>
-                          {savedItem.notes}
+                      {finding && (
+                        <div style={{ fontSize: 13, color: '#6b7280', lineHeight: 1.4 }}>
+                          {finding}
                         </div>
                       )}
                     </div>

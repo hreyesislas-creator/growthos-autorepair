@@ -414,7 +414,8 @@ export interface InspectionResultItem {
  *
  * Flow:
  *  1. Guard: skip if inspection is already completed
- *  2. Upsert inspection_items       (conflict: inspection_id, template_item_id)
+ *  2. Update existing inspection_items in place (preserves IDs → photos stay linked)
+ *     Insert only rows that are genuinely new (no existing row for that template_item_id)
  *  3. Re-fetch inspection_items     to get DB-assigned IDs for the FK
  *  4. Fetch inspection header       for vehicle_id / customer_id
  *  5. Fetch existing recommendations to preserve their status on update
@@ -478,22 +479,62 @@ export async function saveInspectionResults(
   const vehicleId  = inspCheck?.vehicle_id  ?? null
   const customerId = inspCheck?.customer_id ?? null
 
-  // ── 2. Upsert inspection_items ────────────────────────────────────────────
-  const itemRows = items.map(item => ({
-    tenant_id:        tenantId,
-    inspection_id:    inspectionId,
-    template_item_id: item.template_item_id,
-    status:           item.status,
-    notes:            item.notes ?? null,
-  }))
-
-  const { error: upsertError } = await supabase
+  // ── 2. Update existing inspection_items in place (preserve IDs for photos) ─
+  //
+  // Upsert was replaced with an explicit fetch → update/insert pattern so that
+  // inspection_items.id is never changed. Stable IDs are required to keep
+  // inspection_item_photos linked correctly.
+  const { data: existingItems, error: fetchExistingError } = await supabase
     .from('inspection_items')
-    .upsert(itemRows, { onConflict: 'inspection_id,template_item_id' })
+    .select('id, template_item_id')
+    .eq('inspection_id', inspectionId)
 
-  if (upsertError) {
-    console.error('[saveInspectionResults] upsert items:', upsertError.message)
-    return { error: upsertError.message }
+  if (fetchExistingError) {
+    console.error('[saveInspectionResults] fetch existing items:', fetchExistingError.message)
+    return { error: fetchExistingError.message }
+  }
+
+  const existingMap = new Map(
+    (existingItems ?? []).map(i => [i.template_item_id, i.id])
+  )
+
+  console.log('[SAVE FIX]', {
+    existingCount: existingItems?.length ?? 0,
+    savingCount:   items.length,
+  })
+
+  for (const item of items) {
+    const existingId = existingMap.get(item.template_item_id)
+
+    if (existingId) {
+      const { error: updateError } = await supabase
+        .from('inspection_items')
+        .update({
+          status: item.status,
+          notes:  item.notes ?? null,
+        })
+        .eq('id', existingId)
+
+      if (updateError) {
+        console.error('[saveInspectionResults] update item:', updateError.message)
+        return { error: updateError.message }
+      }
+    } else {
+      const { error: insertError } = await supabase
+        .from('inspection_items')
+        .insert({
+          tenant_id:        tenantId,
+          inspection_id:    inspectionId,
+          template_item_id: item.template_item_id,
+          status:           item.status,
+          notes:            item.notes ?? null,
+        })
+
+      if (insertError) {
+        console.error('[saveInspectionResults] insert item:', insertError.message)
+        return { error: insertError.message }
+      }
+    }
   }
 
   // ── 3. Re-fetch inspection_items to get DB-assigned IDs ───────────────────
