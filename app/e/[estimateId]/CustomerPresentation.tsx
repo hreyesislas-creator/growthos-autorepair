@@ -1,3 +1,4 @@
+// Superseded by PresentationView — kept for reference
 'use client'
 
 import { useState, useMemo } from 'react'

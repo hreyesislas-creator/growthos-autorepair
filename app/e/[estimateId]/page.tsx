@@ -199,14 +199,12 @@ export default async function EstimatePresentationPage({
         .eq('tenant_id', (estimate as any).tenant_id)
         .maybeSingle(),
 
-      // Inspection findings (all recommendations from the linked inspection)
+      // Inspection findings (all recommendations from the linked inspection).
+      // Only selects columns confirmed to exist in the live schema.
       (estimate as any).inspection_id
         ? supabase
             .from('service_recommendations')
-            .select(
-              'id, title, description, technician_notes, ' +
-              'source_status, priority, item_name, section_name, estimated_price',
-            )
+            .select('id, title, description, item_name, priority, status, estimated_price')
             .eq('inspection_id', (estimate as any).inspection_id)
         : Promise.resolve({ data: [] }),
     ])
@@ -254,6 +252,7 @@ export default async function EstimatePresentationPage({
     workOrderExists: !!existingWorkOrderId,
   })
 
+
   return (
     <PresentationView
       estimate={estimateWithItems}
@@ -266,6 +265,7 @@ export default async function EstimatePresentationPage({
       existingWorkOrderId={existingWorkOrderId}
       profile={profile}
       isLocked={estimate.status === 'authorized' || estimate.status === 'approved' || estimate.status === 'declined'}
+      recommendations={(recsRes.data ?? []) as any[]}
     />
   )
 }

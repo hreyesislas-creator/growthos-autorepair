@@ -17,6 +17,18 @@ import {
 export type JobDecision = 'approved' | 'declined' | null
 export type DecisionMap = Record<string, JobDecision>
 
+// Matches the shape selected from service_recommendations in page.tsx.
+// Only includes columns confirmed to exist in the live schema.
+interface Recommendation {
+  id:              string
+  title:           string
+  description:     string | null
+  item_name:       string | null
+  priority:        string | null
+  status:          string | null   // 'attention' | 'urgent' | 'pass' etc.
+  estimated_price: number | null
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Work-Order architecture boundary
 //
@@ -82,6 +94,7 @@ interface Props {
   existingWorkOrderId?: string          // loaded from work_orders table in page.tsx
   profile?:            any             // business_profiles data (address, contact, warranty, footer)
   isLocked?:           boolean         // true if authorization already completed and work order exists
+  recommendations?:    Recommendation[] // inspection findings — display only, no effect on approval logic
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -99,6 +112,7 @@ export default function PresentationView({
   existingWorkOrderId,
   profile,
   isLocked,
+  recommendations = [],
 }: Props) {
   // ── Decisions — initialised from DB, then managed locally ─────────────────
   const [decisions, setDecisions] = useState<DecisionMap>(() => {
@@ -445,6 +459,39 @@ export default function PresentationView({
             Review each repair below and click <strong>Approve</strong> or <strong>Decline</strong> to build your work order.
             You can change your mind at any time before submitting.
           </span>
+        </div>
+      )}
+
+      {/* ── Inspection Findings (informational only — no effect on approval) ── */}
+      {recommendations.length > 0 && (
+        <div style={{
+          background: '#fff',
+          border: '1px solid var(--border-2)',
+          borderRadius: 10,
+          padding: '20px 24px',
+          marginBottom: 20,
+        }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>
+            🔍 Inspection Findings
+          </div>
+          <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.55, margin: '0 0 16px' }}>
+            Based on the completed vehicle inspection, your technician found the following items.
+          </p>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {recommendations
+              .slice()
+              .sort((a, b) => {
+                // urgent first, then attention, then rest
+                const rank = (r: Recommendation) =>
+                  r.status === 'urgent' || r.priority === 'high' || r.priority === 'urgent' ? 0
+                  : r.status === 'attention' || r.priority === 'medium' ? 1
+                  : 2
+                return rank(a) - rank(b)
+              })
+              .map(rec => <InspectionFindingCard key={rec.id} rec={rec} />)
+            }
+          </div>
         </div>
       )}
 
@@ -1427,6 +1474,84 @@ function SummaryRow({
       }}>
         ${amount.toFixed(2)}
       </span>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// InspectionFindingCard — display only, no approval logic
+// ─────────────────────────────────────────────────────────────────────────────
+
+function InspectionFindingCard({ rec }: { rec: Recommendation }) {
+  const isUrgent = rec.status === 'urgent' || rec.priority === 'high' || rec.priority === 'urgent'
+  const isWarning = !isUrgent && (rec.status === 'attention' || rec.priority === 'medium')
+
+  const badgeStyle: React.CSSProperties = isUrgent
+    ? { background: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5' }
+    : isWarning
+      ? { background: '#fffbeb', color: '#d97706', border: '1px solid #fde68a' }
+      : { background: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0' }
+
+  const badgeLabel = isUrgent ? '⚠ Urgent' : isWarning ? '! Attention' : '✓ Noted'
+
+  const cardBorder: React.CSSProperties = isUrgent
+    ? { border: '1px solid #fca5a5', borderLeft: '4px solid #dc2626' }
+    : isWarning
+      ? { border: '1px solid #fde68a', borderLeft: '4px solid #f59e0b' }
+      : { border: '1px solid #d1fae5', borderLeft: '4px solid #16a34a' }
+
+  return (
+    <div style={{
+      borderRadius: 8,
+      padding: '12px 14px',
+      background: '#fafafa',
+      ...cardBorder,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        {/* Severity badge */}
+        <span style={{
+          flexShrink: 0,
+          marginTop: 2,
+          padding: '2px 8px',
+          borderRadius: 5,
+          fontSize: 10,
+          fontWeight: 700,
+          textTransform: 'uppercase' as const,
+          letterSpacing: '0.05em',
+          whiteSpace: 'nowrap' as const,
+          ...badgeStyle,
+        }}>
+          {badgeLabel}
+        </span>
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {/* Source item label (e.g. "Brake Pads") */}
+          {rec.item_name && rec.item_name !== rec.title && (
+            <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 2 }}>
+              {rec.item_name}
+            </div>
+          )}
+
+          {/* Finding title */}
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', lineHeight: 1.3 }}>
+            {rec.title}
+          </div>
+
+          {/* Description */}
+          {rec.description && (
+            <div style={{ fontSize: 13, color: '#374151', marginTop: 4, lineHeight: 1.5 }}>
+              {rec.description}
+            </div>
+          )}
+
+          {/* Estimated price (informational) */}
+          {rec.estimated_price != null && rec.estimated_price > 0 && (
+            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>
+              Est. cost: ${Number(rec.estimated_price).toFixed(2)}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
