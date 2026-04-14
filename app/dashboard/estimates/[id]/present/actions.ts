@@ -45,7 +45,7 @@ export async function sendEstimateByText(
   // ── 1. Load estimate header ─────────────────────────────────────────────────
   const { data: estimate, error: estErr } = await supabase
     .from('estimates')
-    .select('id, customer_id, estimate_number, tenant_id')
+    .select('id, customer_id, estimate_number, tenant_id, inspection_id')
     .eq('id', estimateId)
     .maybeSingle()
 
@@ -72,20 +72,24 @@ export async function sendEstimateByText(
   const shopName  = tenant?.name   ?? 'Your Auto Shop'
   const firstName = customer.first_name?.trim() || 'there'
 
-  // ── 4. Build the public estimate URL ────────────────────────────────────────
-  // Priority: NEXT_PUBLIC_BASE_URL → VERCEL_URL (added by Vercel automatically) → placeholder.
-  // This is NEVER window.location — safe to run on the server.
+  // ── 4. Build the correct customer-facing URL ────────────────────────────────
+  // PRODUCT RULE: when the estimate is linked to an inspection, the customer
+  // entry point is the inspection page (/i/…), not the estimate page (/e/…).
+  // This matches the routing logic in EstimateEditor.tsx customerUrl().
   const rawBase = process.env.NEXT_PUBLIC_BASE_URL
     ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
     ?? 'https://your-shop.app'
 
   const baseUrl   = rawBase.replace(/\/$/, '')
-  const publicUrl = `${baseUrl}/e/${estimateId}`
+  const inspectionId = (estimate as any).inspection_id as string | null
+  const publicUrl = inspectionId
+    ? `${baseUrl}/i/${inspectionId}`
+    : `${baseUrl}/e/${estimateId}`
 
-  // ── 5. Compose SMS message ───────────────────────────────────────────────────
-  const message =
-    `Hi ${firstName}, here is your repair estimate from ${shopName}: ` +
-    `${publicUrl}. You can review and approve your recommended work here.`
+  // ── 5. Compose SMS message — wording reflects which page the customer sees ──
+  const message = inspectionId
+    ? `Hi ${firstName}, your vehicle inspection and repair estimate from ${shopName} is ready: ${publicUrl}. Review the findings and approve your repairs here.`
+    : `Hi ${firstName}, here is your repair estimate from ${shopName}: ${publicUrl}. You can review and approve your recommended work here.`
 
   // ── 6. Twilio — fire if configured, warn + skip if not ──────────────────────
   const accountSid = process.env.TWILIO_ACCOUNT_SID

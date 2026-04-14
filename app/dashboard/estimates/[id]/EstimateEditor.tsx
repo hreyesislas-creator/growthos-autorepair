@@ -309,6 +309,11 @@ export default function EstimateEditor({
   )
   const [copied, setCopied] = useState(false)
 
+  // ── SMS send state ────────────────────────────────────────────────────────
+  const [smsSending, setSmsSending] = useState(false)
+  const [smsStatus,  setSmsStatus]  = useState<'idle' | 'sent' | 'no_phone' | 'error'>('idle')
+  const [smsError,   setSmsError]   = useState<string | null>(null)
+
   // ── Work order creation state ─────────────────────────────────────────────
   const [woCreating, setWoCreating] = useState(false)
   const [woError,    setWoError]    = useState<string | null>(null)
@@ -731,6 +736,29 @@ export default function EstimateEditor({
       setCopied(true)
       setTimeout(() => setCopied(false), 2500)
     })
+  }
+
+  // ── Send to Customer via SMS ───────────────────────────────────────────────
+  async function handleSendSms() {
+    setSmsSending(true)
+    setSmsStatus('idle')
+    setSmsError(null)
+
+    const { sendEstimateByText } = await import('./present/actions')
+    const result = await sendEstimateByText(estimate.id)
+
+    setSmsSending(false)
+
+    if (result.noPhone) {
+      setSmsStatus('no_phone')
+    } else if (result.error) {
+      setSmsStatus('error')
+      setSmsError(result.error)
+    } else {
+      // success (or notWired in dev)
+      setSmsStatus('sent')
+      setTimeout(() => setSmsStatus('idle'), 5000)
+    }
   }
 
   // ── Create Work Order ──────────────────────────────────────────────────────
@@ -1587,6 +1615,37 @@ export default function EstimateEditor({
         >
           {copied ? '✓ Copied!' : '📋 Copy Customer Link'}
         </button>
+
+        {/* Send to Customer via SMS */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>
+          <button
+            type="button"
+            onClick={handleSendSms}
+            disabled={smsSending || saving || presenting}
+            style={{
+              fontSize: 12, fontWeight: 700, padding: '8px 14px',
+              borderRadius: 'var(--r8,8px)',
+              border: '1px solid #7c3aed',
+              background: smsStatus === 'sent' ? '#ede9fe' : '#fff',
+              color: smsStatus === 'sent' ? '#6d28d9' : '#7c3aed',
+              cursor: smsSending ? 'default' : 'pointer',
+              flexShrink: 0, whiteSpace: 'nowrap',
+              opacity: (smsSending || saving || presenting) ? 0.6 : 1,
+              transition: 'all 0.15s',
+            }}
+          >
+            {smsSending ? 'Sending…' : smsStatus === 'sent' ? '✓ Sent!' : '💬 Send to Customer'}
+          </button>
+          {smsStatus === 'no_phone' && (
+            <span style={{ fontSize: 11, color: '#b91c1c' }}>No phone on file — add one in the customer profile.</span>
+          )}
+          {smsStatus === 'error' && (
+            <span style={{ fontSize: 11, color: '#b91c1c' }}>{smsError ?? 'SMS failed. Try again.'}</span>
+          )}
+          {smsStatus === 'sent' && (
+            <span style={{ fontSize: 11, color: '#6d28d9' }}>Link sent via SMS.</span>
+          )}
+        </div>
 
         {/* Preview — links to the advisor presentation view */}
         <a
