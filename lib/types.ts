@@ -854,7 +854,9 @@ export interface WorkOrderWithItems extends WorkOrder {
 
 // ── Invoices ───────────────────────────────────────────────────
 
-export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'void'
+export type InvoiceStatus  = 'draft' | 'sent' | 'paid' | 'void'
+export type PaymentStatus  = 'unpaid' | 'partially_paid' | 'paid'
+export type PaymentMethod  = 'card' | 'cash' | 'zelle' | 'check' | 'financing' | 'other'
 
 export interface Invoice {
   id:                 string
@@ -873,8 +875,32 @@ export interface Invoice {
   total:              number
   notes:              string | null // customer-facing notes
   internal_notes:     string | null // shop-internal only
+  // ── Payment tracking (added in migration 20240015) ─────────────────────────
+  payment_status:     PaymentStatus // 'unpaid' | 'partially_paid' | 'paid'
+  amount_paid:        number        // sum of all recorded payments
+  balance_due:        number        // total - amount_paid
   created_at:         string
   updated_at:         string
+}
+
+export type CardType = 'debit' | 'visa' | 'mastercard' | 'amex' | 'other'
+
+/** A single payment recorded against an invoice. */
+export interface InvoicePayment {
+  id:                   string
+  tenant_id:            string
+  invoice_id:           string
+  customer_id:          string | null
+  amount:               number
+  payment_method:       PaymentMethod
+  paid_at:              string       // ISO datetime
+  note:                 string | null
+  // ── Payment metadata (added in migration 20240016) ─────────────────────────
+  card_type:            CardType | null   // card only
+  last4_digits:         string | null     // card only
+  authorization_number: string | null     // card only
+  reference_number:     string | null     // zelle | check | financing | other
+  created_at:           string
 }
 
 export interface InvoiceItem {

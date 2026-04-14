@@ -5,18 +5,27 @@ import Link from 'next/link'
 import type { InvoiceListRow } from './page'
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Status badge styles
+// Badge styles
 // ─────────────────────────────────────────────────────────────────────────────
 
 const STATUS_STYLES: Record<string, { bg: string; color: string; label: string }> = {
   draft: { bg: '#e2e8f0', color: '#1e293b', label: 'Draft' },
-  sent: { bg: '#dbeafe', color: '#1e40af', label: 'Sent' },
-  paid: { bg: '#dcfce7', color: '#14532d', label: 'Paid' },
-  void: { bg: '#fee2e2', color: '#7f1d1d', label: 'Void' },
+  sent:  { bg: '#dbeafe', color: '#1e40af', label: 'Sent' },
+  paid:  { bg: '#dcfce7', color: '#14532d', label: 'Paid' },
+  void:  { bg: '#fee2e2', color: '#7f1d1d', label: 'Void' },
+}
+
+const PAYMENT_STATUS_STYLES: Record<string, { bg: string; color: string; label: string }> = {
+  unpaid:          { bg: '#fee2e2', color: '#991b1b', label: 'Unpaid' },
+  partially_paid:  { bg: '#fef3c7', color: '#92400e', label: 'Partial' },
+  paid:            { bg: '#dcfce7', color: '#14532d', label: '✓ Paid' },
 }
 
 function statusStyle(status: string) {
   return STATUS_STYLES[status] ?? { bg: '#f1f5f9', color: '#475569', label: status }
+}
+function paymentStatusStyle(ps: string) {
+  return PAYMENT_STATUS_STYLES[ps] ?? { bg: '#f1f5f9', color: '#475569', label: ps }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -146,6 +155,20 @@ export default function InvoicesList({ invoices }: Props) {
                   Total
                 </th>
                 <th style={{
+                  padding: '12px 16px', textAlign: 'right',
+                  fontSize: 12, fontWeight: 600, color: 'var(--text-3)',
+                  textTransform: 'uppercase', letterSpacing: '0.05em',
+                }}>
+                  Balance Due
+                </th>
+                <th style={{
+                  padding: '12px 16px', textAlign: 'center',
+                  fontSize: 12, fontWeight: 600, color: 'var(--text-3)',
+                  textTransform: 'uppercase', letterSpacing: '0.05em',
+                }}>
+                  Payment
+                </th>
+                <th style={{
                   padding: '12px 16px', textAlign: 'center',
                   fontSize: 12, fontWeight: 600, color: 'var(--text-3)',
                   textTransform: 'uppercase', letterSpacing: '0.05em',
@@ -163,7 +186,8 @@ export default function InvoicesList({ invoices }: Props) {
             </thead>
             <tbody>
               {filtered.map((invoice, idx) => {
-                const status = statusStyle(invoice.status)
+                const status  = statusStyle(invoice.status)
+                const payment = paymentStatusStyle(invoice.payment_status ?? 'unpaid')
                 const date = new Date(invoice.created_at).toLocaleDateString('en-US', {
                   month: 'short', day: 'numeric', year: 'numeric',
                 })
@@ -200,6 +224,25 @@ export default function InvoicesList({ invoices }: Props) {
                       textAlign: 'right',
                     }}>
                       ${(invoice.total ?? 0).toFixed(2)}
+                    </td>
+                    <td style={{
+                      padding: '12px 16px', textAlign: 'right',
+                      fontSize: 13, fontFamily: 'var(--font-mono)',
+                      color: (invoice.balance_due ?? 0) > 0 ? '#dc2626' : '#15803d',
+                      fontWeight: 600,
+                    }}>
+                      {(invoice.balance_due ?? 0) > 0
+                        ? `$${(invoice.balance_due).toFixed(2)}`
+                        : '—'}
+                    </td>
+                    <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                      <div style={{
+                        display: 'inline-block',
+                        background: payment.bg, color: payment.color,
+                        padding: '4px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600,
+                      }}>
+                        {payment.label}
+                      </div>
                     </td>
                     <td style={{
                       padding: '12px 16px', textAlign: 'center',

@@ -9,13 +9,16 @@ export const metadata = { title: 'Invoices' }
 
 // ── Resolved row shape passed to the client component ────────────────────────
 export type InvoiceListRow = {
-  id: string
+  id:             string
   invoice_number: string | null
-  status: string
-  total: number
-  created_at: string
-  customerName: string | null
-  vehicleLabel: string | null
+  status:         string
+  payment_status: string   // 'unpaid' | 'partially_paid' | 'paid'
+  total:          number
+  amount_paid:    number
+  balance_due:    number
+  created_at:     string
+  customerName:   string | null
+  vehicleLabel:   string | null
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -64,15 +67,36 @@ export default async function InvoicesPage() {
   )
 
   // ── Step 5: Resolve customer and vehicle names ────────────────────────────
-  const resolvedRows: InvoiceListRow[] = rawRows.map(row => ({
-    id: row.id,
-    invoice_number: row.invoice_number,
-    status: row.status,
-    total: row.total,
-    created_at: row.created_at,
-    customerName: row.customer_id ? customerMap.get(row.customer_id) ?? null : null,
-    vehicleLabel: row.vehicle_id ? vehicleMap.get(row.vehicle_id) ?? null : null,
-  }))
+  const resolvedRows: InvoiceListRow[] = rawRows.map(row => {
+    // Defensive normalisation: if the legacy status field says 'paid' but the
+    // payment tracking fields were never backfilled (failed migration), force
+    // consistency so the UI is never misleading.
+    const paymentStatus =
+      row.status === 'paid' && (row.payment_status ?? 'unpaid') === 'unpaid'
+        ? 'paid'
+        : (row.payment_status ?? 'unpaid')
+    const amountPaid =
+      row.status === 'paid' && Number(row.amount_paid ?? 0) === 0
+        ? row.total
+        : Number(row.amount_paid ?? 0)
+    const balanceDue =
+      row.status === 'paid' && Number(row.balance_due ?? row.total) === row.total
+        ? 0
+        : Number(row.balance_due ?? row.total)
+
+    return {
+      id:             row.id,
+      invoice_number: row.invoice_number,
+      status:         row.status,
+      payment_status: paymentStatus,
+      total:          row.total,
+      amount_paid:    amountPaid,
+      balance_due:    balanceDue,
+      created_at:     row.created_at,
+      customerName:   row.customer_id ? customerMap.get(row.customer_id) ?? null : null,
+      vehicleLabel:   row.vehicle_id ? vehicleMap.get(row.vehicle_id) ?? null : null,
+    }
+  })
 
   return (
     <>

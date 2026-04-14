@@ -1310,13 +1310,16 @@ export async function getInvoiceByWorkOrderId(
 export async function getInvoicesForTenant(
   tenantId: string,
 ): Promise<Array<{
-  id: string
+  id:             string
   invoice_number: string | null
-  status: string
-  total: number
-  created_at: string
-  customer_id: string | null
-  vehicle_id: string | null
+  status:         string
+  payment_status: string
+  amount_paid:    number
+  balance_due:    number
+  total:          number
+  created_at:     string
+  customer_id:    string | null
+  vehicle_id:     string | null
 }>> {
   if (!hasValue(tenantId)) return []
 
@@ -1324,7 +1327,7 @@ export async function getInvoicesForTenant(
 
   const { data, error } = await supabase
     .from('invoices')
-    .select('id, invoice_number, status, total, created_at, customer_id, vehicle_id')
+    .select('id, invoice_number, status, payment_status, amount_paid, balance_due, total, created_at, customer_id, vehicle_id')
     .eq('tenant_id', tenantId)
     .order('created_at', { ascending: false })
     .limit(200)
