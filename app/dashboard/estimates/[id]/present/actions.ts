@@ -91,63 +91,80 @@ export async function sendEstimateByText(
     ? `Hi ${firstName}, your vehicle inspection and repair estimate from ${shopName} is ready: ${publicUrl}. Review the findings and approve your repairs here.`
     : `Hi ${firstName}, here is your repair estimate from ${shopName}: ${publicUrl}. You can review and approve your recommended work here.`
 
-  // ── 6. Twilio — fire if configured, warn + skip if not ──────────────────────
+  // Normalize phone number — keep leading + and digits only.
+  const toNumber = customer.phone.replace(/[^\d+]/g, '')
+
+  // ── 6. Twilio attempt (if configured) — status decided BEFORE any return ─────
   const accountSid = process.env.TWILIO_ACCOUNT_SID
   const authToken  = process.env.TWILIO_AUTH_TOKEN
   const fromNumber = process.env.TWILIO_FROM_NUMBER
 
+  let deliveryStatus: 'pending' | 'sent' | 'failed' = 'pending'
+  let twilioUserMessage: string | null = null
+  let providerMessageId: string | null = null
+
   if (!accountSid || !authToken || !fromNumber) {
-    // Dev / staging: Twilio not wired yet — log the payload and return a special
-    // "not wired" flag so the UI can show a yellow informational toast instead
-    // of a hard error.
-    console.warn(
-      '[sendEstimateByText] Twilio env vars not set. ' +
-      'Would have sent SMS to',
-      customer.phone,
-      '→',
-      message,
+    deliveryStatus = 'pending'
+  } else {
+    const formBody = new URLSearchParams({
+      To:   toNumber,
+      From: fromNumber,
+      Body: message,
+    })
+
+    const twilioRes = await fetch(
+      `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
+      {
+        method:  'POST',
+        headers: {
+          Authorization:  'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64'),
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: formBody.toString(),
+      },
     )
+
+    if (!twilioRes.ok) {
+      const json = await twilioRes.json().catch(() => ({})) as { message?: string }
+      deliveryStatus = 'failed'
+      twilioUserMessage = json.message ?? 'SMS delivery failed. Please try again.'
+      console.error('[sendEstimateByText] Twilio error:', json)
+    } else {
+      deliveryStatus = 'sent'
+      const okJson = await twilioRes.json().catch(() => ({})) as { sid?: string }
+      providerMessageId = okJson.sid ?? null
+    }
+  }
+
+  // ── 7. message_logs — production columns (message_body, to_phone, delivery_status)
+  const { error: logErr } = await supabase.from('message_logs').insert({
+    tenant_id:           estimate.tenant_id,
+    customer_id:         estimate.customer_id ?? null,
+    channel:             'sms',
+    message_body:        message,
+    to_phone:            toNumber,
+    from_phone:          fromNumber?.trim() ? fromNumber : null,
+    delivery_status:     deliveryStatus,
+    direction:           'outbound',
+    provider_message_id: providerMessageId,
+    template_id:         null,
+    appointment_id:      null,
+    sent_by_user_id:     null,
+  })
+  if (logErr) {
+    console.error('[sendEstimateByText] message_logs insert FAILED:', logErr.message, logErr)
+    console.log('[sendEstimateByText] message_logs NOT persisted; delivery_status would have been:', deliveryStatus)
+  } else {
+    console.log('[sendEstimateByText] message_logs insert OK, delivery_status:', deliveryStatus)
+  }
+
+  // ── 8. Return — only after insert attempt ───────────────────────────────────
+  if (!accountSid || !authToken || !fromNumber) {
     return { success: true, notWired: true }
   }
-
-  // Normalize phone number — keep leading + and digits only
-  const toNumber = customer.phone.replace(/[^\d+]/g, '')
-  const formBody = new URLSearchParams({
-    To:   toNumber,
-    From: fromNumber,
-    Body: message,
-  })
-
-  const twilioRes = await fetch(
-    `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
-    {
-      method:  'POST',
-      headers: {
-        Authorization:  'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64'),
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: formBody.toString(),
-    },
-  )
-
-  if (!twilioRes.ok) {
-    const json = await twilioRes.json().catch(() => ({})) as { message?: string }
-    console.error('[sendEstimateByText] Twilio error:', json)
-    return { error: json.message ?? 'SMS delivery failed. Please try again.' }
+  if (twilioUserMessage) {
+    return { error: twilioUserMessage }
   }
-
-  // ── 7. Log to message_logs for delivery history + future resend ─────────────
-  await supabase.from('message_logs').insert({
-    tenant_id:   estimate.tenant_id,
-    customer_id: estimate.customer_id ?? null,
-    channel:     'sms',
-    to_address:  toNumber,
-    subject:     null,
-    body:        message,
-    status:      'sent',
-    sent_at:     new Date().toISOString(),
-  })
-
   return { success: true }
 }
 

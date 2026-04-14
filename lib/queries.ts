@@ -516,7 +516,10 @@ export async function getTemplateItems(
 export async function getMessageLogs(tenantId: string): Promise<MessageLog[]> {
   if (!hasValue(tenantId)) return []
 
-  const supabase = await createClient()
+  // Use admin client to bypass RLS — message_logs has no guaranteed SELECT
+  // policy that works with the session client. The page already validates
+  // that the caller belongs to this tenant via getDashboardTenant().
+  const supabase = createAdminClient()
 
   const { data, error } = await supabase
     .from('message_logs')
@@ -526,10 +529,11 @@ export async function getMessageLogs(tenantId: string): Promise<MessageLog[]> {
     .limit(200)
 
   if (error) {
-    console.error('[getMessageLogs]', error.message)
+    console.error('[getMessageLogs] query error:', error.message, error)
     return []
   }
 
+  console.log('[getMessageLogs] rows fetched:', data?.length ?? 0, 'for tenant', tenantId)
   return (data ?? []) as MessageLog[]
 }
 

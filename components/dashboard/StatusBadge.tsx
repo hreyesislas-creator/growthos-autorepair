@@ -8,6 +8,15 @@ const MAP: Record<string, BadgeVariant> = {
   completed:   'green',
   cancelled:   'gray',
   no_show:     'red',
+  // Work order
+  ready:       'blue',
+  invoiced:    'gray',
+  // Estimate
+  presented:   'yellow',
+  reopened:    'yellow',
+  authorized:  'blue',
+  approved:    'green',
+  declined:    'red',
   // Billing
   active:      'green',
   past_due:    'red',

@@ -420,18 +420,24 @@ export interface MessageTemplate {
   created_at: string
 }
 
+/** Matches production `message_logs` table (not legacy body/to_address/status). */
+export type MessageDeliveryStatus = 'pending' | 'sent' | 'delivered' | 'failed'
+
 export interface MessageLog {
-  id: string
-  tenant_id: string
-  customer_id: string | null
-  channel: 'sms' | 'email'
-  to_address: string
-  subject: string | null
-  body: string
-  status: 'pending' | 'sent' | 'delivered' | 'failed'
-  template_id: string | null
-  sent_at: string | null
-  created_at: string
+  id:                   string
+  tenant_id:            string
+  customer_id:          string | null
+  channel:              'sms' | 'email' | string
+  message_body:         string
+  to_phone:             string
+  from_phone:           string | null
+  delivery_status:      MessageDeliveryStatus | string
+  created_at:           string
+  provider_message_id:  string | null
+  direction:            string | null
+  sent_by_user_id:      string | null
+  appointment_id:       string | null
+  template_id:          string | null
 }
 
 export interface AutomationEvent {
