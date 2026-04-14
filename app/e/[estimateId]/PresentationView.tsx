@@ -507,8 +507,9 @@ export default function PresentationView({
           Recommended Repairs
         </div>
         <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.6, margin: 0 }}>
-          This repair estimate is based on the completed vehicle inspection. Review the
-          recommendations below and approve the repairs you would like us to complete.
+          {estimate.inspection_id
+            ? 'This repair estimate is based on the completed vehicle inspection. Review the recommendations below and approve the repairs you would like us to complete.'
+            : 'Please review the recommended repairs below and approve the items you would like us to complete.'}
         </p>
 
         {/* STEP 3: Decision summary grid ─────────────────────────────────── */}

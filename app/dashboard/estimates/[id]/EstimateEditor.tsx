@@ -716,9 +716,18 @@ export default function EstimateEditor({
     router.refresh()
   }
 
+  // Customer-facing URL: inspection page when linked, estimate page otherwise.
+  // This is the single source of truth used by every "customer link" CTA.
+  function customerUrl() {
+    const base = typeof window !== 'undefined' ? window.location.origin : ''
+    const path = estimate.inspection_id
+      ? `/i/${estimate.inspection_id}`
+      : `/e/${estimate.id}`
+    return `${base}${path}`
+  }
+
   function copyShareLink() {
-    const url = `${window.location.origin}/e/${estimate.id}`
-    navigator.clipboard.writeText(url).then(() => {
+    navigator.clipboard.writeText(customerUrl()).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2500)
     })
@@ -884,8 +893,7 @@ export default function EstimateEditor({
                 <button
                   type="button"
                   onClick={() => {
-                    const approvalUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/e/${estimate.id}`
-                    window.open(approvalUrl, '_blank')
+                    window.open(customerUrl(), '_blank')
                   }}
                   style={{
                     fontSize: 13, fontWeight: 700, padding: '10px 16px',
@@ -900,13 +908,12 @@ export default function EstimateEditor({
                     (e.currentTarget as HTMLButtonElement).style.background = '#f59e0b'
                   }}
                 >
-                  ↗ Open Customer Approval Page
+                  ↗ Present to Customer
                 </button>
                 <button
                   type="button"
                   onClick={() => {
-                    const approvalUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/e/${estimate.id}`
-                    navigator.clipboard.writeText(approvalUrl)
+                    navigator.clipboard.writeText(customerUrl())
                     alert('Approval link copied to clipboard')
                   }}
                   style={{
@@ -922,7 +929,7 @@ export default function EstimateEditor({
                     (e.currentTarget as HTMLButtonElement).style.background = '#fff'
                   }}
                 >
-                  📋 Copy Approval Link
+                  Copy Customer Link
                 </button>
               </div>
             </div>
@@ -1323,25 +1330,11 @@ export default function EstimateEditor({
               fontSize: 11, color: '#166534', fontFamily: 'var(--font-mono)',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             }}>
-              {`/e/${estimate.id}`}
+              {estimate.inspection_id ? `/i/${estimate.inspection_id}` : `/e/${estimate.id}`}
             </div>
           </div>
-          <button
-            type="button"
-            onClick={copyShareLink}
-            style={{
-              fontSize: 11, fontWeight: 700, padding: '4px 10px',
-              borderRadius: 6, border: '1px solid #86efac',
-              background: copied ? '#dcfce7' : '#fff',
-              color: copied ? '#15803d' : '#16a34a',
-              cursor: 'pointer', flexShrink: 0,
-              transition: 'all 0.15s',
-            }}
-          >
-            {copied ? '✓ Copied!' : 'Copy Link'}
-          </button>
           <a
-            href={`/e/${estimate.id}`}
+            href={estimate.inspection_id ? `/i/${estimate.inspection_id}` : `/e/${estimate.id}`}
             target="_blank"
             rel="noopener noreferrer"
             style={{
@@ -1452,7 +1445,7 @@ export default function EstimateEditor({
               boxShadow: '0 2px 8px rgba(22,163,74,0.3)',
             }}
           >
-            {presenting ? 'Presenting…' : '📋 Send to Customer for Approval'}
+            {presenting ? 'Presenting…' : 'Present to Customer'}
           </button>
         )}
 
@@ -1577,6 +1570,23 @@ export default function EstimateEditor({
             🔧 View Work Order ↗
           </a>
         )}
+
+        <button
+          type="button"
+          onClick={copyShareLink}
+          style={{
+            fontSize: 12, fontWeight: 700, padding: '8px 14px',
+            borderRadius: 'var(--r8,8px)',
+            border: '1px solid #cbd5e1',
+            background: '#fff',
+            color: '#1e293b',
+            cursor: 'pointer',
+            flexShrink: 0,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {copied ? '✓ Copied!' : '📋 Copy Customer Link'}
+        </button>
 
         {/* Preview — links to the advisor presentation view */}
         <a

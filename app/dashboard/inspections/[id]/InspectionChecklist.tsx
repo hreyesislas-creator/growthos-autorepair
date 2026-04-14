@@ -1211,23 +1211,6 @@ export default function InspectionChecklist({
             <a href="/dashboard/inspections" className="btn-ghost" style={{ fontSize: 12 }}>
               ← Back
             </a>
-            <button
-              type="button"
-              className="btn-ghost"
-              style={{ fontSize: 12 }}
-              onClick={handleCopyLink}
-            >
-              {linkCopied ? '✓ Copied!' : '🔗 Copy Report Link'}
-            </button>
-            <a
-              href={`/i/${inspection.id}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn-ghost"
-              style={{ fontSize: 12 }}
-            >
-              Open Report ↗
-            </a>
             {/* Archive — always available, destructive */}
             <button
               type="button"
@@ -1296,23 +1279,6 @@ export default function InspectionChecklist({
 
             <a href="/dashboard/inspections" className="btn-ghost" style={{ fontSize: 12 }}>
               Cancel
-            </a>
-            <button
-              type="button"
-              className="btn-ghost"
-              style={{ fontSize: 12 }}
-              onClick={handleCopyLink}
-            >
-              {linkCopied ? '✓ Copied!' : '🔗 Copy Report Link'}
-            </button>
-            <a
-              href={`/i/${inspection.id}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn-ghost"
-              style={{ fontSize: 12 }}
-            >
-              Open Report ↗
             </a>
             {/* Archive — always available, destructive */}
             <button

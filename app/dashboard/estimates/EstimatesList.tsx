@@ -72,11 +72,19 @@ export default function EstimatesList({ estimates }: Props) {
   return (
     <div className="dash-content">
 
-      {/* ── Toolbar: search + status filter ─────────────────────────────── */}
+      {/* ── Toolbar: search + status filter + new estimate ───────────────── */}
       <div style={{
         display: 'flex', gap: 10, alignItems: 'center',
         marginBottom: 16, flexWrap: 'wrap',
       }}>
+        {/* New Estimate */}
+        <Link
+          href="/dashboard/estimates/new"
+          className="btn-primary"
+          style={{ fontSize: 13, padding: '8px 14px', flexShrink: 0, textDecoration: 'none' }}
+        >
+          + New Estimate
+        </Link>
         {/* Search */}
         <div style={{ position: 'relative', flex: '1 1 260px', maxWidth: 400 }}>
           <span style={{
@@ -125,7 +133,7 @@ export default function EstimatesList({ estimates }: Props) {
             <div className="empty-state-icon">📋</div>
             <div className="empty-state-title">No estimates yet</div>
             <div className="empty-state-body">
-              Open an inspection and click <strong>Create Estimate</strong> to get started.
+              Click <strong>+ New Estimate</strong> above to create a manual estimate, or open an inspection and click <strong>Create Estimate</strong> to generate one from a DVI.
             </div>
           </div>
 

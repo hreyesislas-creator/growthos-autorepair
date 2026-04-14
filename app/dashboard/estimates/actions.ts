@@ -557,6 +557,7 @@ export async function saveEstimateItems(
   // with "invalid input syntax for type uuid". Use bare UUIDs: (uuid1,uuid2).
   const keepIds = toUpdate.map(i => i.id as string)
   if (keepIds.length > 0) {
+    // Delete any rows no longer in the payload (items were removed by the user).
     const { error: deleteErr } = await supabase
       .from('estimate_items')
       .delete()
@@ -568,13 +569,20 @@ export async function saveEstimateItems(
       console.error('[saveEstimateItems] delete:', deleteErr.message)
       return { error: deleteErr.message }
     }
-  } else if (items.length === 0) {
-    // All items removed — delete everything
-    await supabase
+  } else {
+    // keepIds is empty — either all items were removed, or all incoming items are
+    // brand-new (no IDs).  In both cases we must delete ALL existing rows first so
+    // that a subsequent INSERT never creates duplicates on top of stale DB rows.
+    const { error: deleteErr } = await supabase
       .from('estimate_items')
       .delete()
       .eq('tenant_id', tenantId)
       .eq('estimate_id', estimateId)
+
+    if (deleteErr) {
+      console.error('[saveEstimateItems] delete-all:', deleteErr.message)
+      return { error: deleteErr.message }
+    }
   }
 
   // INSERT new items
