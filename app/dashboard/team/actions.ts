@@ -244,13 +244,13 @@ export async function inviteUser(
     // Omit full_name and language_pref if those columns are absent from tenant_users (schema cache).
     // Language is stored on the invited Auth user as preferred_language in data above.
     const { error: insertError } = await supabase.from('tenant_users').insert({
-      tenant_id: ctx.tenant.id,
-      user_id: invitedUserId,
-      email,
-      role,
-      is_active: false, // becomes true once they accept and we receive the event
-      phone: null,
-    })
+  tenant_id: ctx.tenant.id,
+  auth_user_id: invitedUserId,
+  email,
+  role,
+  is_active: false, // becomes true once they accept and we receive the event
+  phone: null,
+})
 
     console.log(
       TEAM_INVITE_LOG_PREFIX,
