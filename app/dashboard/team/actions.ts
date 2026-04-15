@@ -204,6 +204,82 @@ export async function inviteUser(
           error: 'Invite email rate limit reached. Please wait a few minutes and try again.',
         }
       }
+      if (msgLower.includes('already been registered')) {
+        let existingAuthUser: { id: string; email?: string | undefined } | undefined
+        let page = 1
+        const perPage = 1000
+        for (;;) {
+          const { data: listData, error: listErr } = await adminClient.auth.admin.listUsers({ page, perPage })
+          if (listErr) {
+            console.log(
+              TEAM_INVITE_LOG_PREFIX,
+              'early_exit',
+              JSON.stringify({
+                reason: 'supabase_auth_admin_listUsers_failed',
+                inviteEmail: email,
+                error: serializeErrorForLog(listErr),
+              }),
+            )
+            return { error: err.message }
+          }
+          const users = listData?.users ?? []
+          existingAuthUser = users.find(u => (u.email ?? '').toLowerCase() === email)
+          if (existingAuthUser) break
+          if (users.length < perPage) break
+          page += 1
+        }
+        if (!existingAuthUser) {
+          console.log(
+            TEAM_INVITE_LOG_PREFIX,
+            'early_exit',
+            JSON.stringify({
+              reason: 'already_registered_auth_user_not_found',
+              inviteEmail: email,
+            }),
+          )
+          return { error: err.message }
+        }
+        const { data: existingMembership } = await supabase
+          .from('tenant_users')
+          .select('id')
+          .eq('tenant_id', ctx.tenant.id)
+          .eq('auth_user_id', existingAuthUser.id)
+          .maybeSingle()
+
+        if (existingMembership) {
+          return { error: 'User is already part of this team.' }
+        }
+        const { error: insertExistingError } = await supabase.from('tenant_users').insert({
+          tenant_id: ctx.tenant.id,
+          auth_user_id: existingAuthUser.id,
+          email,
+          role,
+          is_active: true,
+        })
+        if (insertExistingError) {
+          console.log(
+            TEAM_INVITE_LOG_PREFIX,
+            'early_exit',
+            JSON.stringify({
+              reason: 'tenant_users_insert_failed',
+              inviteEmail: email,
+              invitedUserId: existingAuthUser.id,
+              error: serializeErrorForLog(insertExistingError),
+            }),
+          )
+          return { error: insertExistingError.message }
+        }
+        console.log(
+          TEAM_INVITE_LOG_PREFIX,
+          'success',
+          JSON.stringify({
+            step: 'invite_complete',
+            inviteEmail: email,
+            invitedUserId: existingAuthUser.id,
+          }),
+        )
+        return null
+      }
       console.log(
         TEAM_INVITE_LOG_PREFIX,
         'early_exit',
