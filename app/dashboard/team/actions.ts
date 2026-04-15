@@ -60,12 +60,13 @@ export async function inviteUser(
   const invitedUserId = inviteData?.user?.id
   if (!invitedUserId) return { error: 'Invite sent but could not retrieve user ID' }
 
-  // Create the tenant_users record so the user has the correct role on login
+  // Create the tenant_users record so the user has the correct role on login.
+  // Omit full_name: tenant_users in production may not have that column (schema cache error).
+  // Name stays on the invited auth user via invite metadata (data.full_name above).
   const { error: insertError } = await supabase.from('tenant_users').insert({
     tenant_id:     ctx.tenant.id,
     user_id:       invitedUserId,
     email,
-    full_name:     fullName ?? '',
     role,
     language_pref: langPref === 'es' ? 'es' : 'en',
     is_active:     false, // becomes true once they accept and we receive the event

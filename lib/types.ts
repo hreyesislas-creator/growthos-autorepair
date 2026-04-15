@@ -26,7 +26,8 @@ export interface TenantUser {
   /** Alias for the actual DB column name used in queries */
   auth_user_id?: string
   role: 'owner' | 'manager' | 'staff' | 'admin' | 'advisor' | 'technician' | 'viewer'
-  full_name: string
+  /** Present only if the DB column exists / is populated */
+  full_name?: string | null
   email: string
   phone: string | null
   language_pref: 'en' | 'es'
