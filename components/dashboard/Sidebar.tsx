@@ -6,6 +6,8 @@ import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
 import type { Lang } from '@/lib/i18n'
 import { t } from '@/lib/i18n'
+import type { DashboardRole } from '@/lib/dashboard-permissions'
+import { canViewManageNavHref, canViewOperationsNavHref } from '@/lib/dashboard-permissions'
 
 const NAV = [
   { href: '/dashboard',               icon: '▦',  key: 'nav_overview'       },
@@ -34,9 +36,10 @@ interface SidebarProps {
   tenantName: string
   tenantPlan: string
   initialLang: Lang
+  dashboardRole: DashboardRole
 }
 
-export default function Sidebar({ tenantName, tenantPlan, initialLang }: SidebarProps) {
+export default function Sidebar({ tenantName, tenantPlan, initialLang, dashboardRole }: SidebarProps) {
   const pathname = usePathname()
   const router   = useRouter()
   const [lang, setLang] = useState<Lang>(initialLang)
@@ -59,6 +62,9 @@ export default function Sidebar({ tenantName, tenantPlan, initialLang }: Sidebar
     }
   }
 
+  const operationsNav = NAV.filter(({ href }) => canViewOperationsNavHref(dashboardRole, href))
+  const manageNav = NAV2.filter(({ href }) => canViewManageNavHref(dashboardRole, href))
+
   return (
     <aside className="dash-sidebar">
       {/* Logo */}
@@ -76,7 +82,7 @@ export default function Sidebar({ tenantName, tenantPlan, initialLang }: Sidebar
       {/* Primary nav */}
       <nav className="sidebar-nav" aria-label="Dashboard navigation">
         <div className="sidebar-section-label">Operations</div>
-        {NAV.map(({ href, icon, key }) => (
+        {operationsNav.map(({ href, icon, key }) => (
           <Link
             key={href}
             href={href}
@@ -87,17 +93,21 @@ export default function Sidebar({ tenantName, tenantPlan, initialLang }: Sidebar
           </Link>
         ))}
 
-        <div className="sidebar-section-label" style={{ marginTop: '8px' }}>Manage</div>
-        {NAV2.map(({ href, icon, key }) => (
-          <Link
-            key={href}
-            href={href}
-            className={`sidebar-link${isActive(href) ? ' active' : ''}`}
-          >
-            <span style={{ fontSize: '15px', lineHeight: 1 }}>{icon}</span>
-            {t(lang, key as NavKey)}
-          </Link>
-        ))}
+        {manageNav.length > 0 && (
+          <>
+            <div className="sidebar-section-label" style={{ marginTop: '8px' }}>Manage</div>
+            {manageNav.map(({ href, icon, key }) => (
+              <Link
+                key={href}
+                href={href}
+                className={`sidebar-link${isActive(href) ? ' active' : ''}`}
+              >
+                <span style={{ fontSize: '15px', lineHeight: 1 }}>{icon}</span>
+                {t(lang, key as NavKey)}
+              </Link>
+            ))}
+          </>
+        )}
       </nav>
 
       {/* Bottom: lang switcher + sign out */}

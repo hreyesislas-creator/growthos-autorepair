@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { getDashboardTenant } from '@/lib/tenant'
+import { getCurrentUserRoleForTenant } from '@/lib/dashboard-role'
 import Sidebar from '@/components/dashboard/Sidebar'
 import './dashboard.css'
 
@@ -44,6 +45,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     .single()
 
   const lang: 'en' | 'es' = (tuData?.preferred_language as 'en' | 'es') ?? 'en'
+  const dashboardRole = await getCurrentUserRoleForTenant()
 
   console.log('[dashboard layout] rendering — tenant:', tenantName, '| lang:', lang)
 
@@ -56,6 +58,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         tenantName={tenantName}
         tenantPlan={tenantPlan}
         initialLang={lang}
+        dashboardRole={dashboardRole}
       />
       <main className="dash-main">
         {children}
