@@ -259,48 +259,57 @@ export default async function DashboardPage() {
       <Topbar title="Dashboard" subtitle={today} />
       <div className="dash-content">
 
-        {/* ── Shop pulse: five operational KPIs ───────────────────────────── */}
-        <div style={{ marginBottom: 28 }}>
-          <div style={sectionLabel}>Shop today</div>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(158px, 1fr))',
-              gap: 12,
-            }}
-          >
-            {commandMetrics.map(k => (
-              <Link key={k.label} href={k.href} style={{ textDecoration: 'none', color: 'inherit' }}>
-                <div style={kpiTileStyles(k.accent)}>
-                  <div
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 700,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.06em',
-                      color: 'var(--text-3)',
-                    }}
-                  >
-                    {k.label}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: k.accent === 'revenue' ? 26 : 22,
-                      fontWeight: 800,
-                      lineHeight: 1.1,
-                      color: 'var(--text)',
-                      fontFamily: k.monoValue ? 'var(--font-mono)' : 'inherit',
-                      marginTop: 8,
-                    }}
-                  >
-                    {k.value}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 6, lineHeight: 1.35 }}>
-                    {k.hint}
-                  </div>
-                </div>
-              </Link>
-            ))}
+        {/* ── Shop pulse: KPIs + Quick Actions (one operational row) ─────── */}
+        <div className="shop-today-section">
+          <div style={{ ...sectionLabel, marginBottom: 8 }}>Shop today</div>
+          <div className="shop-today-row">
+            <div className="shop-today-kpis">
+              <div className="shop-today-kpi-grid">
+                {commandMetrics.map(k => (
+                  <Link key={k.label} href={k.href} style={{ textDecoration: 'none', color: 'inherit' }}>
+                    <div style={kpiTileStyles(k.accent)}>
+                      <div
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.06em',
+                          color: 'var(--text-3)',
+                        }}
+                      >
+                        {k.label}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: k.accent === 'revenue' ? 26 : 22,
+                          fontWeight: 800,
+                          lineHeight: 1.1,
+                          color: 'var(--text)',
+                          fontFamily: k.monoValue ? 'var(--font-mono)' : 'inherit',
+                          marginTop: 8,
+                        }}
+                      >
+                        {k.value}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 6, lineHeight: 1.35 }}>
+                        {k.hint}
+                      </div>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </div>
+            <div className="card shop-today-quick">
+              <div style={{ ...sectionLabel, marginBottom: 8 }}>Quick actions</div>
+              <div className="quick-actions quick-actions--shop-today">
+                {quickActions.map(a => (
+                  <Link key={a.label} href={a.href} className="quick-action-btn">
+                    <div className="quick-action-icon">{a.icon}</div>
+                    {a.label}
+                  </Link>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -631,18 +640,6 @@ export default async function DashboardPage() {
               </div>
             </Link>
           )}
-        </div>
-
-        <div className="card">
-          <div style={{ ...sectionLabel, marginBottom: 14 }}>Quick actions</div>
-          <div className="quick-actions">
-            {quickActions.map(a => (
-              <Link key={a.label} href={a.href} className="quick-action-btn">
-                <div className="quick-action-icon">{a.icon}</div>
-                {a.label}
-              </Link>
-            ))}
-          </div>
         </div>
 
       </div>

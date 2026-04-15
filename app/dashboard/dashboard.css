@@ -84,6 +84,60 @@ body { font-family: var(--font-body); background: var(--bg); color: var(--text);
 .topbar-sub { font-size: 13px; color: var(--text-3); }
 .topbar-right { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 
+/* Dashboard: KPI row + Quick Actions in one operational band */
+.shop-today-section { margin-bottom: 12px; }
+.shop-today-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+/* KPI cluster: no width:100% on desktop — that was stretching the flex item and leaving a dead zone before Quick Actions */
+.shop-today-kpis {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+.shop-today-kpi-grid {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
+}
+.shop-today-quick.card {
+  flex: 1 1 100%;
+  padding: 12px 12px 10px;
+  border-radius: var(--r8);
+}
+/* Shop today Quick Actions: 2 cols stacked (mobile); mid-desktop 3×2; wide desktop 1×6 in later MQ */
+/* Mobile / tablet */
+.shop-today-quick .quick-actions--shop-today {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+/* Desktop */
+@media (min-width: 1100px) {
+  .shop-today-quick .quick-actions--shop-today {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .shop-today-quick .quick-action-btn {
+    padding: 8px 6px;
+    font-size: 10.5px;
+    line-height: 1.2;
+  }
+
+  .shop-today-quick .quick-action-icon {
+    width: 24px;
+    height: 24px;
+    font-size: 13px;
+  }
+}
+
 .dash-content { padding: 24px; flex: 1; }
 
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r10); padding: 20px; }
@@ -180,7 +234,89 @@ body { font-family: var(--font-body); background: var(--bg); color: var(--text);
 
 .avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--blue-soft); border: 1px solid var(--blue-border); display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; color: var(--blue-light); flex-shrink: 0; }
 
+@media (min-width: 901px) {
+  /* KPI cluster only uses remaining width next to Quick Actions (fixed-ish width) — no flex-grow gap */
+  .shop-today-kpis {
+    flex: 0 1 auto;
+    width: auto;
+    min-width: 0;
+    max-width: calc(100% - min(384px, 40vw) - 10px);
+    overflow-x: auto;
+  }
+  .shop-today-kpi-grid {
+    width: max-content;
+    max-width: 100%;
+    grid-template-columns: repeat(5, minmax(158px, max-content));
+  }
+  .shop-today-row {
+    flex-wrap: nowrap;
+    gap: 10px;
+  }
+  .shop-today-quick.card {
+    flex: 0 0 min(384px, 40vw);
+    width: min(384px, 40vw);
+    max-width: min(384px, 40vw);
+    align-self: flex-start;
+  }
+  .shop-today-quick .quick-actions--shop-today {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+}
+
+/* Wide desktop: one horizontal band of 6 — QA grows into remaining row width (no dead zone) */
+@media (min-width: 1200px) {
+  .shop-today-kpis {
+    max-width: none;
+    overflow-x: visible;
+  }
+  .shop-today-quick.card {
+    flex: 1 1 300px;
+    min-width: 0;
+    width: auto;
+    max-width: none;
+  }
+  .shop-today-quick .quick-actions--shop-today {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .shop-today-quick .quick-action-btn {
+    min-width: 0;
+    padding: 6px 4px;
+    gap: 4px;
+    font-size: 10px;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+    hyphens: auto;
+  }
+  .shop-today-quick .quick-action-icon {
+    width: 22px;
+    height: 22px;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+}
+
 @media (max-width: 900px) {
+  .shop-today-kpis {
+    width: 100%;
+  }
+  .shop-today-kpi-grid {
+    grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
+  }
+  .shop-today-row {
+    gap: 14px;
+  }
+  .shop-today-quick .quick-action-btn {
+    min-height: 44px;
+    padding: 10px 8px;
+    font-size: 12px;
+  }
+  .shop-today-quick .quick-action-icon {
+    width: 30px;
+    height: 30px;
+    font-size: 15px;
+  }
   .dash-sidebar { transform: translateX(-100%); transition: transform .25s; }
   .dash-sidebar.open { transform: translateX(0); }
   .dash-main { margin-left: 0; }
