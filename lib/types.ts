@@ -30,7 +30,8 @@ export interface TenantUser {
   full_name?: string | null
   email: string
   phone: string | null
-  language_pref: 'en' | 'es'
+  /** Present only if the DB column exists / is populated */
+  language_pref?: 'en' | 'es' | null
   is_active: boolean
   created_at: string
 }
