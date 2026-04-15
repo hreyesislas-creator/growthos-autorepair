@@ -22,6 +22,7 @@ const NAV = [
 const NAV2 = [
   { href: '/dashboard/website',       icon: '🌐', key: 'nav_website'   },
   { href: '/dashboard/reviews',       icon: '⭐', key: 'nav_reviews'   },
+  { href: '/dashboard/financials',   icon: '\u{1F4CA}', key: 'nav_financials' },
   { href: '/dashboard/billing',       icon: '💳', key: 'nav_billing'   },
   { href: '/dashboard/team',          icon: '🔑', key: 'nav_team'      },
   { href: '/dashboard/settings',      icon: '⚙️', key: 'nav_settings'  },

@@ -188,12 +188,11 @@ export default async function DashboardPage() {
     monoValue?: boolean
   }[] = [
     {
-      label: 'Today revenue',
-      value: fmtMoney(financial.revenueToday),
-      hint: 'Collected today',
-      href: '/dashboard/invoices',
-      accent: 'revenue',
-      monoValue: true,
+      label: 'Pending inspections',
+      value: pendingInsp,
+      hint: 'Awaiting review',
+      href: '/dashboard/inspections',
+      accent: 'yellow',
     },
     {
       label: 'Cars in service',
