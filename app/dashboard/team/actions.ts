@@ -249,12 +249,25 @@ export async function inviteUser(
         if (existingMembership) {
           return { error: 'User is already part of this team.' }
         }
+        const fullNameTrimmed = (fullName ?? '').trim()
+        let existingFirstName: string
+        let existingLastName: string
+        if (fullNameTrimmed.length > 0) {
+          const parts = fullNameTrimmed.split(/\s+/)
+          existingFirstName = parts[0] ?? ''
+          existingLastName = parts.slice(1).join(' ') || '-'
+        } else {
+          existingFirstName = email.split('@')[0] || email
+          existingLastName = '-'
+        }
         const { error: insertExistingError } = await supabase.from('tenant_users').insert({
           tenant_id: ctx.tenant.id,
           auth_user_id: existingAuthUser.id,
           email,
           role,
           is_active: true,
+          first_name: existingFirstName,
+          last_name: existingLastName,
         })
         if (insertExistingError) {
           console.log(
