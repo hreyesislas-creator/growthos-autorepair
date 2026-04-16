@@ -260,11 +260,12 @@ export async function inviteUser(
           existingFirstName = email.split('@')[0] || email
           existingLastName = '-'
         }
+        const tenantUsersDbRole = role === 'technician' || role === 'viewer' ? 'staff' : 'manager'
         const { error: insertExistingError } = await supabase.from('tenant_users').insert({
           tenant_id: ctx.tenant.id,
           auth_user_id: existingAuthUser.id,
           email,
-          role,
+          role: tenantUsersDbRole,
           is_active: true,
           first_name: existingFirstName,
           last_name: existingLastName,
