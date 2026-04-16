@@ -1,5 +1,14 @@
 'use server'
 
+import {
+  getCurrentDashboardTenantUser,
+  denyUnlessMayMutateWorkOrder,
+  canAssignOperationalTechnician,
+} from '@/lib/auth/operational-assignment'
+import {
+  denyUnlessCanEditAllDashboardModules,
+  denyUnlessCanEditDashboardModule,
+} from '@/lib/auth/roles'
 import { getDashboardTenant } from '@/lib/tenant'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import type { WorkOrderStatus } from '@/lib/types'
@@ -34,7 +43,13 @@ export async function updateWorkOrderStatus(
   const ctx = await getDashboardTenant()
   if (!ctx) throw new Error('Not authenticated')
 
+  const statusDenied = await denyUnlessCanEditDashboardModule('work_orders')
+  if (statusDenied) throw new Error(statusDenied.error)
+
   const tenantId    = ctx.tenant.id
+  const woAssignDenied = await denyUnlessMayMutateWorkOrder(workOrderId, tenantId)
+  if (woAssignDenied) throw new Error(woAssignDenied.error)
+
   const adminClient = await createAdminClient()
 
   const { error } = await adminClient
@@ -66,7 +81,13 @@ export async function startWorkOrder(
   const ctx = await getDashboardTenant()
   if (!ctx) throw new Error('Not authenticated')
 
+  const startDenied = await denyUnlessCanEditDashboardModule('work_orders')
+  if (startDenied) throw new Error(startDenied.error)
+
   const tenantId    = ctx.tenant.id
+  const startAssignDenied = await denyUnlessMayMutateWorkOrder(workOrderId, tenantId)
+  if (startAssignDenied) throw new Error(startAssignDenied.error)
+
   const adminClient = await createAdminClient()
   const now         = new Date().toISOString()
 
@@ -124,7 +145,13 @@ export async function completeWorkOrder(
   const ctx = await getDashboardTenant()
   if (!ctx) throw new Error('Not authenticated')
 
+  const completeDenied = await denyUnlessCanEditDashboardModule('work_orders')
+  if (completeDenied) throw new Error(completeDenied.error)
+
   const tenantId    = ctx.tenant.id
+  const completeAssignDenied = await denyUnlessMayMutateWorkOrder(workOrderId, tenantId)
+  if (completeAssignDenied) throw new Error(completeAssignDenied.error)
+
   const adminClient = await createAdminClient()
 
   // ── Step 1: Fetch started_at from DB ────────────────────────────────────
@@ -210,7 +237,13 @@ export async function reopenWorkOrder(
   const ctx = await getDashboardTenant()
   if (!ctx) throw new Error('Not authenticated')
 
+  const reopenWoDenied = await denyUnlessCanEditDashboardModule('work_orders')
+  if (reopenWoDenied) throw new Error(reopenWoDenied.error)
+
   const tenantId    = ctx.tenant.id
+  const reopenAssignDenied = await denyUnlessMayMutateWorkOrder(workOrderId, tenantId)
+  if (reopenAssignDenied) throw new Error(reopenAssignDenied.error)
+
   const adminClient = await createAdminClient()
   const now         = new Date().toISOString()
 
@@ -272,6 +305,12 @@ export async function cancelWorkOrder(
 ): Promise<ArchiveResult> {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authenticated' }
+
+  const cancelWoDenied = await denyUnlessCanEditDashboardModule('work_orders')
+  if (cancelWoDenied) return cancelWoDenied
+
+  const cancelAssignDenied = await denyUnlessMayMutateWorkOrder(workOrderId, ctx.tenant.id)
+  if (cancelAssignDenied) return cancelAssignDenied
 
   // ── Validate reason / note constraint ───────────────────────────────────
   if (!reason?.trim()) {
@@ -356,7 +395,13 @@ export async function createInvoiceFromWorkOrder(
   const ctx = await getDashboardTenant()
   if (!ctx) throw new Error('Not authenticated')
 
+  const invFromWoDenied = await denyUnlessCanEditAllDashboardModules(['invoices', 'work_orders'])
+  if (invFromWoDenied) throw new Error(invFromWoDenied.error)
+
   const tenantId    = ctx.tenant.id
+  const invAssignDenied = await denyUnlessMayMutateWorkOrder(workOrderId, tenantId)
+  if (invAssignDenied) throw new Error(invAssignDenied.error)
+
   const supabase    = await createAdminClient()
 
   console.log('═══════════════════════════════════════════════════════════')
@@ -657,6 +702,9 @@ export async function recalculateInvoiceTotals(invoiceId: string): Promise<void>
   const ctx = await getDashboardTenant()
   if (!ctx) throw new Error('Not authenticated')
 
+  const recalcInvDenied = await denyUnlessCanEditDashboardModule('invoices')
+  if (recalcInvDenied) throw new Error(recalcInvDenied.error)
+
   const tenantId    = ctx.tenant.id
   const supabase    = await createAdminClient()
 
@@ -745,6 +793,9 @@ export async function recalculateInvoiceTotals(invoiceId: string): Promise<void>
 export async function fixInvoiceItemLineTotals(invoiceId: string): Promise<{ fixed: number }> {
   const ctx = await getDashboardTenant()
   if (!ctx) throw new Error('Not authenticated')
+
+  const fixLinesDenied = await denyUnlessCanEditDashboardModule('invoices')
+  if (fixLinesDenied) throw new Error(fixLinesDenied.error)
 
   const tenantId    = ctx.tenant.id
   const supabase    = await createAdminClient()
@@ -904,4 +955,45 @@ export async function validateInvoiceTotals(
       itemsWithBadLineTotal,
     },
   }
+}
+
+// ── Assign technician (advisor / admin only) ─────────────────────────────────
+
+export async function setWorkOrderTechnician(
+  workOrderId:            string,
+  technicianTenantUserId: string | null,
+): Promise<{ error: string } | null> {
+  const ctx = await getDashboardTenant()
+  if (!ctx) return { error: 'Not authorized' }
+
+  const du = await getCurrentDashboardTenantUser()
+  if (!du || !canAssignOperationalTechnician(du.role)) {
+    return { error: 'Not authorized' }
+  }
+
+  const tenantId    = ctx.tenant.id
+  const adminClient = await createAdminClient()
+
+  if (technicianTenantUserId) {
+    const { data: assignee } = await adminClient
+      .from('tenant_users')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('id', technicianTenantUserId)
+      .maybeSingle()
+
+    if (!assignee) return { error: 'Invalid team member.' }
+  }
+
+  const { error } = await adminClient
+    .from('work_orders')
+    .update({
+      technician_id: technicianTenantUserId,
+      updated_at:      new Date().toISOString(),
+    })
+    .eq('id', workOrderId)
+    .eq('tenant_id', tenantId)
+
+  if (error) return { error: error.message }
+  return null
 }

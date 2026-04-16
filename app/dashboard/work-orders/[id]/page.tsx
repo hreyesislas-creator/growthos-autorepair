@@ -1,7 +1,18 @@
 import { notFound }           from 'next/navigation'
 import { getDashboardTenant } from '@/lib/tenant'
-import { getWorkOrderById }   from '@/lib/queries'
+import {
+  getWorkOrderById,
+  getTeamUsers,
+  getCurrentTenantUser,
+  getTenantUserById,
+} from '@/lib/queries'
 import { createClient }       from '@/lib/supabase/server'
+import {
+  canEditDashboardModule,
+  getCurrentAppRoleForTenant,
+  isAdmin,
+} from '@/lib/auth/roles'
+import { technicianMayMutateAssignedRecord } from '@/lib/auth/operational-assignment'
 import Topbar                 from '@/components/dashboard/Topbar'
 import WorkOrderDetail        from './WorkOrderDetail'
 
@@ -56,6 +67,43 @@ export default async function WorkOrderDetailPage({
 
   const subtitle = [customerName, vehicleLabel].filter(Boolean).join(' · ') || undefined
 
+  const [canEditWoModule, canEditInvoices, role, currentTu, teamUsers] = await Promise.all([
+    canEditDashboardModule('work_orders'),
+    canEditDashboardModule('invoices'),
+    getCurrentAppRoleForTenant(),
+    getCurrentTenantUser(tenantId),
+    getTeamUsers(tenantId),
+  ])
+
+  const assignableTeamUsers = teamUsers.filter(u => {
+    if (!u.is_active) return false
+    const r = u.role
+    return r === 'technician' || r === 'staff' || r === 'admin' || r === 'owner' || r === 'manager'
+  })
+
+  const canAssignWorkOrderTechnician =
+    canEditWoModule && (isAdmin(role) || role === 'service_advisor')
+
+  const currentTenantUserId = currentTu?.id ?? ''
+  const canMutateWorkOrder =
+    canEditWoModule &&
+    technicianMayMutateAssignedRecord(
+      role,
+      workOrder.technician_id ?? null,
+      currentTenantUserId || '__no_user__',
+    )
+
+  const assignmentReadOnlyBanner =
+    canEditWoModule && !canMutateWorkOrder && role === 'technician'
+      ? workOrder.technician_id
+        ? 'You can view this work order but only the assigned technician can change it.'
+        : 'No technician is assigned. A service advisor must assign you before you can update this work order.'
+      : null
+
+  const assignedTechnician = workOrder.technician_id
+    ? await getTenantUserById(tenantId, workOrder.technician_id)
+    : null
+
   return (
     <>
       <Topbar
@@ -67,6 +115,12 @@ export default async function WorkOrderDetailPage({
         workOrder={workOrder}
         customerName={customerName}
         vehicleLabel={vehicleLabel}
+        canEditWorkOrders={canMutateWorkOrder}
+        canEditInvoices={canEditInvoices}
+        canAssignWorkOrderTechnician={canAssignWorkOrderTechnician}
+        teamUsersForAssignment={assignableTeamUsers}
+        assignedTechnician={assignedTechnician}
+        assignmentReadOnlyBanner={assignmentReadOnlyBanner}
       />
     </>
   )

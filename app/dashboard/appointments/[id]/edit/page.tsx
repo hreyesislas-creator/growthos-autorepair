@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation'
+import { assertCanEditDashboardModule } from '@/lib/auth/roles'
 import { getDashboardTenant } from '@/lib/tenant'
 import { getAppointmentById, getCustomers, getVehicles } from '@/lib/queries'
 import Topbar from '@/components/dashboard/Topbar'
@@ -11,6 +12,7 @@ export default async function EditAppointmentPage({
 }: {
   params: { id: string }
 }) {
+  await assertCanEditDashboardModule('appointments')
   const ctx = await getDashboardTenant()
   if (!ctx) notFound()
 

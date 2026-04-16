@@ -1,5 +1,9 @@
 'use server'
 
+import {
+  denyUnlessCanEditAllDashboardModules,
+  denyUnlessCanEditDashboardModule,
+} from '@/lib/auth/roles'
 import { createClient } from '@/lib/supabase/server'
 import { getDashboardTenant } from '@/lib/tenant'
 
@@ -10,6 +14,9 @@ export async function createCustomer(
 ): Promise<{ error: string } | null> {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
+
+  const createCustDenied = await denyUnlessCanEditDashboardModule('customers')
+  if (createCustDenied) return createCustDenied
 
   const supabase  = await createClient()
   const firstName = String(formData.get('first_name') ?? '').trim()
@@ -41,6 +48,12 @@ export async function createCustomerAndVehicle(formData: FormData): Promise<{
 } | null> {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
+
+  const addVehicle = formData.get('add_vehicle') === 'yes'
+  const combinedDenied = addVehicle
+    ? await denyUnlessCanEditAllDashboardModules(['customers', 'vehicles'])
+    : await denyUnlessCanEditDashboardModule('customers')
+  if (combinedDenied) return combinedDenied
 
   const tenantId = ctx.tenant.id
   const supabase = await createClient()
@@ -90,7 +103,6 @@ export async function createCustomerAndVehicle(formData: FormData): Promise<{
   const customerId = newCustomer.id
 
   // ── 3. Create vehicle if vehicle fields provided ───────────
-  const addVehicle = formData.get('add_vehicle') === 'yes'
   if (addVehicle) {
     const vin     = String(formData.get('vin')  ?? '').trim() || null
     const make    = String(formData.get('make') ?? '').trim() || null
@@ -134,6 +146,9 @@ export async function updateCustomer(
 ): Promise<{ error: string } | null> {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
+
+  const updateCustDenied = await denyUnlessCanEditDashboardModule('customers')
+  if (updateCustDenied) return updateCustDenied
 
   const id = String(formData.get('id') ?? '').trim()
   if (!id) return { error: 'Missing customer ID' }

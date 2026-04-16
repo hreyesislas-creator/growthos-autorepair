@@ -1,5 +1,6 @@
 'use server'
 
+import { denyUnlessCanEditDashboardModule } from '@/lib/auth/roles'
 import { createClient } from '@/lib/supabase/server'
 import { getDashboardTenant } from '@/lib/tenant'
 
@@ -8,6 +9,9 @@ export async function createAppointment(
 ): Promise<{ error: string } | null> {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
+
+  const apptDenied = await denyUnlessCanEditDashboardModule('appointments')
+  if (apptDenied) return apptDenied
 
   const supabase = await createClient()
   const { error } = await supabase.from('appointments').insert({
@@ -31,6 +35,9 @@ export async function updateAppointment(
 ): Promise<{ error: string } | null> {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
+
+  const apptDenied = await denyUnlessCanEditDashboardModule('appointments')
+  if (apptDenied) return apptDenied
 
   const id = String(formData.get('id') ?? '').trim()
   if (!id) return { error: 'Missing appointment ID' }

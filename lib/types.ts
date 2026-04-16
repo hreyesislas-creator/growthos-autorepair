@@ -25,7 +25,15 @@ export interface TenantUser {
   user_id: string
   /** Alias for the actual DB column name used in queries */
   auth_user_id?: string
-  role: 'owner' | 'manager' | 'staff' | 'admin' | 'advisor' | 'technician' | 'viewer'
+  role:
+    | 'owner'
+    | 'manager'
+    | 'staff'
+    | 'admin'
+    | 'service_advisor'
+    | 'advisor'
+    | 'technician'
+    | 'viewer'
   /** Present only if the DB column exists / is populated */
   full_name?: string | null
   email: string
@@ -796,6 +804,9 @@ export interface WorkOrder {
 
   /** Soft copy of source estimate number for traceability. */
   estimate_number:      string | null
+
+  /** tenant_users.id of assigned technician — same semantics as inspections.technician_id */
+  technician_id:        string | null
 
   /** Set when status transitions to in_progress. NULL until work begins. */
   started_at:           string | null

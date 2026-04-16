@@ -1,8 +1,7 @@
 import type { ReactNode } from 'react'
-import { assertDashboardRole } from '@/lib/dashboard-guard'
-import { canViewCommunications } from '@/lib/dashboard-permissions'
+import { assertCanAccessDashboardModule } from '@/lib/auth/roles'
 
 export default async function CommunicationsLayout({ children }: { children: ReactNode }) {
-  await assertDashboardRole(canViewCommunications)
+  await assertCanAccessDashboardModule('communications')
   return <>{children}</>
 }

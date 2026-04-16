@@ -188,6 +188,8 @@ interface Props {
   serviceJobs:       ServiceJobWithCategory[]
   defaultLaborRate:  number
   initialDecisions:  EstimateItemDecision[]   // pre-loaded snapshot from DB — read-only in editor
+  /** When true, all mutation controls are disabled (viewer / read-only access). */
+  readOnly?:            boolean
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -198,9 +200,11 @@ export default function EstimateEditor({
   serviceJobs,
   defaultLaborRate,
   initialDecisions,
+  readOnly = false,
 }: Props) {
   const router  = useRouter()
   const inputId = useId()
+  const ro      = readOnly
 
   // ── Header state ───────────────────────────────────────────────────────────
   const [status,        setStatus]        = useState<Status>(estimate.status as Status)
@@ -515,6 +519,7 @@ export default function EstimateEditor({
 
   // ── Save ───────────────────────────────────────────────────────────────────
   const handleSave = async () => {
+    if (ro) return
     setSaving(true)
     setSaveError(null)
 
@@ -620,6 +625,7 @@ export default function EstimateEditor({
   // ── Present to customer ────────────────────────────────────────────────────
   // Saves all items + header (forcing status = 'sent'), then reveals the share link.
   const handlePresent = async () => {
+    if (ro) return
     setPresenting(true)
     setPresentError(null)
 
@@ -732,6 +738,7 @@ export default function EstimateEditor({
   }
 
   function copyShareLink() {
+    if (ro) return
     navigator.clipboard.writeText(customerUrl()).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2500)
@@ -740,6 +747,7 @@ export default function EstimateEditor({
 
   // ── Send to Customer via SMS ───────────────────────────────────────────────
   async function handleSendSms() {
+    if (ro) return
     setSmsSending(true)
     setSmsStatus('idle')
     setSmsError(null)
@@ -771,6 +779,7 @@ export default function EstimateEditor({
   // On error:   stores the message for display in the sticky bar.
   //
   const handleCreateWorkOrder = async () => {
+    if (ro) return
     // If work order already exists, navigate to it instead of creating again
     if (woResult) {
       router.push(`/dashboard/work-orders/${woResult.id}`)
@@ -794,6 +803,7 @@ export default function EstimateEditor({
   // ── Void modal handlers ────────────────────────────────────────────────────
 
   function openVoidModal() {
+    if (ro) return
     setVoidError(null)
     // Use the saved estimate.status — not the local status state which may have
     // unsaved dropdown changes — to determine the correct warning tier.
@@ -820,6 +830,7 @@ export default function EstimateEditor({
   }
 
   async function handleVoidConfirm(reason: string, note: string) {
+    if (ro) return
     setVoidSubmit(true)
     setVoidError(null)
 
@@ -841,6 +852,15 @@ export default function EstimateEditor({
 
   return (
     <div className="dash-content">
+      <fieldset
+        disabled={ro}
+        style={{
+          border: 'none',
+          padding: 0,
+          margin: 0,
+          minWidth: 0,
+        }}
+      >
 
       {/* ── Estimate header ────────────────────────────────────────────────── */}
       <div className="card" style={{ marginBottom: 16 }}>
@@ -871,20 +891,32 @@ export default function EstimateEditor({
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <label style={{ fontSize: 12, color: 'var(--text-3)' }}>Status:</label>
-            <select
-              value={status}
-              onChange={e => setStatus(e.target.value as Status)}
-              style={{
-                fontSize: 12, fontWeight: 600, borderRadius: 6,
-                border: '1px solid var(--border)', padding: '4px 8px',
-                ...statusStyle(status),
-                cursor: 'pointer',
-              }}
-            >
-              {STATUSES.map(s => (
-                <option key={s.value} value={s.value}>{s.label}</option>
-              ))}
-            </select>
+            {ro ? (
+              <span
+                style={{
+                  fontSize: 12, fontWeight: 600, borderRadius: 6,
+                  border: '1px solid var(--border)', padding: '4px 8px',
+                  ...statusStyle(status),
+                }}
+              >
+                {STATUSES.find(s => s.value === status)?.label ?? status}
+              </span>
+            ) : (
+              <select
+                value={status}
+                onChange={e => setStatus(e.target.value as Status)}
+                style={{
+                  fontSize: 12, fontWeight: 600, borderRadius: 6,
+                  border: '1px solid var(--border)', padding: '4px 8px',
+                  ...statusStyle(status),
+                  cursor: 'pointer',
+                }}
+              >
+                {STATUSES.map(s => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
+            )}
           </div>
         </div>
       </div>
@@ -918,6 +950,7 @@ export default function EstimateEditor({
               <div style={{
                 display: 'flex', gap: 8, flexWrap: 'wrap',
               }}>
+                {!ro && (
                 <button
                   type="button"
                   onClick={() => {
@@ -938,6 +971,7 @@ export default function EstimateEditor({
                 >
                   ↗ Present to Customer
                 </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -1036,7 +1070,11 @@ export default function EstimateEditor({
             padding: '20px 0', textAlign: 'center',
             fontSize: 13, color: 'var(--text-3)',
           }}>
-            No items yet. Click <strong>Add Item</strong> to get started.
+            {ro ? (
+              'No items yet.'
+            ) : (
+              <>No items yet. Click <strong>Add Item</strong> to get started.</>
+            )}
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1457,7 +1495,7 @@ export default function EstimateEditor({
         </div>
 
         {/* Present to Customer — only when estimate hasn't been decided yet */}
-        {status !== 'approved' && status !== 'declined' && (
+        {status !== 'approved' && status !== 'declined' && !ro && (
           <button
             type="button"
             disabled={presenting || saving}
@@ -1480,7 +1518,7 @@ export default function EstimateEditor({
         {/* Reopen Authorization Button — shown when estimate is authorized or approved (Phase 2).
             Allows reopening authorization to change customer decisions again.
             Shows warning if work order exists (will be out of sync). */}
-        {(estimate.status === 'authorized' || estimate.status === 'approved') && (
+        {(estimate.status === 'authorized' || estimate.status === 'approved') && !ro && (
           <button
             type="button"
             disabled={saving || presenting}
@@ -1513,7 +1551,7 @@ export default function EstimateEditor({
 
         {/* Create Work Order Button (Phase 1+3) — shown when authorized and no WO exists.
             Only show when no woResult. */}
-        {estimate.status === 'authorized' && !woLoading && !woResult && (
+        {estimate.status === 'authorized' && !woLoading && !woResult && !ro && (
           <button
             type="button"
             disabled={woCreating || saving || presenting}
@@ -1538,7 +1576,7 @@ export default function EstimateEditor({
 
         {/* Update Work Order Button (Phase 3) — shown when authorized and WO exists.
             Only show when woResult exists. */}
-        {estimate.status === 'authorized' && !woLoading && woResult && (
+        {estimate.status === 'authorized' && !woLoading && woResult && !ro && (
           <button
             type="button"
             disabled={woCreating || saving || presenting}
@@ -1599,6 +1637,7 @@ export default function EstimateEditor({
           </a>
         )}
 
+        {!ro && (
         <button
           type="button"
           onClick={copyShareLink}
@@ -1615,8 +1654,10 @@ export default function EstimateEditor({
         >
           {copied ? '✓ Copied!' : '📋 Copy Customer Link'}
         </button>
+        )}
 
         {/* Send to Customer via SMS */}
+        {!ro && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>
           <button
             type="button"
@@ -1646,8 +1687,10 @@ export default function EstimateEditor({
             <span style={{ fontSize: 11, color: '#6d28d9' }}>Link sent via SMS.</span>
           )}
         </div>
+        )}
 
         {/* Preview — links to the advisor presentation view */}
+        {!ro && (
         <a
           href={`/dashboard/estimates/${estimate.id}/present`}
           style={{
@@ -1663,7 +1706,9 @@ export default function EstimateEditor({
         >
           Review (Internal) ↗
         </a>
+        )}
 
+        {!ro && (
         <button
           type="button"
           className="btn-primary"
@@ -1673,12 +1718,13 @@ export default function EstimateEditor({
         >
           {saving ? 'Saving…' : 'Save Estimate'}
         </button>
+        )}
 
         <a href={backHref} className="btn-ghost" style={{ fontSize: 12 }}>
           ← Back
         </a>
 
-        {/* Void Estimate — destructive, always available in the save bar */}
+        {!ro && (
         <button
           type="button"
           className="btn-danger"
@@ -1688,7 +1734,10 @@ export default function EstimateEditor({
         >
           Void Estimate
         </button>
+        )}
       </div>
+
+      </fieldset>
 
       {/* ── Void confirmation modal ───────────────────────────────────────────── */}
       <ArchiveConfirmModal
@@ -1706,7 +1755,7 @@ export default function EstimateEditor({
       />
 
       {/* ── Delete line item confirmation modal ───────────────────────────────── */}
-      {deleteConfirmOpen && (
+      {deleteConfirmOpen && !ro && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
           backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex',

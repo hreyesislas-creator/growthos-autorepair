@@ -1,3 +1,4 @@
+import { assertCanEditDashboardModule } from '@/lib/auth/roles'
 import { getDashboardTenant } from '@/lib/tenant'
 import { getCustomers, getVehicles } from '@/lib/queries'
 import Topbar from '@/components/dashboard/Topbar'
@@ -6,6 +7,7 @@ import NewEstimateForm from './NewEstimateForm'
 export const metadata = { title: 'New Estimate' }
 
 export default async function NewEstimatePage() {
+  await assertCanEditDashboardModule('estimates')
   const ctx      = await getDashboardTenant()
   const tenantId = ctx?.tenant.id ?? ''
 

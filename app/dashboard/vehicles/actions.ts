@@ -1,5 +1,9 @@
 'use server'
 
+import {
+  denyUnlessCanEditAllDashboardModules,
+  denyUnlessCanEditDashboardModule,
+} from '@/lib/auth/roles'
 import { createClient } from '@/lib/supabase/server'
 import { getDashboardTenant } from '@/lib/tenant'
 
@@ -20,6 +24,12 @@ export async function createVehicleWithCustomer(formData: FormData): Promise<{
   const supabase    = await createClient()
   const mode        = String(formData.get('customer_mode') ?? 'select')
   let   customerId: string | null = null
+
+  const vehComboDenied =
+    mode === 'create'
+      ? await denyUnlessCanEditAllDashboardModules(['customers', 'vehicles'])
+      : await denyUnlessCanEditDashboardModule('vehicles')
+  if (vehComboDenied) return vehComboDenied
 
   if (mode === 'create') {
     // ── Phone duplicate check ────────────────────────────────
@@ -101,6 +111,9 @@ export async function createVehicle(
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
 
+  const createVehDenied = await denyUnlessCanEditDashboardModule('vehicles')
+  if (createVehDenied) return createVehDenied
+
   const yearStr    = String(formData.get('year')    ?? '').trim()
   const mileageStr = String(formData.get('mileage') ?? '').trim()
 
@@ -128,6 +141,9 @@ export async function updateVehicle(
 ): Promise<{ error: string } | null> {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
+
+  const updateVehDenied = await denyUnlessCanEditDashboardModule('vehicles')
+  if (updateVehDenied) return updateVehDenied
 
   const id = String(formData.get('id') ?? '').trim()
   if (!id) return { error: 'Missing vehicle ID' }

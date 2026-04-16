@@ -1,5 +1,6 @@
 import { getDashboardTenant } from '@/lib/tenant'
 import { getVehicles } from '@/lib/queries'
+import { canEditDashboardModule } from '@/lib/auth/roles'
 import Topbar from '@/components/dashboard/Topbar'
 import Link from 'next/link'
 import { format } from 'date-fns'
@@ -10,10 +11,14 @@ export default async function VehiclesPage() {
   const ctx      = await getDashboardTenant()
   const tenantId = ctx?.tenant.id ?? ''
   const vehicles = await getVehicles(tenantId)
+  const canEdit    = await canEditDashboardModule('vehicles')
 
   return (
     <>
-      <Topbar title="Vehicles" action={{ label: 'Add Vehicle', href: '/dashboard/vehicles/new' }} />
+      <Topbar
+        title="Vehicles"
+        action={canEdit ? { label: 'Add Vehicle', href: '/dashboard/vehicles/new' } : undefined}
+      />
       <div className="dash-content">
         <div className="table-wrap">
           {vehicles.length === 0 ? (
@@ -59,13 +64,15 @@ export default async function VehiclesPage() {
                         >
                           View
                         </Link>
-                        <Link
-                          href={`/dashboard/vehicles/${v.id}/edit`}
-                          className="btn-ghost"
-                          style={{ padding: '3px 10px', fontSize: '12px' }}
-                        >
-                          Edit
-                        </Link>
+                        {canEdit ? (
+                          <Link
+                            href={`/dashboard/vehicles/${v.id}/edit`}
+                            className="btn-ghost"
+                            style={{ padding: '3px 10px', fontSize: '12px' }}
+                          >
+                            Edit
+                          </Link>
+                        ) : null}
                       </div>
                     </td>
                   </tr>

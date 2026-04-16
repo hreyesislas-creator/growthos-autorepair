@@ -110,6 +110,7 @@ interface InvoiceDetailProps {
   customerName:   string | null
   vehicleDisplay: string | null
   payments:       InvoicePayment[]
+  canRecordPayment?: boolean
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -119,6 +120,7 @@ export default function InvoiceDetail({
   customerName,
   vehicleDisplay,
   payments,
+  canRecordPayment = true,
 }: InvoiceDetailProps) {
   const router        = useRouter()
   const status        = statusStyle(invoice.status)
@@ -160,6 +162,7 @@ export default function InvoiceDetail({
 
   async function handleSubmitPayment(e: React.FormEvent) {
     e.preventDefault()
+    if (!canRecordPayment) return
     setSaveError(null)
 
     const parsedAmount = parseFloat(amount)
@@ -227,7 +230,7 @@ export default function InvoiceDetail({
             </span>
           )}
         </div>
-        {!isFullyPaid && (
+        {!isFullyPaid && canRecordPayment && (
           <button
             onClick={() => setShowForm(v => !v)}
             style={{
@@ -243,7 +246,7 @@ export default function InvoiceDetail({
       </div>
 
       {/* ── Record Payment form ────────────────────────────────────────────── */}
-      {showForm && !isFullyPaid && (
+      {showForm && !isFullyPaid && canRecordPayment && (
         <div className="card" style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 14 }}>
             Record Payment

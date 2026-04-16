@@ -7,6 +7,7 @@ import { notFound } from 'next/navigation'
 import { getDashboardTenant } from '@/lib/tenant'
 import { getInvoiceById, getCustomerName, getVehicleDisplay } from '@/lib/queries'
 import { createAdminClient } from '@/lib/supabase/server'
+import { canEditDashboardModule } from '@/lib/auth/roles'
 import Topbar from '@/components/dashboard/Topbar'
 import InvoiceDetail from './InvoiceDetail'
 import type { InvoicePayment } from '@/lib/types'
@@ -41,6 +42,8 @@ export default async function InvoiceDetailPage({
 
   const payments = (paymentsRes.data ?? []) as InvoicePayment[]
 
+  const canEditInvoices = await canEditDashboardModule('invoices')
+
   return (
     <>
       <Topbar title={`Invoice ${invoice.invoice_number || invoice.id}`} />
@@ -50,6 +53,7 @@ export default async function InvoiceDetailPage({
           customerName={customerName}
           vehicleDisplay={vehicleDisplay}
           payments={payments}
+          canRecordPayment={canEditInvoices}
         />
       </div>
     </>

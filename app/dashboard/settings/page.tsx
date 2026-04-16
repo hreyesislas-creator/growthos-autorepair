@@ -1,5 +1,6 @@
 import { getDashboardTenant } from '@/lib/tenant'
 import { getTenantPricingConfig } from '@/lib/queries'
+import { canEditDashboardModule } from '@/lib/auth/roles'
 import Topbar from '@/components/dashboard/Topbar'
 import Link from 'next/link'
 import { BusinessProfileForm, WebsiteModulesForm } from './SettingsClient'
@@ -12,6 +13,11 @@ export default async function SettingsPage() {
   const settings = ctx?.settings ?? null
   const pricing  = ctx?.tenant.id ? await getTenantPricingConfig(ctx.tenant.id) : null
 
+  const [canEditSettings, canEditWebsite] = await Promise.all([
+    canEditDashboardModule('settings'),
+    canEditDashboardModule('website'),
+  ])
+
   const taxDisplay = pricing?.default_tax_rate != null
     ? `${parseFloat((Number(pricing.default_tax_rate) * 100).toFixed(4))}%`
     : 'Not configured'
@@ -22,10 +28,10 @@ export default async function SettingsPage() {
       <div className="dash-content">
         <div className="two-col">
 
-          <BusinessProfileForm profile={profile} />
+          <BusinessProfileForm profile={profile} readOnly={!canEditSettings} />
 
           <div>
-            <WebsiteModulesForm settings={settings} />
+            <WebsiteModulesForm settings={settings} readOnly={!canEditWebsite} />
 
             {/* Pricing & Tax link card */}
             <div className="card" style={{ marginBottom: '14px' }}>
@@ -39,13 +45,17 @@ export default async function SettingsPage() {
                     </strong>
                   </p>
                 </div>
-                <Link
-                  href="/dashboard/settings/pricing"
-                  className="btn-ghost"
-                  style={{ fontSize: 12, whiteSpace: 'nowrap' }}
-                >
-                  Configure →
-                </Link>
+                {canEditSettings ? (
+                  <Link
+                    href="/dashboard/settings/pricing"
+                    className="btn-ghost"
+                    style={{ fontSize: 12, whiteSpace: 'nowrap' }}
+                  >
+                    Configure →
+                  </Link>
+                ) : (
+                  <span style={{ fontSize: 12, color: 'var(--text-3)' }}>View only</span>
+                )}
               </div>
             </div>
 

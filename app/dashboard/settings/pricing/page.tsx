@@ -1,11 +1,13 @@
 import { getDashboardTenant } from '@/lib/tenant'
 import { getTenantPricingConfig } from '@/lib/queries'
+import { assertCanEditDashboardModule } from '@/lib/auth/roles'
 import Topbar from '@/components/dashboard/Topbar'
 import PricingConfigForm from './PricingConfigForm'
 
 export const metadata = { title: 'Pricing Settings' }
 
 export default async function PricingSettingsPage() {
+  await assertCanEditDashboardModule('settings')
   const ctx = await getDashboardTenant()
   const tenantId = ctx?.tenant.id ?? ''
 

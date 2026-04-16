@@ -6,8 +6,8 @@ import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
 import type { Lang } from '@/lib/i18n'
 import { t } from '@/lib/i18n'
-import type { DashboardRole } from '@/lib/dashboard-permissions'
-import { canViewManageNavHref, canViewOperationsNavHref } from '@/lib/dashboard-permissions'
+import type { AppRole } from '@/lib/auth/role-access'
+import { appModuleForDashboardNavHref, canAccessModule } from '@/lib/auth/role-access'
 
 const NAV = [
   { href: '/dashboard',               icon: '▦',  key: 'nav_overview'       },
@@ -36,10 +36,10 @@ interface SidebarProps {
   tenantName: string
   tenantPlan: string
   initialLang: Lang
-  dashboardRole: DashboardRole
+  appRole: AppRole
 }
 
-export default function Sidebar({ tenantName, tenantPlan, initialLang, dashboardRole }: SidebarProps) {
+export default function Sidebar({ tenantName, tenantPlan, initialLang, appRole }: SidebarProps) {
   const pathname = usePathname()
   const router   = useRouter()
   const [lang, setLang] = useState<Lang>(initialLang)
@@ -62,8 +62,12 @@ export default function Sidebar({ tenantName, tenantPlan, initialLang, dashboard
     }
   }
 
-  const operationsNav = NAV.filter(({ href }) => canViewOperationsNavHref(dashboardRole, href))
-  const manageNav = NAV2.filter(({ href }) => canViewManageNavHref(dashboardRole, href))
+  const navAllowed = (href: string) => {
+    const m = appModuleForDashboardNavHref(href)
+    return m != null && canAccessModule(appRole, m)
+  }
+  const operationsNav = NAV.filter(({ href }) => navAllowed(href))
+  const manageNav = NAV2.filter(({ href }) => navAllowed(href))
 
   return (
     <aside className="dash-sidebar">

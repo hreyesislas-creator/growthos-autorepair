@@ -1,5 +1,6 @@
 import { getDashboardTenant } from '@/lib/tenant'
 import { getTeamUsers } from '@/lib/queries'
+import { canEditDashboardModule } from '@/lib/auth/roles'
 import Topbar from '@/components/dashboard/Topbar'
 import StatusBadge from '@/components/dashboard/StatusBadge'
 import { DeactivateTeamMemberButton } from './DeactivateTeamMemberButton'
@@ -15,10 +16,14 @@ export default async function TeamPage() {
   const ctx      = await getDashboardTenant()
   const tenantId = ctx?.tenant.id ?? ''
   const users    = await getTeamUsers(tenantId)
+  const canEdit  = await canEditDashboardModule('team')
 
   return (
     <>
-      <Topbar title="Team & Roles" action={{ label: 'Invite User', href: '/dashboard/team/invite' }} />
+      <Topbar
+        title="Team & Roles"
+        action={canEdit ? { label: 'Invite User', href: '/dashboard/team/invite' } : undefined}
+      />
       <div className="dash-content">
         <div className="table-wrap">
           {users.length === 0 ? (
@@ -56,7 +61,12 @@ export default async function TeamPage() {
                     <td><span className="badge badge-gray">{u.language_pref === "es" ? "ES" : "EN"}</span></td>
                     <td><StatusBadge status={u.is_active ? "active" : "inactive"} /></td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      <DeactivateTeamMemberButton tenantUserId={u.id} role={u.role} isActive={u.is_active} />
+                      <DeactivateTeamMemberButton
+                        tenantUserId={u.id}
+                        role={u.role}
+                        isActive={u.is_active}
+                        canManage={canEdit}
+                      />
                     </td>
                   </tr>
                   )

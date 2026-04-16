@@ -1,5 +1,6 @@
 'use server'
 
+import { denyUnlessCanEditDashboardModule } from '@/lib/auth/roles'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { getDashboardTenant } from '@/lib/tenant'
 import { getTenantPricingConfig } from '@/lib/queries'
@@ -122,6 +123,9 @@ export async function recalculateEstimateTotals(
 ): Promise<{ error: string } | null> {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
+
+  const estDenied = await denyUnlessCanEditDashboardModule('estimates')
+  if (estDenied) return estDenied
 
   const supabase   = await createAdminClient()
   const tenantId   = ctx.tenant.id
@@ -334,6 +338,9 @@ export async function createEstimate(
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
 
+  const estDenied = await denyUnlessCanEditDashboardModule('estimates')
+  if (estDenied) return estDenied
+
   const supabase = await createAdminClient()
   const tenantId = ctx.tenant.id
 
@@ -430,6 +437,9 @@ export async function saveEstimate(
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
 
+  const estDenied = await denyUnlessCanEditDashboardModule('estimates')
+  if (estDenied) return estDenied
+
   const supabase = await createAdminClient()
 
   const updatePayload = {
@@ -496,6 +506,9 @@ export async function saveEstimateItems(
 ): Promise<{ data: EstimateItem[] } | { error: string }> {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
+
+  const estDenied = await denyUnlessCanEditDashboardModule('estimates')
+  if (estDenied) return estDenied
 
   const supabase = await createClient()
   const tenantId = ctx.tenant.id
@@ -647,6 +660,9 @@ export async function importRecommendationsToEstimate(
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
 
+  const estDenied = await denyUnlessCanEditDashboardModule('estimates')
+  if (estDenied) return estDenied
+
   const supabase = await createClient()
   const tenantId = ctx.tenant.id
 
@@ -740,6 +756,9 @@ export async function createEstimateFromInspection(input: {
 }): Promise<{ data: { estimateId: string } } | { error: string }> {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
+
+  const estDenied = await denyUnlessCanEditDashboardModule('estimates')
+  if (estDenied) return estDenied
 
   const supabase = await createAdminClient()
   const tenantId = ctx.tenant.id
@@ -918,6 +937,9 @@ export async function saveEstimateItemParts(
 ): Promise<{ error: string } | null> {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
+
+  const estDenied = await denyUnlessCanEditDashboardModule('estimates')
+  if (estDenied) return estDenied
 
   const supabase = await createAdminClient()
   const tenantId = ctx.tenant.id

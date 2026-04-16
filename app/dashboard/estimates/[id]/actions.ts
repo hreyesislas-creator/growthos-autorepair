@@ -7,6 +7,10 @@
 // Creates a new work order by copying approved estimate items.
 // ============================================================
 
+import {
+  denyUnlessCanEditAllDashboardModules,
+  denyUnlessCanEditDashboardModule,
+} from '@/lib/auth/roles'
 import { getDashboardTenant } from '@/lib/tenant'
 import {
   getEstimateWithItems,
@@ -83,6 +87,9 @@ export async function createWorkOrderFromEstimate(
   // ── Step 1: Auth check ──────────────────────────────────────────
   const ctx = await getDashboardTenant()
   if (!ctx) throw new Error('Not authenticated')
+
+  const woFromEstDenied = await denyUnlessCanEditDashboardModule('work_orders')
+  if (woFromEstDenied) throw new Error(woFromEstDenied.error)
 
   const tenantId = ctx.tenant.id
 
@@ -191,6 +198,7 @@ export async function createWorkOrderFromEstimate(
       internal_notes:       estimate.internal_notes,
       parts_markup_percent: estimate.parts_markup_percent,
       estimate_number:      estimate.estimate_number,
+      technician_id:        null,
       created_by:           createdBy,           // authenticated user id resolved in step 2
       created_at:           new Date().toISOString(),
       updated_at:           new Date().toISOString(),
@@ -296,6 +304,9 @@ export async function voidEstimate(
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authenticated' }
 
+  const voidEstDenied = await denyUnlessCanEditDashboardModule('estimates')
+  if (voidEstDenied) return voidEstDenied
+
   // ── Validate reason / note constraint ───────────────────────────────────
   if (!reason?.trim()) {
     return { error: 'A reason is required to void an estimate.' }
@@ -384,6 +395,9 @@ export async function reopenEstimateAuthorization(
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authenticated' }
 
+  const reopenDenied = await denyUnlessCanEditDashboardModule('estimates')
+  if (reopenDenied) return reopenDenied
+
   const tenantId = ctx.tenant.id
 
   // ── Step 2: Load estimate ──────────────────────────────────────
@@ -460,6 +474,9 @@ export async function updateWorkOrderFromEstimate(
   // ── Step 1: Auth check ──────────────────────────────────────────
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authenticated' }
+
+  const syncWoDenied = await denyUnlessCanEditAllDashboardModules(['estimates', 'work_orders'])
+  if (syncWoDenied) return syncWoDenied
 
   const tenantId = ctx.tenant.id
 

@@ -1,5 +1,6 @@
 import { getDashboardTenant } from '@/lib/tenant'
 import { getAppointments } from '@/lib/queries'
+import { canEditDashboardModule } from '@/lib/auth/roles'
 import Topbar from '@/components/dashboard/Topbar'
 import StatusBadge from '@/components/dashboard/StatusBadge'
 import Link from 'next/link'
@@ -11,10 +12,14 @@ export default async function AppointmentsPage() {
   const ctx      = await getDashboardTenant()
   const tenantId = ctx?.tenant.id ?? ''
   const appts    = await getAppointments(tenantId, 100)
+  const canEdit  = await canEditDashboardModule('appointments')
 
   return (
     <>
-      <Topbar title="Appointments" action={{ label: 'New Appointment', href: '/dashboard/appointments/new' }} />
+      <Topbar
+        title="Appointments"
+        action={canEdit ? { label: 'New Appointment', href: '/dashboard/appointments/new' } : undefined}
+      />
       <div className="dash-content">
         <div className="table-wrap">
           {appts.length === 0 ? (
@@ -61,13 +66,17 @@ export default async function AppointmentsPage() {
                       <td><StatusBadge status={a.status} /></td>
                       <td><span className="badge badge-gray">{a.source}</span></td>
                       <td>
-                        <Link
-                          href={`/dashboard/appointments/${a.id}/edit`}
-                          className="btn-ghost"
-                          style={{ padding: '3px 10px', fontSize: '12px' }}
-                        >
-                          Edit
-                        </Link>
+                        {canEdit ? (
+                          <Link
+                            href={`/dashboard/appointments/${a.id}/edit`}
+                            className="btn-ghost"
+                            style={{ padding: '3px 10px', fontSize: '12px' }}
+                          >
+                            Edit
+                          </Link>
+                        ) : (
+                          <span style={{ fontSize: 12, color: 'var(--text-3)' }}>—</span>
+                        )}
                       </td>
                     </tr>
                   )

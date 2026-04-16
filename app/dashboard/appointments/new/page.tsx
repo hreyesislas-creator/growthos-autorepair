@@ -1,11 +1,13 @@
 import { getDashboardTenant } from '@/lib/tenant'
 import { getCustomers, getVehicles } from '@/lib/queries'
+import { assertCanEditDashboardModule } from '@/lib/auth/roles'
 import Topbar from '@/components/dashboard/Topbar'
 import AppointmentForm from '../AppointmentForm'
 
 export const metadata = { title: 'New Appointment' }
 
 export default async function NewAppointmentPage() {
+  await assertCanEditDashboardModule('appointments')
   const ctx      = await getDashboardTenant()
   const tenantId = ctx?.tenant.id ?? ''
 

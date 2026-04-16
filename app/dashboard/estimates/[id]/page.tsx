@@ -7,6 +7,7 @@ import {
   getTenantPricingConfig,
 } from '@/lib/queries'
 import { createClient } from '@/lib/supabase/server'
+import { canEditDashboardModule } from '@/lib/auth/roles'
 import Topbar from '@/components/dashboard/Topbar'
 import EstimateEditor from './EstimateEditor'
 
@@ -80,6 +81,8 @@ export default async function EstimateDetailPage({
 
   const subtitle = [customerName, vehicleLabel].filter(Boolean).join(' · ') || undefined
 
+  const canEditEstimates = await canEditDashboardModule('estimates')
+
   return (
     <>
       <Topbar
@@ -93,6 +96,7 @@ export default async function EstimateDetailPage({
         serviceJobs={serviceJobs}
         defaultLaborRate={defaultLaborRate}
         initialDecisions={initialDecisions}
+        readOnly={!canEditEstimates}
       />
     </>
   )

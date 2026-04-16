@@ -2,7 +2,17 @@
 
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
+import type { AppRole } from '@/lib/auth/role-access'
 import type { WorkOrderListRow } from './page'
+import AdvisorTechnicianFilterSelect from '@/components/dashboard/AdvisorTechnicianFilterSelect'
+import {
+  applyAssignmentListFilters,
+  sortForTechnicianListPriority,
+  assignmentLabelForRow,
+  assigneeBadgeDisplay,
+  type AdvisorTechnicianFilterOption,
+  type AssignmentListScope,
+} from '@/lib/dashboard/assignment-list-helpers'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Status badge styles — keyed by raw DB status value
@@ -25,16 +35,74 @@ function statusStyle(status: string) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface Props {
-  workOrders: WorkOrderListRow[]
+  workOrders:                 WorkOrderListRow[]
+  assignmentScope:            AssignmentListScope
+  appRole:                    AppRole
+  currentTenantUserId:        string
+  advisorTechnicianId:        string | null
+  technicianNameById:         Record<string, string>
+  advisorTechnicianOptions:   AdvisorTechnicianFilterOption[]
+  showAdvisorTechFilter:      boolean
 }
 
-export default function WorkOrdersList({ workOrders }: Props) {
+function AssignmentBadge({
+  technicianId,
+  currentTenantUserId,
+  nameById,
+}: {
+  technicianId:        string | null
+  currentTenantUserId: string
+  nameById:            Record<string, string>
+}) {
+  const d = assigneeBadgeDisplay(technicianId, currentTenantUserId, nameById)
+  const cfg =
+    d.kind === 'you'
+      ? { bg: '#dcfce7', color: '#15803d' }
+      : d.kind === 'unassigned'
+      ? { bg: '#f1f5f9', color: '#64748b' }
+      : { bg: '#ffedd5', color: '#c2410c' }
+
+  return (
+    <span style={{
+      display: 'inline-block',
+      fontSize: 10, fontWeight: 700,
+      padding: '3px 8px', borderRadius: 999,
+      background: cfg.bg, color: cfg.color,
+      whiteSpace: 'nowrap',
+      maxWidth: 200,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+    }}>
+      {d.text}
+    </span>
+  )
+}
+
+export default function WorkOrdersList({
+  workOrders,
+  assignmentScope,
+  appRole,
+  currentTenantUserId,
+  advisorTechnicianId,
+  technicianNameById,
+  advisorTechnicianOptions,
+  showAdvisorTechFilter,
+}: Props) {
   const [query,        setQuery]        = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
 
+  const basePath = '/dashboard/work-orders'
+
   // ── Filter logic ─────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
-    let result = workOrders
+    let result = applyAssignmentListFilters(
+      workOrders,
+      assignmentScope,
+      advisorTechnicianId,
+      currentTenantUserId,
+      appRole,
+    )
+    result = sortForTechnicianListPriority(result, appRole, currentTenantUserId)
 
     if (statusFilter !== 'all') {
       result = result.filter(wo => wo.status === statusFilter)
@@ -51,11 +119,80 @@ export default function WorkOrdersList({ workOrders }: Props) {
     }
 
     return result
-  }, [workOrders, query, statusFilter])
+  }, [
+    workOrders,
+    query,
+    statusFilter,
+    assignmentScope,
+    appRole,
+    currentTenantUserId,
+    advisorTechnicianId,
+  ])
 
   // ─────────────────────────────────────────────────────────────────────────
+  const showAllAssigneePill = appRole !== 'technician'
+  const techFilterActive = !!advisorTechnicianId
+  const allPillActive = !techFilterActive && assignmentScope === 'all' && showAllAssigneePill
+  const minePillActive = !techFilterActive && assignmentScope === 'mine'
+  const unassignedPillActive = !techFilterActive && assignmentScope === 'unassigned'
+
   return (
     <div className="dash-content">
+
+      {/* ── Assignment scope (Phase 6.5) ─────────────────────────────────── */}
+      <div style={{
+        display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center',
+        marginBottom: 12,
+      }}>
+        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Assignee:</span>
+        {showAllAssigneePill && (
+          <Link
+            href={basePath}
+            className={allPillActive ? 'btn-primary' : 'btn-ghost'}
+            style={{ fontSize: 12, padding: '6px 12px', textDecoration: 'none' }}
+          >
+            All
+          </Link>
+        )}
+        <Link
+          href={`${basePath}?scope=mine`}
+          className={minePillActive ? 'btn-primary' : 'btn-ghost'}
+          style={{ fontSize: 12, padding: '6px 12px', textDecoration: 'none' }}
+        >
+          Assigned to me
+        </Link>
+        <Link
+          href={`${basePath}?scope=unassigned`}
+          className={unassignedPillActive ? 'btn-primary' : 'btn-ghost'}
+          style={{ fontSize: 12, padding: '6px 12px', textDecoration: 'none' }}
+        >
+          Unassigned
+        </Link>
+        {showAdvisorTechFilter && advisorTechnicianOptions.length > 0 && (
+          <AdvisorTechnicianFilterSelect
+            basePath={basePath}
+            assignmentScope={assignmentScope}
+            options={advisorTechnicianOptions}
+            currentTechId={advisorTechnicianId}
+          />
+        )}
+        {appRole === 'technician' && assignmentScope !== 'all' && (
+          <Link
+            href={basePath}
+            className="btn-ghost"
+            style={{ fontSize: 12, padding: '6px 12px', textDecoration: 'none' }}
+          >
+            Full shop list
+          </Link>
+        )}
+      </div>
+      {appRole === 'technician' && assignmentScope === 'all' && (
+        <div style={{
+          fontSize: 12, color: 'var(--text-3)', marginBottom: 12, marginTop: -4,
+        }}>
+          Your assigned and unassigned jobs are listed first.
+        </div>
+      )}
 
       {/* ── Toolbar ────────────────────────────────────────────────────────── */}
       <div style={{
@@ -117,7 +254,9 @@ export default function WorkOrdersList({ workOrders }: Props) {
             <div className="empty-state-icon">🔍</div>
             <div className="empty-state-title">No matching work orders</div>
             <div className="empty-state-body">
-              Try a different search term or clear the status filter.
+              {advisorTechnicianId
+                ? 'Try another technician or use the assignee pills to widen the list.'
+                : 'Try a different search term or clear the status filter.'}
             </div>
           </div>
 
@@ -126,6 +265,7 @@ export default function WorkOrdersList({ workOrders }: Props) {
             <thead>
               <tr>
                 <th style={{ whiteSpace: 'nowrap' }}>Work Order #</th>
+                <th style={{ whiteSpace: 'nowrap' }}>Assignee</th>
                 <th>Status</th>
                 <th>Customer</th>
                 <th>Vehicle</th>
@@ -142,8 +282,17 @@ export default function WorkOrdersList({ workOrders }: Props) {
                   month: 'short', day: 'numeric', year: 'numeric',
                 })
 
+                const assignLabel = assignmentLabelForRow(wo.technician_id, currentTenantUserId)
+
                 return (
-                  <tr key={wo.id}>
+                  <tr
+                    key={wo.id}
+                    style={
+                      assignLabel === 'you'
+                        ? { background: 'rgba(220, 252, 231, 0.4)' }
+                        : undefined
+                    }
+                  >
 
                     {/* WO # */}
                     <td style={{ whiteSpace: 'nowrap' }}>
@@ -153,6 +302,14 @@ export default function WorkOrdersList({ workOrders }: Props) {
                       }}>
                         {wo.work_order_number ?? '—'}
                       </span>
+                    </td>
+
+                    <td>
+                      <AssignmentBadge
+                        technicianId={wo.technician_id}
+                        currentTenantUserId={currentTenantUserId}
+                        nameById={technicianNameById}
+                      />
                     </td>
 
                     {/* Status badge */}

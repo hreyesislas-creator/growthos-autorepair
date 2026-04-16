@@ -1,6 +1,16 @@
 import { notFound }           from 'next/navigation'
 import { getDashboardTenant } from '@/lib/tenant'
 import { createAdminClient }  from '@/lib/supabase/server'
+import { getCurrentAppRoleForTenant } from '@/lib/auth/roles'
+import { getCurrentTenantUser, getTeamUsers } from '@/lib/queries'
+import {
+  parseAssignmentListScope,
+  parseAdvisorTechnicianFilterParam,
+  technicianNameMapFromTeamUsers,
+  advisorTechnicianFilterOptionsFromTeamUsers,
+  validatedAdvisorTechnicianId,
+  canUseAdvisorTechnicianFilter,
+} from '@/lib/dashboard/assignment-list-helpers'
 import Topbar                 from '@/components/dashboard/Topbar'
 import WorkOrdersList         from './WorkOrdersList'
 
@@ -17,11 +27,16 @@ export type WorkOrderListRow = {
   estimate_number:   string | null   // soft copy on the WO row
   customerName:      string | null
   vehicleLabel:      string | null
+  technician_id:     string | null
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export default async function WorkOrdersPage() {
+export default async function WorkOrdersPage({
+  searchParams,
+}: {
+  searchParams: { scope?: string; tech?: string }
+}) {
   const ctx = await getDashboardTenant()
   if (!ctx) return notFound()
 
@@ -31,7 +46,7 @@ export default async function WorkOrdersPage() {
   // ── Step 1: Fetch work orders ─────────────────────────────────────────────
   const { data: rawRows, error } = await supabase
     .from('work_orders')
-    .select('id, work_order_number, status, total, created_at, estimate_id, estimate_number, customer_id, vehicle_id')
+    .select('id, work_order_number, status, total, created_at, estimate_id, estimate_number, customer_id, vehicle_id, technician_id')
     .eq('tenant_id', tenantId)
     .eq('is_archived', false)          // Phase A: hide archived records from list
     .order('created_at', { ascending: false })
@@ -91,13 +106,35 @@ export default async function WorkOrdersPage() {
       estimate_number:   r.estimate_number ?? null,
       customerName:      c ? `${c.first_name} ${c.last_name}`.trim() : null,
       vehicleLabel:      v ? [v.year, v.make, v.model].filter(Boolean).join(' ') : null,
+      technician_id:     (r.technician_id as string | null) ?? null,
     }
   })
+
+  const [appRole, currentTu, teamUsers] = await Promise.all([
+    getCurrentAppRoleForTenant(),
+    getCurrentTenantUser(tenantId),
+    getTeamUsers(tenantId),
+  ])
+  const assignmentScope = parseAssignmentListScope(searchParams?.scope)
+  const advisorTechParsed = parseAdvisorTechnicianFilterParam(searchParams?.tech, appRole)
+  const advisorTechnicianId = validatedAdvisorTechnicianId(advisorTechParsed, teamUsers)
+  const technicianNameById = technicianNameMapFromTeamUsers(teamUsers)
+  const advisorTechnicianOptions = advisorTechnicianFilterOptionsFromTeamUsers(teamUsers)
+  const showAdvisorTechFilter = canUseAdvisorTechnicianFilter(appRole)
 
   return (
     <>
       <Topbar title="Work Orders" />
-      <WorkOrdersList workOrders={workOrders} />
+      <WorkOrdersList
+        workOrders={workOrders}
+        assignmentScope={assignmentScope}
+        appRole={appRole}
+        currentTenantUserId={currentTu?.id ?? ''}
+        advisorTechnicianId={advisorTechnicianId}
+        technicianNameById={technicianNameById}
+        advisorTechnicianOptions={advisorTechnicianOptions}
+        showAdvisorTechFilter={showAdvisorTechFilter}
+      />
     </>
   )
 }

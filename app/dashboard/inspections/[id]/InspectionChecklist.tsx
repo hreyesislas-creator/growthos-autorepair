@@ -15,6 +15,7 @@ import {
   generateRecommendations,
   archiveInspection,
   createInspectionItemRow,
+  setInspectionTechnician,
 } from '../actions'
 import {
   createEstimateFromInspection,
@@ -82,6 +83,15 @@ interface Props {
   initialRecommendations: ServiceRecommendation[]
   technician?:            TenantUser | null
   linkedEstimate?:        LinkedEstimate | null
+  /** When false, checklist item edits and inspection lifecycle actions are hidden/disabled (viewer, etc.). */
+  canEditInspections?:    boolean
+  /** When false, create/present estimate actions from this page are hidden (technician, viewer, etc.). */
+  canEditEstimates?:      boolean
+  /** Advisor/admin: show assign/reassign technician control. */
+  canAssignTechnician?:   boolean
+  teamUsersForAssignment?: TenantUser[]
+  /** Technician viewing without edit access (wrong assignee or unassigned). */
+  assignmentReadOnlyBanner?: string | null
 }
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -245,6 +255,11 @@ export default function InspectionChecklist({
   initialRecommendations,
   technician,
   linkedEstimate = null,
+  canEditInspections = true,
+  canEditEstimates = true,
+  canAssignTechnician = false,
+  teamUsersForAssignment = [],
+  assignmentReadOnlyBanner = null,
 }: Props) {
   const router = useRouter()
 
@@ -316,6 +331,13 @@ export default function InspectionChecklist({
   const [archiveTier,    setArchiveTier]    = useState<'standard' | 'strong_warning' | 'hard_block'>('standard')
   const [archiveWarning, setArchiveWarning] = useState('')
 
+  const [assignTechId, setAssignTechId]     = useState<string>(() => inspection.technician_id ?? '')
+  const [assignSaving, setAssignSaving] = useState(false)
+  const [assignError,  setAssignError]      = useState<string | null>(null)
+
+  useEffect(() => {
+    setAssignTechId(inspection.technician_id ?? '')
+  }, [inspection.technician_id])
 
   // ── Completion state (local) ────────────────────────────────────────────────
   //
@@ -330,6 +352,7 @@ export default function InspectionChecklist({
     () => inspection.status === 'completed',
   )
   const isReadOnly = isCompletedLocal
+  const itemInteractionLocked = isReadOnly || !canEditInspections
 
   // ── Derived values ─────────────────────────────────────────────────────────
 
@@ -356,13 +379,13 @@ export default function InspectionChecklist({
   // ── Checklist handlers ─────────────────────────────────────────────────────
 
   function setResult(itemId: string, result: ItemResult) {
-    if (isReadOnly) return
+    if (itemInteractionLocked) return
     setSaveResult('idle')
     setItemState(prev => ({ ...prev, [itemId]: { ...prev[itemId], result } }))
   }
 
   function setNote(itemId: string, note: string) {
-    if (isReadOnly) return
+    if (itemInteractionLocked) return
     setItemState(prev => ({ ...prev, [itemId]: { ...prev[itemId], note } }))
   }
 
@@ -405,6 +428,7 @@ export default function InspectionChecklist({
   )
 
   async function handlePhotoUpload(templateItemId: string, file: File) {
+    if (itemInteractionLocked) return
     console.log('[handlePhotoUpload] called', { templateItemId, fileName: file.name, fileSize: file.size, fileType: file.type })
 
     // Resolve from already-saved rows first, then fall back to rows created
@@ -461,7 +485,7 @@ export default function InspectionChecklist({
   // ── Save handler ───────────────────────────────────────────────────────────
 
   async function handleSave() {
-    if (isReadOnly) return
+    if (itemInteractionLocked) return
     setSaving(true)
     setSaveResult('idle')
     setSaveError(null)
@@ -490,6 +514,7 @@ export default function InspectionChecklist({
   // ── Complete / reopen handlers ─────────────────────────────────────────────
 
   async function handleComplete() {
+    if (!canEditInspections) return
     setCompleting(true)
     setSaveResult('idle')
     setSaveError(null)
@@ -508,6 +533,7 @@ export default function InspectionChecklist({
   }
 
   async function handleReopen() {
+    if (!canEditInspections) return
     setReopening(true)
     setSaveResult('idle')
     setSaveError(null)
@@ -536,6 +562,7 @@ export default function InspectionChecklist({
   }
 
   function openArchiveModal() {
+    if (!canEditInspections) return
     setArchiveError(null)
     // Inspections do not have an "approved" equivalent — always standard tier.
     // The linked-estimate blocker is returned by the server action as an error.
@@ -567,7 +594,24 @@ export default function InspectionChecklist({
 
   // ── Generate recommendations handler ──────────────────────────────────────
 
+  async function handleSaveTechnicianAssignment() {
+    if (!canAssignTechnician) return
+    const nextId = assignTechId.trim() || null
+    const prevId = inspection.technician_id ?? null
+    if (nextId === prevId) return
+    setAssignSaving(true)
+    setAssignError(null)
+    const result = await setInspectionTechnician(inspection.id, nextId)
+    setAssignSaving(false)
+    if (result?.error) {
+      setAssignError(result.error)
+      return
+    }
+    router.refresh()
+  }
+
   async function handleGenerate() {
+    if (!canEditInspections) return
     setGenerating(true)
     setGenError(null)
 
@@ -586,6 +630,7 @@ export default function InspectionChecklist({
   // ── Create Estimate handler ────────────────────────────────────────────────
 
   async function handleCreateEstimate() {
+    if (!canEditEstimates) return
     setCreatingEstimate(true)
     setEstimateError(null)
 
@@ -634,6 +679,16 @@ export default function InspectionChecklist({
   return (
     <div className="dash-content">
 
+      {assignmentReadOnlyBanner && (
+        <div style={{
+          marginBottom: 16, padding: '12px 16px',
+          background: '#fef3c7', border: '1px solid #fcd34d',
+          borderRadius: 'var(--r8, 8px)', fontSize: 13, color: '#92400e',
+        }}>
+          {assignmentReadOnlyBanner}
+        </div>
+      )}
+
       {/* ── Completed banner ──────────────────────────────────────────────── */}
       {isReadOnly && (
         <div style={{
@@ -646,21 +701,23 @@ export default function InspectionChecklist({
           <div style={{ flex: 1, fontSize: 13, fontWeight: 600, color: '#15803d' }}>
             Inspection completed — checklist is read-only.
           </div>
-          <button
-            type="button"
-            className="btn-ghost"
-            disabled={reopening}
-            style={{ fontSize: 12, opacity: reopening ? 0.6 : 1 }}
-            onClick={handleReopen}
-          >
-            {reopening ? 'Reopening…' : 'Edit Inspection'}
-          </button>
+          {canEditInspections && (
+            <button
+              type="button"
+              className="btn-ghost"
+              disabled={reopening}
+              style={{ fontSize: 12, opacity: reopening ? 0.6 : 1 }}
+              onClick={handleReopen}
+            >
+              {reopening ? 'Reopening…' : 'Edit Inspection'}
+            </button>
+          )}
         </div>
       )}
 
       {/* ── Linked estimate card ──────────────────────────────────────────── */}
       {linkedEstimate && (
-        <LinkedEstimateCard estimate={linkedEstimate} />
+        <LinkedEstimateCard estimate={linkedEstimate} showPresent={canEditEstimates} />
       )}
 
       {/* ── Save result banners ───────────────────────────────────────────── */}
@@ -694,8 +751,59 @@ export default function InspectionChecklist({
       {/* ── Progress + summary card ───────────────────────────────────────── */}
       <div className="card" style={{ marginBottom: 16 }}>
 
-        {/* Technician info */}
-        {technician && (
+        {/* Technician assignment (advisor/admin) or read-only display */}
+        {canAssignTechnician && teamUsersForAssignment.length > 0 && (
+          <div style={{
+            paddingBottom: 12, marginBottom: 10,
+            borderBottom: '1px solid var(--border-2)',
+          }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)', marginBottom: 6 }}>
+              Assigned technician
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+              <select
+                className="field-input"
+                value={assignTechId}
+                onChange={e => setAssignTechId(e.target.value)}
+                style={{ flex: '1 1 200px', maxWidth: 320, fontSize: 13 }}
+              >
+                <option value="">— Unassigned —</option>
+                {teamUsersForAssignment.map(u => (
+                  <option key={u.id} value={u.id}>
+                    {u.full_name?.trim() || u.email}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn-primary"
+                style={{ fontSize: 12 }}
+                disabled={
+                  assignSaving ||
+                  (assignTechId || '') === (inspection.technician_id ?? '')
+                }
+                onClick={handleSaveTechnicianAssignment}
+              >
+                {assignSaving ? 'Saving…' : 'Update'}
+              </button>
+            </div>
+            {assignError && (
+              <div style={{ fontSize: 12, color: '#b91c1c', marginTop: 6 }}>{assignError}</div>
+            )}
+          </div>
+        )}
+
+        {canAssignTechnician && teamUsersForAssignment.length === 0 && (
+          <div style={{
+            fontSize: 12, color: 'var(--text-3)',
+            paddingBottom: 10, marginBottom: 10,
+            borderBottom: '1px solid var(--border-2)',
+          }}>
+            No technician or admin users on the team yet — add members under <strong>Team</strong> to assign inspections.
+          </div>
+        )}
+
+        {!canAssignTechnician && technician && (
           <div style={{
             display: 'flex', alignItems: 'center', gap: 8,
             paddingBottom: 10, marginBottom: 10,
@@ -729,6 +837,16 @@ export default function InspectionChecklist({
                 {technician.role}
               </span>
             </div>
+          </div>
+        )}
+
+        {!canAssignTechnician && !technician && (
+          <div style={{
+            fontSize: 12, color: 'var(--text-3)',
+            paddingBottom: 10, marginBottom: 10,
+            borderBottom: '1px solid var(--border-2)',
+          }}>
+            Technician: <strong style={{ color: 'var(--text)' }}>Unassigned</strong>
           </div>
         )}
 
@@ -813,15 +931,15 @@ export default function InspectionChecklist({
                           key={opt.value}
                           type="button"
                           onClick={() => setResult(item.id, opt.value)}
-                          disabled={isReadOnly}
-                          title={isReadOnly ? 'Inspection is completed' : undefined}
+                          disabled={itemInteractionLocked}
+                          title={itemInteractionLocked ? 'Read-only' : undefined}
                           style={{
                             padding: '3px 9px', fontSize: 11,
                             fontWeight: isActive ? 700 : 400,
                             borderRadius: 'var(--r6,6px)',
                             border: '1px solid var(--border)',
-                            cursor: isReadOnly ? 'default' : 'pointer',
-                            opacity: isReadOnly && !isActive ? 0.35 : 1,
+                            cursor: itemInteractionLocked ? 'default' : 'pointer',
+                            opacity: itemInteractionLocked && !isActive ? 0.35 : 1,
                             transition: 'all 0.1s',
                             ...(isActive ? opt.activeStyle : { background: 'transparent', color: 'var(--text-3)' }),
                           }}
@@ -835,16 +953,16 @@ export default function InspectionChecklist({
                     <button
                       type="button"
                       onClick={() => toggleNote(item.id)}
-                      disabled={isReadOnly && !state.note}
+                      disabled={itemInteractionLocked && !state.note}
                       title="Technician note"
                       style={{
                         padding: '3px 7px', fontSize: 11,
                         borderRadius: 'var(--r6,6px)',
                         border: '1px solid var(--border)',
-                        cursor: isReadOnly && !state.note ? 'default' : 'pointer',
+                        cursor: itemInteractionLocked && !state.note ? 'default' : 'pointer',
                         background: state.note ? 'var(--blue-bg,#eff6ff)' : 'transparent',
                         color:      state.note ? 'var(--blue-light,#3b82f6)' : 'var(--text-3)',
-                        opacity: isReadOnly && !state.note ? 0.35 : 1,
+                        opacity: itemInteractionLocked && !state.note ? 0.35 : 1,
                       }}
                     >
                       ✎
@@ -855,7 +973,7 @@ export default function InspectionChecklist({
                 {/* Note field */}
                 {noteOpen && (
                   <div style={{ marginTop: 8, paddingLeft: 14 }}>
-                    {isReadOnly ? (
+                    {itemInteractionLocked ? (
                       state.note ? (
                         <p style={{
                           fontSize: 12, color: 'var(--text-3)', margin: 0,
@@ -878,7 +996,7 @@ export default function InspectionChecklist({
                 )}
 
                 {/* Add Photo */}
-                {!isReadOnly && (
+                {!itemInteractionLocked && (
                   <div style={{ marginTop: 6, paddingLeft: 14 }}>
                     <input
                       type="file"
@@ -973,8 +1091,8 @@ export default function InspectionChecklist({
             </span>
           )}
 
-          {/* Generate button — always visible */}
-          <button
+          {canEditInspections && (
+            <button
             type="button"
             className="btn-ghost"
             disabled={generating}
@@ -984,6 +1102,7 @@ export default function InspectionChecklist({
           >
             {generating ? 'Generating…' : '⚙ Generate Findings'}
           </button>
+          )}
         </div>
 
         {/* Generate error */}
@@ -1180,46 +1299,53 @@ export default function InspectionChecklist({
                 >
                   📋 View Estimate
                 </a>
-                <a
-                  href={`/dashboard/estimates/${linkedEstimate.id}/present`}
-                  className="btn-ghost"
-                  style={{ fontSize: 12 }}
-                >
-                  Present to Customer ↗
-                </a>
+                {canEditEstimates && (
+                  <a
+                    href={`/dashboard/estimates/${linkedEstimate.id}/present`}
+                    className="btn-ghost"
+                    style={{ fontSize: 12 }}
+                  >
+                    Present to Customer ↗
+                  </a>
+                )}
               </>
             ) : (
+              canEditEstimates ? (
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={creatingEstimate}
+                  style={{ fontSize: 12, opacity: creatingEstimate ? 0.6 : 1 }}
+                  onClick={handleCreateEstimate}
+                >
+                  {creatingEstimate ? 'Creating…' : '📋 Create Estimate'}
+                </button>
+              ) : null
+            )}
+            {canEditInspections && (
               <button
                 type="button"
-                className="btn-primary"
-                disabled={creatingEstimate}
-                style={{ fontSize: 12, opacity: creatingEstimate ? 0.6 : 1 }}
-                onClick={handleCreateEstimate}
+                className="btn-ghost"
+                disabled={reopening}
+                style={{ fontSize: 12, opacity: reopening ? 0.6 : 1 }}
+                onClick={handleReopen}
               >
-                {creatingEstimate ? 'Creating…' : '📋 Create Estimate'}
+                {reopening ? 'Reopening…' : 'Edit Inspection'}
               </button>
             )}
-            <button
-              type="button"
-              className="btn-ghost"
-              disabled={reopening}
-              style={{ fontSize: 12, opacity: reopening ? 0.6 : 1 }}
-              onClick={handleReopen}
-            >
-              {reopening ? 'Reopening…' : 'Edit Inspection'}
-            </button>
             <a href="/dashboard/inspections" className="btn-ghost" style={{ fontSize: 12 }}>
               ← Back
             </a>
-            {/* Archive — always available, destructive */}
-            <button
-              type="button"
-              className="btn-danger"
-              style={{ fontSize: 12 }}
-              onClick={openArchiveModal}
-            >
-              Archive
-            </button>
+            {canEditInspections && (
+              <button
+                type="button"
+                className="btn-danger"
+                style={{ fontSize: 12 }}
+                onClick={openArchiveModal}
+              >
+                Archive
+              </button>
+            )}
           </>
         ) : (
           /* ── Editable mode ──────────────────────────────────────────────── */
@@ -1236,15 +1362,17 @@ export default function InspectionChecklist({
               )}
             </div>
 
-            <button
-              type="button"
-              className="btn-primary"
-              disabled={saving}
-              style={{ opacity: saving ? 0.6 : 1 }}
-              onClick={handleSave}
-            >
-              {saving ? 'Saving…' : 'Save Results'}
-            </button>
+            {canEditInspections && (
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={saving}
+                style={{ opacity: saving ? 0.6 : 1 }}
+                onClick={handleSave}
+              >
+                {saving ? 'Saving…' : 'Save Results'}
+              </button>
+            )}
 
             {linkedEstimate ? (
               <a
@@ -1255,40 +1383,45 @@ export default function InspectionChecklist({
                 📋 View Estimate
               </a>
             ) : (
+              canEditEstimates ? (
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  disabled={creatingEstimate}
+                  style={{ fontSize: 12, opacity: creatingEstimate ? 0.6 : 1 }}
+                  onClick={handleCreateEstimate}
+                >
+                  {creatingEstimate ? 'Creating…' : '📋 Create Estimate'}
+                </button>
+              ) : null
+            )}
+
+            {canEditInspections && (
               <button
                 type="button"
                 className="btn-ghost"
-                disabled={creatingEstimate}
-                style={{ fontSize: 12, opacity: creatingEstimate ? 0.6 : 1 }}
-                onClick={handleCreateEstimate}
+                disabled={completing}
+                style={{ fontSize: 12, opacity: completing ? 0.6 : 1 }}
+                onClick={handleComplete}
+                title={counts.nc > 0 ? `${counts.nc} items still unchecked` : 'Mark inspection as completed'}
               >
-                {creatingEstimate ? 'Creating…' : '📋 Create Estimate'}
+                {completing ? 'Completing…' : `Mark Completed${counts.nc > 0 ? ` (${counts.nc} left)` : ''}`}
               </button>
             )}
-
-            <button
-              type="button"
-              className="btn-ghost"
-              disabled={completing}
-              style={{ fontSize: 12, opacity: completing ? 0.6 : 1 }}
-              onClick={handleComplete}
-              title={counts.nc > 0 ? `${counts.nc} items still unchecked` : 'Mark inspection as completed'}
-            >
-              {completing ? 'Completing…' : `Mark Completed${counts.nc > 0 ? ` (${counts.nc} left)` : ''}`}
-            </button>
 
             <a href="/dashboard/inspections" className="btn-ghost" style={{ fontSize: 12 }}>
               Cancel
             </a>
-            {/* Archive — always available, destructive */}
-            <button
-              type="button"
-              className="btn-danger"
-              style={{ fontSize: 12 }}
-              onClick={openArchiveModal}
-            >
-              Archive
-            </button>
+            {canEditInspections && (
+              <button
+                type="button"
+                className="btn-danger"
+                style={{ fontSize: 12 }}
+                onClick={openArchiveModal}
+              >
+                Archive
+              </button>
+            )}
           </>
         )}
       </div>
@@ -1328,7 +1461,13 @@ const ESTIMATE_STATUS_STYLES: Record<string, { bg: string; color: string; border
   declined: { bg: '#fed7aa', color: '#7c2d12', border: '#fb923c', label: 'Rejected'  },
 }
 
-function LinkedEstimateCard({ estimate }: { estimate: LinkedEstimate }) {
+function LinkedEstimateCard({
+  estimate,
+  showPresent = true,
+}: {
+  estimate: LinkedEstimate
+  showPresent?: boolean
+}) {
   const style = ESTIMATE_STATUS_STYLES[estimate.status] ?? ESTIMATE_STATUS_STYLES.draft
 
   const updatedLabel = estimate.updated_at
@@ -1391,13 +1530,15 @@ function LinkedEstimateCard({ estimate }: { estimate: LinkedEstimate }) {
         >
           View Estimate
         </a>
-        <a
-          href={`/dashboard/estimates/${estimate.id}/present`}
-          className="btn-ghost"
-          style={{ fontSize: 12 }}
-        >
-          Present to Customer ↗
-        </a>
+        {showPresent ? (
+          <a
+            href={`/dashboard/estimates/${estimate.id}/present`}
+            className="btn-ghost"
+            style={{ fontSize: 12 }}
+          >
+            Present to Customer ↗
+          </a>
+        ) : null}
       </div>
     </div>
   )

@@ -1,3 +1,4 @@
+import { assertCanEditDashboardModule } from '@/lib/auth/roles'
 import { getDashboardTenant } from '@/lib/tenant'
 import {
   getCustomers, getVehicles, getInspectionTemplates,
@@ -9,6 +10,7 @@ import InspectionForm from '../InspectionForm'
 export const metadata = { title: 'New Inspection' }
 
 export default async function NewInspectionPage() {
+  await assertCanEditDashboardModule('inspections')
   const ctx      = await getDashboardTenant()
   const tenantId = ctx?.tenant.id ?? ''
 

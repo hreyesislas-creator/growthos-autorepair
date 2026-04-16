@@ -1,4 +1,5 @@
 import { notFound }            from 'next/navigation'
+import { canEditDashboardModule } from '@/lib/auth/roles'
 import { getDashboardTenant }  from '@/lib/tenant'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import Topbar                  from '@/components/dashboard/Topbar'
@@ -179,10 +180,12 @@ export default async function EstimatesPage() {
     }
   })
 
+  const canEditEstimates = await canEditDashboardModule('estimates')
+
   return (
     <>
       <Topbar title="Estimates" />
-      <EstimatesList estimates={estimates} />
+      <EstimatesList estimates={estimates} canEditEstimates={canEditEstimates} />
     </>
   )
 }

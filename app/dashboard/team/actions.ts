@@ -2,6 +2,7 @@
 
 import { createAdminClient } from '@/lib/supabase/server'
 import { createClient } from '@/lib/supabase/server'
+import { denyUnlessCanEditDashboardModule } from '@/lib/auth/roles'
 import { getDashboardTenant } from '@/lib/tenant'
 
 const VALID_ROLES = ['admin', 'advisor', 'technician', 'viewer'] as const
@@ -61,6 +62,9 @@ export async function inviteUser(
     )
     return { error: 'Not authorized' }
   }
+
+  const inviteDenied = await denyUnlessCanEditDashboardModule('team')
+  if (inviteDenied) return inviteDenied
 
   const email = String(formData.get('email') ?? '').trim().toLowerCase()
   const role = String(formData.get('role') ?? '').trim() as Role
@@ -425,6 +429,9 @@ export async function deactivateTeamMember(
 ): Promise<{ success: true } | { error: string }> {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
+
+  const deactivateDenied = await denyUnlessCanEditDashboardModule('team')
+  if (deactivateDenied) return deactivateDenied
 
   const id = tenantUserId?.trim()
   if (!id) return { error: 'Invalid user' }

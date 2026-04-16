@@ -7,8 +7,16 @@ import {
   getInspectionTemplates,
   getInspectionRecommendations,
   getTenantUserById,
+  getTeamUsers,
+  getCurrentTenantUser,
 } from '@/lib/queries'
 import { createClient } from '@/lib/supabase/server'
+import {
+  canEditDashboardModule,
+  getCurrentAppRoleForTenant,
+  isAdmin,
+} from '@/lib/auth/roles'
+import { technicianMayMutateAssignedRecord } from '@/lib/auth/operational-assignment'
 import Topbar from '@/components/dashboard/Topbar'
 import InspectionChecklist from './InspectionChecklist'
 import type { InspectionTemplateItem } from '@/lib/types'
@@ -137,6 +145,39 @@ export default async function InspectionDetailPage({
 
   const sections = groupBySection(templateItems)
 
+  const [canEditInspectionsModule, canEditEstimates, role, currentTu, teamUsers] = await Promise.all([
+    canEditDashboardModule('inspections'),
+    canEditDashboardModule('estimates'),
+    getCurrentAppRoleForTenant(),
+    getCurrentTenantUser(tenantId),
+    getTeamUsers(tenantId),
+  ])
+
+  const assignableTeamUsers = teamUsers.filter(u => {
+    if (!u.is_active) return false
+    const r = u.role
+    return r === 'technician' || r === 'staff' || r === 'admin' || r === 'owner' || r === 'manager'
+  })
+
+  const canAssignTechnician =
+    canEditInspectionsModule && (isAdmin(role) || role === 'service_advisor')
+
+  const currentTenantUserId = currentTu?.id ?? ''
+  const canEditInspections =
+    canEditInspectionsModule &&
+    technicianMayMutateAssignedRecord(
+      role,
+      inspection.technician_id ?? null,
+      currentTenantUserId || '__no_user__',
+    )
+
+  const assignmentReadOnlyBanner =
+    canEditInspectionsModule && !canEditInspections && role === 'technician'
+      ? inspection.technician_id
+        ? 'You can view this inspection but only the assigned technician can edit it.'
+        : 'No technician is assigned. A service advisor must assign one before you can edit this inspection.'
+      : null
+
   return (
     <>
       <Topbar
@@ -152,6 +193,11 @@ export default async function InspectionDetailPage({
         initialRecommendations={recommendations}
         technician={technician}
         linkedEstimate={linkedEstimate}
+        canEditInspections={canEditInspections}
+        canEditEstimates={canEditEstimates}
+        canAssignTechnician={canAssignTechnician}
+        teamUsersForAssignment={assignableTeamUsers}
+        assignmentReadOnlyBanner={assignmentReadOnlyBanner}
       />
     </>
   )

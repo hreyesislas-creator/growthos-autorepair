@@ -1,9 +1,9 @@
 'use client'
 
-import { useState }    from 'react'
+import { useState, useEffect }    from 'react'
 import Link            from 'next/link'
 import { useRouter }   from 'next/navigation'
-import type { WorkOrderWithItems, WorkOrderStatus } from '@/lib/types'
+import type { WorkOrderWithItems, WorkOrderStatus, TenantUser } from '@/lib/types'
 import {
   updateWorkOrderStatus,
   startWorkOrder,
@@ -11,6 +11,7 @@ import {
   reopenWorkOrder,
   cancelWorkOrder,
   createInvoiceFromWorkOrder,
+  setWorkOrderTechnician,
   type WorkOrderTimeSnapshot,
 } from './actions'
 import ArchiveConfirmModal from '@/components/dashboard/ArchiveConfirmModal'
@@ -109,15 +110,39 @@ function ActionButton({ label, color, shadow, disabled, onClick }: ActionButtonP
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 interface Props {
-  workOrder:    WorkOrderWithItems
-  customerName: string | null
-  vehicleLabel: string | null
+  workOrder:           WorkOrderWithItems
+  customerName:        string | null
+  vehicleLabel:        string | null
+  canEditWorkOrders?:  boolean
+  canEditInvoices?:    boolean
+  canAssignWorkOrderTechnician?: boolean
+  teamUsersForAssignment?: TenantUser[]
+  assignedTechnician?: TenantUser | null
+  assignmentReadOnlyBanner?: string | null
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function WorkOrderDetail({ workOrder, customerName, vehicleLabel }: Props) {
+export default function WorkOrderDetail({
+  workOrder,
+  customerName,
+  vehicleLabel,
+  canEditWorkOrders = true,
+  canEditInvoices = true,
+  canAssignWorkOrderTechnician = false,
+  teamUsersForAssignment = [],
+  assignedTechnician = null,
+  assignmentReadOnlyBanner = null,
+}: Props) {
   const router = useRouter()
+
+  const [woTechId, setWoTechId] = useState(workOrder.technician_id ?? '')
+  const [woAssignSaving, setWoAssignSaving] = useState(false)
+  const [woAssignErr, setWoAssignErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    setWoTechId(workOrder.technician_id ?? '')
+  }, [workOrder.technician_id])
 
   // ── Local state — optimistic mirrors of DB values ─────────────────────────
   const [status,      setStatus]      = useState<WorkOrderStatus>(workOrder.status as WorkOrderStatus)
@@ -239,6 +264,22 @@ export default function WorkOrderDetail({ workOrder, customerName, vehicleLabel 
 
   // ── Invoice handlers ──────────────────────────────────────────────────────
 
+  async function handleSaveWoTechnician() {
+    if (!canAssignWorkOrderTechnician) return
+    const nextId = woTechId.trim() || null
+    const prevId = workOrder.technician_id ?? null
+    if (nextId === prevId) return
+    setWoAssignSaving(true)
+    setWoAssignErr(null)
+    const result = await setWorkOrderTechnician(workOrder.id, nextId)
+    setWoAssignSaving(false)
+    if (result?.error) {
+      setWoAssignErr(result.error)
+      return
+    }
+    router.refresh()
+  }
+
   const handleCreateInvoice = async () => {
     // If invoice already exists, navigate to it
     if (invoiceResult) {
@@ -329,6 +370,16 @@ export default function WorkOrderDetail({ workOrder, customerName, vehicleLabel 
   return (
     <div className="dash-content">
 
+      {assignmentReadOnlyBanner && (
+        <div style={{
+          marginBottom: 16, padding: '12px 16px',
+          background: '#fef3c7', border: '1px solid #fcd34d',
+          borderRadius: 'var(--r8,8px)', fontSize: 13, color: '#92400e',
+        }}>
+          {assignmentReadOnlyBanner}
+        </div>
+      )}
+
       {/* ── Header card ──────────────────────────────────────────────────── */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
@@ -381,13 +432,72 @@ export default function WorkOrderDetail({ workOrder, customerName, vehicleLabel 
                   month: 'long', day: 'numeric', year: 'numeric',
                 })}
               </div>
+
+              {canAssignWorkOrderTechnician && teamUsersForAssignment.length > 0 && (
+                <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border-2)' }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)', marginBottom: 6 }}>
+                    Assigned technician
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+                    <select
+                      className="field-input"
+                      value={woTechId}
+                      onChange={e => setWoTechId(e.target.value)}
+                      style={{ flex: '1 1 200px', maxWidth: 280, fontSize: 13 }}
+                    >
+                      <option value="">— Unassigned —</option>
+                      {teamUsersForAssignment.map(u => (
+                        <option key={u.id} value={u.id}>
+                          {u.full_name?.trim() || u.email}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      style={{ fontSize: 12 }}
+                      disabled={
+                        woAssignSaving ||
+                        (woTechId || '') === (workOrder.technician_id ?? '')
+                      }
+                      onClick={handleSaveWoTechnician}
+                    >
+                      {woAssignSaving ? 'Saving…' : 'Update'}
+                    </button>
+                  </div>
+                  {woAssignErr && (
+                    <div style={{ fontSize: 12, color: '#b91c1c', marginTop: 6 }}>{woAssignErr}</div>
+                  )}
+                </div>
+              )}
+
+              {canAssignWorkOrderTechnician && teamUsersForAssignment.length === 0 && (
+                <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-3)' }}>
+                  Add technician or admin users under <strong>Team</strong> to assign work orders.
+                </div>
+              )}
+
+              {!canAssignWorkOrderTechnician && (
+                <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-3)' }}>
+                  Technician:{' '}
+                  <strong style={{ color: 'var(--text)' }}>
+                    {assignedTechnician
+                      ? (assignedTechnician.full_name?.trim() || assignedTechnician.email || 'Assigned')
+                      : 'Unassigned'}
+                  </strong>
+                </div>
+              )}
             </div>
           </div>
 
           {/* Right: status action buttons */}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
 
-            {status === 'draft' && (
+            {!canEditWorkOrders && (
+              <span style={{ fontSize: 12, color: 'var(--text-3)' }}>View only</span>
+            )}
+
+            {canEditWorkOrders && status === 'draft' && (
               <ActionButton
                 label={updating ? 'Updating…' : 'Mark as Ready →'}
                 color="#2563eb"
@@ -397,7 +507,7 @@ export default function WorkOrderDetail({ workOrder, customerName, vehicleLabel 
               />
             )}
 
-            {status === 'ready' && (
+            {canEditWorkOrders && status === 'ready' && (
               <ActionButton
                 label={updating ? 'Starting…' : '▶ Start Work'}
                 color="#16a34a"
@@ -407,7 +517,7 @@ export default function WorkOrderDetail({ workOrder, customerName, vehicleLabel 
               />
             )}
 
-            {status === 'in_progress' && (
+            {canEditWorkOrders && status === 'in_progress' && (
               <ActionButton
                 label={updating ? 'Completing…' : '✓ Complete Work'}
                 color="#d97706"
@@ -417,7 +527,7 @@ export default function WorkOrderDetail({ workOrder, customerName, vehicleLabel 
               />
             )}
 
-            {status === 'completed' && (
+            {canEditWorkOrders && status === 'completed' && (
               <ActionButton
                 label={updating ? 'Reopening…' : '↩ Reopen Work Order'}
                 color="#64748b"
@@ -434,7 +544,7 @@ export default function WorkOrderDetail({ workOrder, customerName, vehicleLabel 
             )}
 
             {/* ── Create/View Invoice — shown when work order is completed ────── */}
-            {status === 'completed' && (
+            {canEditWorkOrders && canEditInvoices && status === 'completed' && (
               <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border-2)' }}>
                 <button
                   type="button"
@@ -477,7 +587,8 @@ export default function WorkOrderDetail({ workOrder, customerName, vehicleLabel 
               </div>
             )}
 
-            {/* ── Cancel / Archive — always shown, styled as secondary destructive */}
+            {/* ── Cancel / Archive — work order edit permission */}
+            {canEditWorkOrders && (
             <div style={{ marginTop: 4, borderTop: '1px solid var(--border-2)', paddingTop: 8 }}>
               <button
                 type="button"
@@ -489,6 +600,7 @@ export default function WorkOrderDetail({ workOrder, customerName, vehicleLabel 
                 {cancelButtonLabel}
               </button>
             </div>
+            )}
           </div>
         </div>
       </div>

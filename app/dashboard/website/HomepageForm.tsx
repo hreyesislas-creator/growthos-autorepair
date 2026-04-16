@@ -6,10 +6,11 @@ import { saveHomepageContent } from './actions'
 import type { HomepageContent } from '@/lib/types'
 
 interface Props {
-  content: HomepageContent | null
+  content:   HomepageContent | null
+  readOnly?: boolean
 }
 
-export default function HomepageForm({ content }: Props) {
+export default function HomepageForm({ content, readOnly = false }: Props) {
   const router = useRouter()
   const [error,   setError]   = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
@@ -17,6 +18,7 @@ export default function HomepageForm({ content }: Props) {
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    if (readOnly) return
     setPending(true)
     setError(null)
     setSuccess(false)
@@ -37,17 +39,23 @@ export default function HomepageForm({ content }: Props) {
 
   return (
     <form onSubmit={handleSubmit}>
+      <fieldset
+        disabled={readOnly}
+        style={{ border: 'none', padding: 0, margin: 0, minWidth: 0 }}
+      >
       <div className="card">
         <div className="section-header">
           <div className="section-title">Homepage Content</div>
-          <button
-            type="submit"
-            className="btn-primary"
-            disabled={pending}
-            style={{ fontSize: '12px', padding: '6px 12px', opacity: pending ? 0.6 : 1 }}
-          >
-            {pending ? 'Saving…' : success ? '✓ Saved' : 'Save'}
-          </button>
+          {!readOnly && (
+            <button
+              type="submit"
+              className="btn-primary"
+              disabled={pending}
+              style={{ fontSize: '12px', padding: '6px 12px', opacity: pending ? 0.6 : 1 }}
+            >
+              {pending ? 'Saving…' : success ? '✓ Saved' : 'Save'}
+            </button>
+          )}
         </div>
 
         <div className="form-grid">
@@ -108,6 +116,7 @@ export default function HomepageForm({ content }: Props) {
           </div>
         )}
       </div>
+      </fieldset>
     </form>
   )
 }

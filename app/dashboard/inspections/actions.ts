@@ -1,5 +1,11 @@
 'use server'
 
+import {
+  getCurrentDashboardTenantUser,
+  denyUnlessMayMutateInspection,
+  canAssignOperationalTechnician,
+} from '@/lib/auth/operational-assignment'
+import { denyUnlessCanEditDashboardModule } from '@/lib/auth/roles'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { getDashboardTenant } from '@/lib/tenant'
 import type { ServiceRecommendation } from '@/lib/types'
@@ -17,12 +23,20 @@ export async function createInspection(
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
 
+  const inspDenied = await denyUnlessCanEditDashboardModule('inspections')
+  if (inspDenied) return inspDenied
+
+  const du = await getCurrentDashboardTenantUser()
+
   const supabase = await createClient()
 
   const vehicleId    = String(formData.get('vehicle_id')    ?? '').trim() || null
   const customerId   = String(formData.get('customer_id')   ?? '').trim() || null
   let templateId     = String(formData.get('template_id')   ?? '').trim() || null
-  const technicianId = String(formData.get('technician_id') ?? '').trim() || null
+  let technicianId   = String(formData.get('technician_id') ?? '').trim() || null
+  if (du?.role === 'technician') {
+    technicianId = du.tenantUserId
+  }
   const notes        = String(formData.get('notes')         ?? '').trim() || null
 
   // Server-side fallback: If no template provided, use "Standard Vehicle Inspection"
@@ -79,8 +93,14 @@ export async function completeInspection(
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
 
+  const inspDenied = await denyUnlessCanEditDashboardModule('inspections')
+  if (inspDenied) return inspDenied
+
   const supabase = await createClient()
   const tenantId = ctx.tenant.id
+
+  const assignDenied = await denyUnlessMayMutateInspection(inspectionId, tenantId)
+  if (assignDenied) return assignDenied
 
   console.log('[completeInspection] starting', { inspectionId, tenantId })
 
@@ -222,8 +242,14 @@ export async function reopenInspection(
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
 
+  const inspDenied = await denyUnlessCanEditDashboardModule('inspections')
+  if (inspDenied) return inspDenied
+
   const supabase = await createClient()
   const tenantId = ctx.tenant.id
+
+  const reopenAssignDenied = await denyUnlessMayMutateInspection(inspectionId, tenantId)
+  if (reopenAssignDenied) return reopenAssignDenied
 
   console.log('[reopenInspection] starting', { inspectionId, tenantId })
 
@@ -313,7 +339,31 @@ export async function updateRecommendationStatus(
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
 
+  const inspDenied = await denyUnlessCanEditDashboardModule('inspections')
+  if (inspDenied) return inspDenied
+
   const supabase = await createClient()
+
+  const { data: recRow, error: recFetchErr } = await supabase
+    .from('service_recommendations')
+    .select('inspection_id')
+    .eq('tenant_id', ctx.tenant.id)
+    .eq('id', recommendationId)
+    .maybeSingle()
+
+  if (recFetchErr || !recRow) {
+    return { error: recFetchErr?.message ?? 'Recommendation not found.' }
+  }
+
+  if (recRow.inspection_id) {
+    const recDenied = await denyUnlessMayMutateInspection(recRow.inspection_id as string, ctx.tenant.id)
+    if (recDenied) return recDenied
+  } else {
+    const du = await getCurrentDashboardTenantUser()
+    if (du?.role === 'technician') {
+      return { error: 'Not authorized' }
+    }
+  }
 
   const { error } = await supabase
     .from('service_recommendations')
@@ -461,8 +511,14 @@ export async function saveInspectionResults(
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
 
+  const inspDenied = await denyUnlessCanEditDashboardModule('inspections')
+  if (inspDenied) return inspDenied
+
   const supabase = await createClient()
   const tenantId = ctx.tenant.id
+
+  const saveAssignDenied = await denyUnlessMayMutateInspection(inspectionId, tenantId)
+  if (saveAssignDenied) return saveAssignDenied
 
   // ── 1. Guard: don't overwrite a completed inspection ─────────────────────
   const { data: inspCheck } = await supabase
@@ -728,6 +784,12 @@ export async function createInspectionItemRow(
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
 
+  const inspDenied = await denyUnlessCanEditDashboardModule('inspections')
+  if (inspDenied) return inspDenied
+
+  const rowDenied = await denyUnlessMayMutateInspection(inspectionId, ctx.tenant.id)
+  if (rowDenied) return rowDenied
+
   const tenantId    = ctx.tenant.id
   const adminClient = createAdminClient()
 
@@ -786,9 +848,15 @@ export async function generateRecommendations(
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
 
+  const inspDenied = await denyUnlessCanEditDashboardModule('inspections')
+  if (inspDenied) return inspDenied
+
   const supabase      = await createClient()
   const adminSupabase = createAdminClient()
   const tenantId      = ctx.tenant.id
+
+  const genDenied = await denyUnlessMayMutateInspection(inspectionId, tenantId)
+  if (genDenied) return genDenied
 
   // ── 1. Fetch inspection header (vehicle / customer IDs) ───────────────────
   const { data: inspection, error: inspError } = await supabase
@@ -995,6 +1063,12 @@ export async function archiveInspection(
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authenticated' }
 
+  const archiveInspDenied = await denyUnlessCanEditDashboardModule('inspections')
+  if (archiveInspDenied) return archiveInspDenied
+
+  const archiveAssignDenied = await denyUnlessMayMutateInspection(inspectionId, ctx.tenant.id)
+  if (archiveAssignDenied) return archiveAssignDenied
+
   // ── Validate reason / note constraint ───────────────────────────────────
   if (!reason?.trim()) {
     return { error: 'A reason is required to archive an inspection.' }
@@ -1056,5 +1130,46 @@ export async function archiveInspection(
     return { error: `Failed to archive inspection: ${updateErr.message}` }
   }
 
+  return null
+}
+
+// ── Assign technician (advisor / admin only) ─────────────────────────────────
+
+export async function setInspectionTechnician(
+  inspectionId:           string,
+  technicianTenantUserId: string | null,
+): Promise<{ error: string } | null> {
+  const ctx = await getDashboardTenant()
+  if (!ctx) return { error: 'Not authorized' }
+
+  const du = await getCurrentDashboardTenantUser()
+  if (!du || !canAssignOperationalTechnician(du.role)) {
+    return { error: 'Not authorized' }
+  }
+
+  const tenantId    = ctx.tenant.id
+  const adminClient = createAdminClient()
+
+  if (technicianTenantUserId) {
+    const { data: assignee } = await adminClient
+      .from('tenant_users')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('id', technicianTenantUserId)
+      .maybeSingle()
+
+    if (!assignee) return { error: 'Invalid team member.' }
+  }
+
+  const { error } = await adminClient
+    .from('inspections')
+    .update({
+      technician_id: technicianTenantUserId,
+      updated_at:    new Date().toISOString(),
+    })
+    .eq('id', inspectionId)
+    .eq('tenant_id', tenantId)
+
+  if (error) return { error: error.message }
   return null
 }

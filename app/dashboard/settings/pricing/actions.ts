@@ -1,5 +1,6 @@
 'use server'
 
+import { denyUnlessCanEditDashboardModule } from '@/lib/auth/roles'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { getDashboardTenant } from '@/lib/tenant'
 import type { TenantPricingConfig } from '@/lib/types'
@@ -22,6 +23,9 @@ export async function savePricingConfig(
 ): Promise<{ data: TenantPricingConfig } | { error: string }> {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
+
+  const pricingDenied = await denyUnlessCanEditDashboardModule('settings')
+  if (pricingDenied) return pricingDenied
 
   const supabase   = await createAdminClient()
   const tenantId   = ctx.tenant.id

@@ -1,5 +1,6 @@
 import { getDashboardTenant } from '@/lib/tenant'
 import { getCustomers } from '@/lib/queries'
+import { canEditDashboardModule } from '@/lib/auth/roles'
 import Topbar from '@/components/dashboard/Topbar'
 import StatusBadge from '@/components/dashboard/StatusBadge'
 import Link from 'next/link'
@@ -11,10 +12,14 @@ export default async function CustomersPage() {
   const ctx       = await getDashboardTenant()
   const tenantId  = ctx?.tenant.id ?? ''
   const customers = await getCustomers(tenantId)
+  const canEdit     = await canEditDashboardModule('customers')
 
   return (
     <>
-      <Topbar title="Customers" action={{ label: 'Add Customer', href: '/dashboard/customers/new' }} />
+      <Topbar
+        title="Customers"
+        action={canEdit ? { label: 'Add Customer', href: '/dashboard/customers/new' } : undefined}
+      />
       <div className="dash-content">
         <div className="table-wrap">
           {customers.length === 0 ? (
@@ -48,13 +53,17 @@ export default async function CustomersPage() {
                       {format(new Date(c.created_at), 'MMM d, yyyy')}
                     </td>
                     <td>
-                      <Link
-                        href={`/dashboard/customers/${c.id}/edit`}
-                        className="btn-ghost"
-                        style={{ padding: '3px 10px', fontSize: '12px' }}
-                      >
-                        Edit
-                      </Link>
+                      {canEdit ? (
+                        <Link
+                          href={`/dashboard/customers/${c.id}/edit`}
+                          className="btn-ghost"
+                          style={{ padding: '3px 10px', fontSize: '12px' }}
+                        >
+                          Edit
+                        </Link>
+                      ) : (
+                        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>—</span>
+                      )}
                     </td>
                   </tr>
                 ))}

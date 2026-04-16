@@ -1,8 +1,7 @@
 import type { ReactNode } from 'react'
-import { assertDashboardRole } from '@/lib/dashboard-guard'
-import { canViewFinancials } from '@/lib/dashboard-permissions'
+import { assertCanAccessDashboardModule } from '@/lib/auth/roles'
 
 export default async function FinancialsLayout({ children }: { children: ReactNode }) {
-  await assertDashboardRole(canViewFinancials)
+  await assertCanAccessDashboardModule('financials')
   return <>{children}</>
 }

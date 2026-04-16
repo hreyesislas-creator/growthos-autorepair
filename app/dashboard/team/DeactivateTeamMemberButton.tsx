@@ -8,15 +8,17 @@ export function DeactivateTeamMemberButton({
   tenantUserId,
   role,
   isActive,
+  canManage = true,
 }: {
   tenantUserId: string
   role: string
   isActive: boolean
+  canManage?: boolean
 }) {
   const router = useRouter()
   const [pending, setPending] = useState(false)
 
-  if (role === 'owner' || !isActive) return null
+  if (!canManage || role === 'owner' || !isActive) return null
 
   async function onDeactivate() {
     if (!confirm("Remove this user's access to this shop?")) return

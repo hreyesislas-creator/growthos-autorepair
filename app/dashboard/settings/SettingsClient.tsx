@@ -8,10 +8,11 @@ import type { BusinessProfile, WebsiteSettings } from '@/lib/types'
 // ── Business Profile Form ──────────────────────────────────────
 
 interface ProfileFormProps {
-  profile: BusinessProfile | null
+  profile:   BusinessProfile | null
+  readOnly?: boolean
 }
 
-export function BusinessProfileForm({ profile }: ProfileFormProps) {
+export function BusinessProfileForm({ profile, readOnly = false }: ProfileFormProps) {
   const router  = useRouter()
   const [error,   setError]   = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
@@ -19,6 +20,7 @@ export function BusinessProfileForm({ profile }: ProfileFormProps) {
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    if (readOnly) return
     setPending(true)
     setError(null)
     setSuccess(false)
@@ -39,7 +41,11 @@ export function BusinessProfileForm({ profile }: ProfileFormProps) {
 
   return (
     <form onSubmit={handleSubmit}>
-      <div className="card">
+      <fieldset
+        disabled={readOnly}
+        style={{ border: 'none', padding: 0, margin: 0, minWidth: 0 }}
+      >
+        <div className="card">
         <div className="section-title" style={{ marginBottom: '16px' }}>Business Profile</div>
 
         {/* Business Identity */}
@@ -228,15 +234,18 @@ export function BusinessProfileForm({ profile }: ProfileFormProps) {
           </div>
         )}
 
-        <button
-          type="submit"
-          className="btn-primary"
-          disabled={pending}
-          style={{ marginTop: '16px', opacity: pending ? 0.6 : 1 }}
-        >
-          {pending ? 'Saving…' : success ? '✓ Saved' : 'Save Changes'}
-        </button>
+        {!readOnly && (
+          <button
+            type="submit"
+            className="btn-primary"
+            disabled={pending}
+            style={{ marginTop: '16px', opacity: pending ? 0.6 : 1 }}
+          >
+            {pending ? 'Saving…' : success ? '✓ Saved' : 'Save Changes'}
+          </button>
+        )}
       </div>
+      </fieldset>
     </form>
   )
 }
@@ -258,10 +267,11 @@ const MODULE_FIELDS = [
 type ModuleKey = typeof MODULE_FIELDS[number]['key']
 
 interface ModulesFormProps {
-  settings: WebsiteSettings | null
+  settings:   WebsiteSettings | null
+  readOnly?: boolean
 }
 
-export function WebsiteModulesForm({ settings }: ModulesFormProps) {
+export function WebsiteModulesForm({ settings, readOnly = false }: ModulesFormProps) {
   const router = useRouter()
 
   const initial = Object.fromEntries(
@@ -274,12 +284,14 @@ export function WebsiteModulesForm({ settings }: ModulesFormProps) {
   const [pending, setPending] = useState(false)
 
   function toggle(key: ModuleKey) {
+    if (readOnly) return
     setChecked(prev => ({ ...prev, [key]: !prev[key] }))
     setSuccess(false)
   }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    if (readOnly) return
     setPending(true)
     setError(null)
     setSuccess(false)
@@ -300,6 +312,10 @@ export function WebsiteModulesForm({ settings }: ModulesFormProps) {
 
   return (
     <form onSubmit={handleSubmit}>
+      <fieldset
+        disabled={readOnly}
+        style={{ border: 'none', padding: 0, margin: 0, minWidth: 0 }}
+      >
       <div className="card" style={{ marginBottom: '14px' }}>
         <div className="section-title" style={{ marginBottom: '12px' }}>Website Modules</div>
         <p style={{ fontSize: '12px', color: 'var(--text-3)', marginBottom: '12px' }}>
@@ -339,15 +355,18 @@ export function WebsiteModulesForm({ settings }: ModulesFormProps) {
           </div>
         )}
 
-        <button
-          type="submit"
-          className="btn-primary"
-          disabled={pending}
-          style={{ marginTop: '14px', opacity: pending ? 0.6 : 1 }}
-        >
-          {pending ? 'Saving…' : success ? '✓ Saved' : 'Save Modules'}
-        </button>
+        {!readOnly && (
+          <button
+            type="submit"
+            className="btn-primary"
+            disabled={pending}
+            style={{ marginTop: '14px', opacity: pending ? 0.6 : 1 }}
+          >
+            {pending ? 'Saving…' : success ? '✓ Saved' : 'Save Modules'}
+          </button>
+        )}
       </div>
+      </fieldset>
     </form>
   )
 }

@@ -19,6 +19,10 @@
  *     writing, so an attacker with a valid session cannot modify another tenant's data.
  */
 
+import {
+  denyUnlessCanEditAllDashboardModules,
+  denyUnlessCanEditDashboardModule,
+} from '@/lib/auth/roles'
 import { createAdminClient } from '@/lib/supabase/server'
 import { getDashboardTenant }  from '@/lib/tenant'
 
@@ -192,6 +196,9 @@ export async function approveEstimateItem(
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authenticated.' }
 
+  const approveDenied = await denyUnlessCanEditDashboardModule('estimates')
+  if (approveDenied) return approveDenied
+
   const supabase = createAdminClient()
   const tenantId = ctx.tenant.id
   const now      = new Date().toISOString()
@@ -242,6 +249,9 @@ export async function declineEstimateItem(
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authenticated.' }
 
+  const declineDenied = await denyUnlessCanEditDashboardModule('estimates')
+  if (declineDenied) return declineDenied
+
   const supabase = createAdminClient()
   const tenantId = ctx.tenant.id
   const now      = new Date().toISOString()
@@ -291,6 +301,9 @@ export async function undecideEstimateItem(
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authenticated.' }
 
+  const undecideDenied = await denyUnlessCanEditDashboardModule('estimates')
+  if (undecideDenied) return undecideDenied
+
   const supabase = createAdminClient()
   const tenantId = ctx.tenant.id
 
@@ -332,6 +345,9 @@ export async function createWorkOrderFromApprovedItems(
 ): Promise<{ data: { workOrderId: string } } | { error: string }> {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authenticated.' }
+
+  const woApprovedDenied = await denyUnlessCanEditDashboardModule('work_orders')
+  if (woApprovedDenied) return woApprovedDenied
 
   const supabase = createAdminClient()
   const tenantId = ctx.tenant.id
@@ -507,6 +523,9 @@ export async function finalizeEstimateApproval(
 ): Promise<{ data?: { workOrderId: string }; error?: string }> {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authenticated' }
+
+  const finalizeDenied = await denyUnlessCanEditAllDashboardModules(['estimates', 'work_orders'])
+  if (finalizeDenied) return { error: finalizeDenied.error }
 
   const tenantId = ctx.tenant.id
   const supabase = createAdminClient()

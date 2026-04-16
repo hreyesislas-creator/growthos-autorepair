@@ -1,5 +1,6 @@
 'use server'
 
+import { denyUnlessCanEditDashboardModule } from '@/lib/auth/roles'
 import { createClient } from '@/lib/supabase/server'
 import { getDashboardTenant } from '@/lib/tenant'
 
@@ -10,6 +11,9 @@ export async function saveHomepageContent(
 ): Promise<{ error: string } | null> {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
+
+  const websiteDenied = await denyUnlessCanEditDashboardModule('website')
+  if (websiteDenied) return websiteDenied
 
   const tenantId = ctx.tenant.id
   const supabase = await createClient()
@@ -40,6 +44,9 @@ export async function saveSectionVisibility(
 ): Promise<{ error: string } | null> {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
+
+  const websiteDenied = await denyUnlessCanEditDashboardModule('website')
+  if (websiteDenied) return websiteDenied
 
   const tenantId = ctx.tenant.id
   const supabase = await createClient()
@@ -78,6 +85,9 @@ export async function addTireBrand(
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
 
+  const websiteDenied = await denyUnlessCanEditDashboardModule('website')
+  if (websiteDenied) return websiteDenied
+
   const name = String(formData.get('name') ?? '').trim()
   if (!name) return { error: 'Brand name is required' }
 
@@ -102,6 +112,9 @@ export async function addVehicleMake(
 ): Promise<{ error: string } | null> {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
+
+  const websiteDenied = await denyUnlessCanEditDashboardModule('website')
+  if (websiteDenied) return websiteDenied
 
   const make = String(formData.get('make') ?? '').trim()
   if (!make) return { error: 'Make is required' }
@@ -128,6 +141,9 @@ export async function addSpecial(
 ): Promise<{ error: string } | null> {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
+
+  const websiteDenied = await denyUnlessCanEditDashboardModule('website')
+  if (websiteDenied) return websiteDenied
 
   const title = String(formData.get('title') ?? '').trim()
   if (!title) return { error: 'Title is required' }
@@ -156,6 +172,9 @@ export async function addGalleryItem(
 ): Promise<{ error: string } | null> {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
+
+  const websiteDenied = await denyUnlessCanEditDashboardModule('website')
+  if (websiteDenied) return websiteDenied
 
   const imageUrl = String(formData.get('image_url') ?? '').trim()
   if (!imageUrl) return { error: 'Image URL is required' }

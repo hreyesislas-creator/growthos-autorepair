@@ -41,10 +41,11 @@ const CREATION_MODE_LABELS: Record<string, string> = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface Props {
-  estimates: EstimateListRow[]
+  estimates:         EstimateListRow[]
+  canEditEstimates?: boolean
 }
 
-export default function EstimatesList({ estimates }: Props) {
+export default function EstimatesList({ estimates, canEditEstimates = true }: Props) {
   const [query,        setQuery]        = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
 
@@ -77,14 +78,15 @@ export default function EstimatesList({ estimates }: Props) {
         display: 'flex', gap: 10, alignItems: 'center',
         marginBottom: 16, flexWrap: 'wrap',
       }}>
-        {/* New Estimate */}
-        <Link
-          href="/dashboard/estimates/new"
-          className="btn-primary"
-          style={{ fontSize: 13, padding: '8px 14px', flexShrink: 0, textDecoration: 'none' }}
-        >
-          + New Estimate
-        </Link>
+        {canEditEstimates && (
+          <Link
+            href="/dashboard/estimates/new"
+            className="btn-primary"
+            style={{ fontSize: 13, padding: '8px 14px', flexShrink: 0, textDecoration: 'none' }}
+          >
+            + New Estimate
+          </Link>
+        )}
         {/* Search */}
         <div style={{ position: 'relative', flex: '1 1 260px', maxWidth: 400 }}>
           <span style={{
@@ -241,14 +243,16 @@ export default function EstimatesList({ estimates }: Props) {
                         >
                           View
                         </Link>
-                        <Link
-                          href={`/dashboard/estimates/${est.id}/present`}
-                          className="btn-ghost"
-                          style={{ padding: '3px 10px', fontSize: '12px', color: 'var(--text-3)', whiteSpace: 'nowrap' }}
-                          title="Open customer presentation view"
-                        >
-                          Present ↗
-                        </Link>
+                        {canEditEstimates && (
+                          <Link
+                            href={`/dashboard/estimates/${est.id}/present`}
+                            className="btn-ghost"
+                            style={{ padding: '3px 10px', fontSize: '12px', color: 'var(--text-3)', whiteSpace: 'nowrap' }}
+                            title="Open customer presentation view"
+                          >
+                            Present ↗
+                          </Link>
+                        )}
                       </div>
                     </td>
                   </tr>

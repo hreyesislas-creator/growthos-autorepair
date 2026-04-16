@@ -1,4 +1,5 @@
 import { getDashboardTenant } from '@/lib/tenant'
+import { canEditDashboardModule } from '@/lib/auth/roles'
 import {
   getServices, getSpecials, getTireBrands,
   getVehicleServiceBrands, getGalleryItems,
@@ -31,6 +32,7 @@ export default async function WebsitePage() {
   const ctx      = await getDashboardTenant()
   const tenantId = ctx?.tenant.id ?? ''
   const settings = ctx?.settings ?? null
+  const canEdit = await canEditDashboardModule('website')
 
   // Load CMS data in parallel
   const [services, specials, tireBrands, vehBrands, gallery] = await Promise.all([
@@ -72,7 +74,7 @@ export default async function WebsitePage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
             {/* Hero / Homepage — wired client form */}
-            <HomepageForm content={homepageContent ?? null} />
+            <HomepageForm content={homepageContent ?? null} readOnly={!canEdit} />
 
             {/* Services */}
             <div className="card">
@@ -81,13 +83,15 @@ export default async function WebsitePage() {
                   <div className="section-title">Services</div>
                   <div className="section-subtitle">{services.length} services configured</div>
                 </div>
-                <Link
-                  href="/dashboard/website/services/new"
-                  className="btn-ghost"
-                  style={{ fontSize: '12px' }}
-                >
-                  + Add Service
-                </Link>
+                {canEdit ? (
+                  <Link
+                    href="/dashboard/website/services/new"
+                    className="btn-ghost"
+                    style={{ fontSize: '12px' }}
+                  >
+                    + Add Service
+                  </Link>
+                ) : null}
               </div>
               {services.length === 0 ? (
                 <div className="empty-state" style={{ padding: '24px' }}>
@@ -110,7 +114,9 @@ export default async function WebsitePage() {
                       </div>
                       <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                         <span className={`badge ${s.is_active ? 'badge-green' : 'badge-gray'}`}>{s.is_active ? 'Active' : 'Hidden'}</span>
-                        <button className="btn-ghost" style={{ padding: '3px 8px', fontSize: '11px' }}>Edit</button>
+                        {canEdit ? (
+                          <button type="button" className="btn-ghost" style={{ padding: '3px 8px', fontSize: '11px' }}>Edit</button>
+                        ) : null}
                       </div>
                     </div>
                   ))}
@@ -156,13 +162,15 @@ export default async function WebsitePage() {
                   <div className="section-title">Vehicles We Service</div>
                   <div className="section-subtitle">{vehBrands.length} makes · supports SEO brand pages</div>
                 </div>
-                <Link
-                  href="/dashboard/website/vehicle-makes/new"
-                  className="btn-ghost"
-                  style={{ fontSize: '12px' }}
-                >
-                  + Add Make
-                </Link>
+                {canEdit ? (
+                  <Link
+                    href="/dashboard/website/vehicle-makes/new"
+                    className="btn-ghost"
+                    style={{ fontSize: '12px' }}
+                  >
+                    + Add Make
+                  </Link>
+                ) : null}
               </div>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 {vehBrands.map(b => (
@@ -187,13 +195,15 @@ export default async function WebsitePage() {
                   <div className="section-title">Specials & Promotions</div>
                   <div className="section-subtitle">{specials.filter(s => s.is_active).length} active</div>
                 </div>
-                <Link
-                  href="/dashboard/website/specials/new"
-                  className="btn-ghost"
-                  style={{ fontSize: '12px' }}
-                >
-                  + Add Special
-                </Link>
+                {canEdit ? (
+                  <Link
+                    href="/dashboard/website/specials/new"
+                    className="btn-ghost"
+                    style={{ fontSize: '12px' }}
+                  >
+                    + Add Special
+                  </Link>
+                ) : null}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {specials.map(s => (
@@ -211,7 +221,9 @@ export default async function WebsitePage() {
                     </div>
                     <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
                       <span className={`badge ${s.is_active ? 'badge-green' : 'badge-gray'}`}>{s.is_active ? 'Active' : 'Off'}</span>
-                      <button className="btn-ghost" style={{ padding: '3px 8px', fontSize: '11px' }}>Edit</button>
+                      {canEdit ? (
+                        <button type="button" className="btn-ghost" style={{ padding: '3px 8px', fontSize: '11px' }}>Edit</button>
+                      ) : null}
                     </div>
                   </div>
                 ))}
@@ -228,13 +240,15 @@ export default async function WebsitePage() {
                   <div className="section-title">Gallery</div>
                   <div className="section-subtitle">{gallery.filter(g => g.is_active).length} active photos</div>
                 </div>
-                <Link
-                  href="/dashboard/website/gallery/new"
-                  className="btn-ghost"
-                  style={{ fontSize: '12px' }}
-                >
-                  + Add Photo
-                </Link>
+                {canEdit ? (
+                  <Link
+                    href="/dashboard/website/gallery/new"
+                    className="btn-ghost"
+                    style={{ fontSize: '12px' }}
+                  >
+                    + Add Photo
+                  </Link>
+                ) : null}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: '8px' }}>
                 {gallery.map(g => (
@@ -259,7 +273,7 @@ export default async function WebsitePage() {
 
           {/* Right: section visibility — wired client form */}
           <div>
-            <SectionVisibilityForm settings={settings} />
+            <SectionVisibilityForm settings={settings} readOnly={!canEdit} />
           </div>
 
         </div>

@@ -22,10 +22,11 @@ const TOGGLE_FIELDS = [
 type Key = typeof TOGGLE_FIELDS[number]['key']
 
 interface Props {
-  settings: WebsiteSettings | null
+  settings:   WebsiteSettings | null
+  readOnly?: boolean
 }
 
-export default function SectionVisibilityForm({ settings }: Props) {
+export default function SectionVisibilityForm({ settings, readOnly = false }: Props) {
   const router = useRouter()
 
   const initial = Object.fromEntries(
@@ -38,12 +39,14 @@ export default function SectionVisibilityForm({ settings }: Props) {
   const [pending, setPending] = useState(false)
 
   function toggle(key: Key) {
+    if (readOnly) return
     setChecked(prev => ({ ...prev, [key]: !prev[key] }))
     setSuccess(false)
   }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    if (readOnly) return
     setPending(true)
     setError(null)
     setSuccess(false)
@@ -69,6 +72,10 @@ export default function SectionVisibilityForm({ settings }: Props) {
         Toggle which sections appear on your public website.
       </p>
       <form onSubmit={handleSubmit}>
+        <fieldset
+          disabled={readOnly}
+          style={{ border: 'none', padding: 0, margin: 0, minWidth: 0 }}
+        >
         {TOGGLE_FIELDS.map(f => (
           <label
             key={f.key}
@@ -103,14 +110,17 @@ export default function SectionVisibilityForm({ settings }: Props) {
           </div>
         )}
 
-        <button
-          type="submit"
-          className="btn-primary"
-          disabled={pending}
-          style={{ width: '100%', marginTop: '14px', justifyContent: 'center', opacity: pending ? 0.6 : 1 }}
-        >
-          {pending ? 'Saving…' : success ? '✓ Saved' : 'Save Visibility'}
-        </button>
+        {!readOnly && (
+          <button
+            type="submit"
+            className="btn-primary"
+            disabled={pending}
+            style={{ width: '100%', marginTop: '14px', justifyContent: 'center', opacity: pending ? 0.6 : 1 }}
+          >
+            {pending ? 'Saving…' : success ? '✓ Saved' : 'Save Visibility'}
+          </button>
+        )}
+        </fieldset>
       </form>
     </div>
   )

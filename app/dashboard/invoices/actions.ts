@@ -1,5 +1,6 @@
 'use server'
 
+import { denyUnlessCanEditDashboardModule } from '@/lib/auth/roles'
 import { createAdminClient } from '@/lib/supabase/server'
 import { getDashboardTenant } from '@/lib/tenant'
 import type { PaymentMethod, CardType } from '@/lib/types'
@@ -32,6 +33,9 @@ export async function recordInvoicePayment(
 ): Promise<{ error: string } | null> {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
+
+  const payDenied = await denyUnlessCanEditDashboardModule('invoices')
+  if (payDenied) return payDenied
 
   const supabase = createAdminClient()
   const tenantId = ctx.tenant.id

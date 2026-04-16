@@ -1,5 +1,6 @@
 'use server'
 
+import { denyUnlessCanEditDashboardModule } from '@/lib/auth/roles'
 import { createClient } from '@/lib/supabase/server'
 import { getDashboardTenant } from '@/lib/tenant'
 
@@ -8,6 +9,9 @@ export async function updateBusinessProfile(
 ): Promise<{ error: string } | null> {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
+
+  const profileDenied = await denyUnlessCanEditDashboardModule('settings')
+  if (profileDenied) return profileDenied
 
   const supabase = await createClient()
 
@@ -49,6 +53,9 @@ export async function updateWebsiteModules(
 ): Promise<{ error: string } | null> {
   const ctx = await getDashboardTenant()
   if (!ctx) return { error: 'Not authorized' }
+
+  const websiteDenied = await denyUnlessCanEditDashboardModule('website')
+  if (websiteDenied) return websiteDenied
 
   const supabase = await createClient()
   const bool = (key: string) => formData.get(key) === 'on'
