@@ -170,7 +170,7 @@ export async function inviteUser(
           preferred_language: lang, // Auth user_metadata; tenant_users may not have a language column
         },
         // Redirect user to dashboard after they accept
-        redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`,
+        redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/confirm`,
       },
     )
 
