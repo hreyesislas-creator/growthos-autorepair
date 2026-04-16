@@ -261,6 +261,15 @@ export async function inviteUser(
           existingLastName = '-'
         }
         const tenantUsersDbRole = role === 'technician' || role === 'viewer' ? 'staff' : 'manager'
+        console.log(
+          TEAM_INVITE_LOG_PREFIX,
+          'debug_role_mapping',
+          JSON.stringify({
+            rawRole: role,
+            tenantUsersDbRole,
+            inviteEmail: email,
+          }),
+        )
         const { error: insertExistingError } = await supabase.from('tenant_users').insert({
           tenant_id: ctx.tenant.id,
           auth_user_id: existingAuthUser.id,
