@@ -347,14 +347,27 @@ export async function inviteUser(
     // Create the tenant_users record so the user has the correct role on login.
     // Omit full_name and language_pref if those columns are absent from tenant_users (schema cache).
     // Language is stored on the invited Auth user as preferred_language in data above.
+    const inviteNameTrimmed = (fullName ?? '').trim()
+    let inviteFirstName: string
+    let inviteLastName: string
+    if (inviteNameTrimmed.length > 0) {
+      const parts = inviteNameTrimmed.split(/\s+/)
+      inviteFirstName = parts[0] ?? ''
+      inviteLastName = parts.slice(1).join(' ') || '-'
+    } else {
+      inviteFirstName = email.split('@')[0] || email
+      inviteLastName = '-'
+    }
     const { error: insertError } = await supabase.from('tenant_users').insert({
-  tenant_id: ctx.tenant.id,
-  auth_user_id: invitedUserId,
-  email,
-  role,
-  is_active: false, // becomes true once they accept and we receive the event
-  phone: null,
-})
+      tenant_id: ctx.tenant.id,
+      auth_user_id: invitedUserId,
+      email,
+      role,
+      is_active: false, // becomes true once they accept and we receive the event
+      phone: null,
+      first_name: inviteFirstName,
+      last_name: inviteLastName,
+    })
 
     console.log(
       TEAM_INVITE_LOG_PREFIX,
