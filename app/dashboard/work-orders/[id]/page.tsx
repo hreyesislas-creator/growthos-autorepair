@@ -121,6 +121,7 @@ export default async function WorkOrderDetailPage({
         teamUsersForAssignment={assignableTeamUsers}
         assignedTechnician={assignedTechnician}
         assignmentReadOnlyBanner={assignmentReadOnlyBanner}
+        showTechnicianSelfAssign={role === 'technician' && !workOrder.technician_id}
       />
     </>
   )

@@ -16,6 +16,7 @@ import {
   archiveInspection,
   createInspectionItemRow,
   setInspectionTechnician,
+  claimInspectionForCurrentTechnician,
 } from '../actions'
 import {
   createEstimateFromInspection,
@@ -92,6 +93,8 @@ interface Props {
   teamUsersForAssignment?: TenantUser[]
   /** Technician viewing without edit access (wrong assignee or unassigned). */
   assignmentReadOnlyBanner?: string | null
+  /** Technician on an unassigned inspection: show self-claim control. */
+  showTechnicianSelfAssign?: boolean
 }
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -260,6 +263,7 @@ export default function InspectionChecklist({
   canAssignTechnician = false,
   teamUsersForAssignment = [],
   assignmentReadOnlyBanner = null,
+  showTechnicianSelfAssign = false,
 }: Props) {
   const router = useRouter()
 
@@ -334,6 +338,8 @@ export default function InspectionChecklist({
   const [assignTechId, setAssignTechId]     = useState<string>(() => inspection.technician_id ?? '')
   const [assignSaving, setAssignSaving] = useState(false)
   const [assignError,  setAssignError]      = useState<string | null>(null)
+  const [selfAssignSaving, setSelfAssignSaving] = useState(false)
+  const [selfAssignError,  setSelfAssignError]  = useState<string | null>(null)
 
   useEffect(() => {
     setAssignTechId(inspection.technician_id ?? '')
@@ -610,6 +616,19 @@ export default function InspectionChecklist({
     router.refresh()
   }
 
+  async function handleSelfAssignInspection() {
+    if (!showTechnicianSelfAssign) return
+    setSelfAssignSaving(true)
+    setSelfAssignError(null)
+    const result = await claimInspectionForCurrentTechnician(inspection.id)
+    setSelfAssignSaving(false)
+    if (result?.error) {
+      setSelfAssignError(result.error)
+      return
+    }
+    router.refresh()
+  }
+
   async function handleGenerate() {
     if (!canEditInspections) return
     setGenerating(true)
@@ -803,50 +822,58 @@ export default function InspectionChecklist({
           </div>
         )}
 
-        {!canAssignTechnician && technician && (
+        {!canAssignTechnician && (
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 8,
             paddingBottom: 10, marginBottom: 10,
             borderBottom: '1px solid var(--border-2)',
           }}>
-            <span style={{
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              width: 28, height: 28, borderRadius: '50%',
-              background: 'var(--blue-bg,#eff6ff)',
-              fontSize: 12, fontWeight: 700, color: 'var(--blue-light,#3b82f6)',
-              flexShrink: 0,
-            }}>
-              {(technician.full_name ?? technician.email ?? 'T').charAt(0).toUpperCase()}
-            </span>
-            <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.4 }}>
-              <span style={{ color: 'var(--text-3)' }}>Technician: </span>
-              <strong style={{ color: 'var(--text)', fontWeight: 600 }}>
-                {technician.full_name || technician.email || 'Technician'}
-              </strong>
-              {technician.email && (
-                <span style={{ marginLeft: 6, color: 'var(--text-3)' }}>
-                  — {technician.email}
-                </span>
-              )}
-              <span style={{
-                marginLeft: 8, fontSize: 10, fontWeight: 600,
-                padding: '1px 6px', borderRadius: 4,
-                background: 'var(--surface-3,#f1f5f9)',
-                color: 'var(--text-3)', textTransform: 'capitalize',
-              }}>
-                {technician.role}
-              </span>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)', marginBottom: 8 }}>
+              Assigned technician
             </div>
-          </div>
-        )}
-
-        {!canAssignTechnician && !technician && (
-          <div style={{
-            fontSize: 12, color: 'var(--text-3)',
-            paddingBottom: 10, marginBottom: 10,
-            borderBottom: '1px solid var(--border-2)',
-          }}>
-            Technician: <strong style={{ color: 'var(--text)' }}>Unassigned</strong>
+            {technician ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  width: 36, height: 36, borderRadius: '50%',
+                  background: 'var(--blue-bg,#eff6ff)',
+                  fontSize: 14, fontWeight: 700, color: 'var(--blue-light,#3b82f6)',
+                  flexShrink: 0,
+                }}>
+                  {(technician.full_name ?? technician.email ?? 'T').charAt(0).toUpperCase()}
+                </span>
+                <div style={{ fontSize: 14, color: 'var(--text)', lineHeight: 1.35 }}>
+                  <strong style={{ fontWeight: 700 }}>
+                    {technician.full_name?.trim() || technician.email || 'Technician'}
+                  </strong>
+                  {technician.email && technician.full_name?.trim() && (
+                    <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>
+                      {technician.email}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : showTechnicianSelfAssign ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 13, color: 'var(--text-2)' }}>No one assigned yet.</span>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  style={{ fontSize: 12 }}
+                  disabled={selfAssignSaving}
+                  onClick={handleSelfAssignInspection}
+                >
+                  {selfAssignSaving ? 'Assigning…' : 'Assign to me'}
+                </button>
+                {selfAssignError && (
+                  <span style={{ fontSize: 12, color: '#b91c1c', width: '100%' }}>{selfAssignError}</span>
+                )}
+              </div>
+            ) : (
+              <div style={{ fontSize: 13, color: 'var(--text-2)' }}>
+                <strong style={{ color: 'var(--text)' }}>Unassigned</strong>
+                {' — '}a service advisor can assign this inspection from the dashboard.
+              </div>
+            )}
           </div>
         )}
 

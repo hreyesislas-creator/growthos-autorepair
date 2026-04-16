@@ -997,3 +997,31 @@ export async function setWorkOrderTechnician(
   if (error) return { error: error.message }
   return null
 }
+
+/** Technician: claim an unassigned work order (does not change advisor assignment rules). */
+export async function claimWorkOrderForCurrentTechnician(
+  workOrderId: string,
+): Promise<{ error: string } | null> {
+  const ctx = await getDashboardTenant()
+  if (!ctx) return { error: 'Not authorized' }
+
+  const du = await getCurrentDashboardTenantUser()
+  if (!du || du.role !== 'technician') return { error: 'Not authorized' }
+
+  const tenantId    = ctx.tenant.id
+  const adminClient = await createAdminClient()
+  const now         = new Date().toISOString()
+
+  const { data, error } = await adminClient
+    .from('work_orders')
+    .update({ technician_id: du.tenantUserId, updated_at: now })
+    .eq('id', workOrderId)
+    .eq('tenant_id', tenantId)
+    .is('technician_id', null)
+    .select('id')
+    .maybeSingle()
+
+  if (error) return { error: error.message }
+  if (!data) return { error: 'Already assigned or not found. Refresh the page.' }
+  return null
+}

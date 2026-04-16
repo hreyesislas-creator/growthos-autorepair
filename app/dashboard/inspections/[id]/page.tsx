@@ -198,6 +198,7 @@ export default async function InspectionDetailPage({
         canAssignTechnician={canAssignTechnician}
         teamUsersForAssignment={assignableTeamUsers}
         assignmentReadOnlyBanner={assignmentReadOnlyBanner}
+        showTechnicianSelfAssign={role === 'technician' && !inspection.technician_id}
       />
     </>
   )

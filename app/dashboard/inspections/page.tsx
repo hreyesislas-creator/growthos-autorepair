@@ -71,7 +71,10 @@ export default async function InspectionsPage({
     getTeamUsers(tenantId),
   ])
 
-  const assignmentScope = parseAssignmentListScope(searchParams?.scope)
+  let assignmentScope = parseAssignmentListScope(searchParams?.scope)
+  if (appRole === 'technician' && searchParams?.scope === undefined) {
+    assignmentScope = 'mine'
+  }
   const tenantUserId    = currentTu?.id ?? ''
   const advisorTechParsed = parseAdvisorTechnicianFilterParam(searchParams?.tech, appRole)
   const advisorTechnicianId = validatedAdvisorTechnicianId(advisorTechParsed, teamUsers)
@@ -142,7 +145,7 @@ export default async function InspectionsPage({
           )}
           {appRole === 'technician' && assignmentScope !== 'all' && (
             <Link
-              href={basePath}
+              href={`${basePath}?scope=all`}
               className="btn-ghost"
               style={{ fontSize: 12, padding: '6px 12px', textDecoration: 'none' }}
             >

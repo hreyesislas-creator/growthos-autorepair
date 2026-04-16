@@ -178,7 +178,7 @@ export default function WorkOrdersList({
         )}
         {appRole === 'technician' && assignmentScope !== 'all' && (
           <Link
-            href={basePath}
+            href={`${basePath}?scope=all`}
             className="btn-ghost"
             style={{ fontSize: 12, padding: '6px 12px', textDecoration: 'none' }}
           >

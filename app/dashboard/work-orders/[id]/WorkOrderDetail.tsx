@@ -12,6 +12,7 @@ import {
   cancelWorkOrder,
   createInvoiceFromWorkOrder,
   setWorkOrderTechnician,
+  claimWorkOrderForCurrentTechnician,
   type WorkOrderTimeSnapshot,
 } from './actions'
 import ArchiveConfirmModal from '@/components/dashboard/ArchiveConfirmModal'
@@ -119,6 +120,7 @@ interface Props {
   teamUsersForAssignment?: TenantUser[]
   assignedTechnician?: TenantUser | null
   assignmentReadOnlyBanner?: string | null
+  showTechnicianSelfAssign?: boolean
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -133,10 +135,13 @@ export default function WorkOrderDetail({
   teamUsersForAssignment = [],
   assignedTechnician = null,
   assignmentReadOnlyBanner = null,
+  showTechnicianSelfAssign = false,
 }: Props) {
   const router = useRouter()
 
   const [woTechId, setWoTechId] = useState(workOrder.technician_id ?? '')
+  const [woSelfAssignSaving, setWoSelfAssignSaving] = useState(false)
+  const [woSelfAssignErr,    setWoSelfAssignErr]    = useState<string | null>(null)
   const [woAssignSaving, setWoAssignSaving] = useState(false)
   const [woAssignErr, setWoAssignErr] = useState<string | null>(null)
 
@@ -275,6 +280,19 @@ export default function WorkOrderDetail({
     setWoAssignSaving(false)
     if (result?.error) {
       setWoAssignErr(result.error)
+      return
+    }
+    router.refresh()
+  }
+
+  async function handleSelfAssignWorkOrder() {
+    if (!showTechnicianSelfAssign) return
+    setWoSelfAssignSaving(true)
+    setWoSelfAssignErr(null)
+    const result = await claimWorkOrderForCurrentTechnician(workOrder.id)
+    setWoSelfAssignSaving(false)
+    if (result?.error) {
+      setWoSelfAssignErr(result.error)
       return
     }
     router.refresh()
@@ -478,13 +496,56 @@ export default function WorkOrderDetail({
               )}
 
               {!canAssignWorkOrderTechnician && (
-                <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-3)' }}>
-                  Technician:{' '}
-                  <strong style={{ color: 'var(--text)' }}>
-                    {assignedTechnician
-                      ? (assignedTechnician.full_name?.trim() || assignedTechnician.email || 'Assigned')
-                      : 'Unassigned'}
-                  </strong>
+                <div style={{
+                  marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border-2)',
+                }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)', marginBottom: 8 }}>
+                    Assigned technician
+                  </div>
+                  {assignedTechnician ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        width: 36, height: 36, borderRadius: '50%',
+                        background: 'var(--blue-bg,#eff6ff)',
+                        fontSize: 14, fontWeight: 700, color: 'var(--blue-light,#3b82f6)',
+                        flexShrink: 0,
+                      }}>
+                        {(assignedTechnician.full_name ?? assignedTechnician.email ?? 'T').charAt(0).toUpperCase()}
+                      </span>
+                      <div style={{ fontSize: 14, color: 'var(--text)', lineHeight: 1.35 }}>
+                        <strong style={{ fontWeight: 700 }}>
+                          {assignedTechnician.full_name?.trim() || assignedTechnician.email || 'Technician'}
+                        </strong>
+                        {assignedTechnician.email && assignedTechnician.full_name?.trim() && (
+                          <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>
+                            {assignedTechnician.email}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : showTechnicianSelfAssign ? (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 13, color: 'var(--text-2)' }}>No one assigned yet.</span>
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        style={{ fontSize: 12 }}
+                        disabled={woSelfAssignSaving}
+                        onClick={handleSelfAssignWorkOrder}
+                      >
+                        {woSelfAssignSaving ? 'Assigning…' : 'Assign to me'}
+                      </button>
+                      {woSelfAssignErr && (
+                        <span style={{ fontSize: 12, color: '#b91c1c', width: '100%' }}>{woSelfAssignErr}</span>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 13, color: 'var(--text-2)' }}>
+                      <strong style={{ color: 'var(--text)' }}>Unassigned</strong>
+                      {' — '}a service advisor can assign this work order.
+                    </div>
+                  )}
                 </div>
               )}
             </div>

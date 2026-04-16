@@ -115,7 +115,10 @@ export default async function WorkOrdersPage({
     getCurrentTenantUser(tenantId),
     getTeamUsers(tenantId),
   ])
-  const assignmentScope = parseAssignmentListScope(searchParams?.scope)
+  let assignmentScope = parseAssignmentListScope(searchParams?.scope)
+  if (appRole === 'technician' && searchParams?.scope === undefined) {
+    assignmentScope = 'mine'
+  }
   const advisorTechParsed = parseAdvisorTechnicianFilterParam(searchParams?.tech, appRole)
   const advisorTechnicianId = validatedAdvisorTechnicianId(advisorTechParsed, teamUsers)
   const technicianNameById = technicianNameMapFromTeamUsers(teamUsers)
