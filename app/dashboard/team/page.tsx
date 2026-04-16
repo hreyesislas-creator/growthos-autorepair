@@ -2,6 +2,7 @@ import { getDashboardTenant } from '@/lib/tenant'
 import { getTeamUsers } from '@/lib/queries'
 import Topbar from '@/components/dashboard/Topbar'
 import StatusBadge from '@/components/dashboard/StatusBadge'
+import { DeactivateTeamMemberButton } from './DeactivateTeamMemberButton'
 
 export const metadata = { title: 'Team & Roles' }
 
@@ -29,7 +30,14 @@ export default async function TeamPage() {
           ) : (
             <table className="data-table">
               <thead>
-                <tr><th>Name</th><th>Email</th><th>Role</th><th>Language</th><th>Status</th></tr>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Role</th>
+                  <th>Language</th>
+                  <th>Status</th>
+                  <th style={{ textAlign: 'right' }}></th>
+                </tr>
               </thead>
               <tbody>
                 {users.map(u => {
@@ -47,6 +55,9 @@ export default async function TeamPage() {
                     <td><span className="badge badge-blue">{ROLE_LABELS[u.role] ?? u.role ?? '—'}</span></td>
                     <td><span className="badge badge-gray">{u.language_pref === "es" ? "ES" : "EN"}</span></td>
                     <td><StatusBadge status={u.is_active ? "active" : "inactive"} /></td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <DeactivateTeamMemberButton tenantUserId={u.id} role={u.role} isActive={u.is_active} />
+                    </td>
                   </tr>
                   )
                 })}

@@ -419,3 +419,35 @@ export async function inviteUser(
     throw unexpected
   }
 }
+
+export async function deactivateTeamMember(
+  tenantUserId: string,
+): Promise<{ success: true } | { error: string }> {
+  const ctx = await getDashboardTenant()
+  if (!ctx) return { error: 'Not authorized' }
+
+  const id = tenantUserId?.trim()
+  if (!id) return { error: 'Invalid user' }
+
+  const supabase = await createClient()
+
+  const { data: row, error: fetchErr } = await supabase
+    .from('tenant_users')
+    .select('id, role, tenant_id')
+    .eq('id', id)
+    .eq('tenant_id', ctx.tenant.id)
+    .maybeSingle()
+
+  if (fetchErr) return { error: fetchErr.message }
+  if (!row) return { error: 'Team member not found.' }
+  if (row.role === 'owner') return { error: 'Owner cannot be deactivated.' }
+
+  const { error: updateErr } = await supabase
+    .from('tenant_users')
+    .update({ is_active: false })
+    .eq('id', id)
+    .eq('tenant_id', ctx.tenant.id)
+
+  if (updateErr) return { error: updateErr.message }
+  return { success: true }
+}
