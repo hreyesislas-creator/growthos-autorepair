@@ -358,11 +358,17 @@ export async function inviteUser(
       inviteFirstName = email.split('@')[0] || email
       inviteLastName = '-'
     }
+    const tenantUsersDbRole =
+      role === 'technician' || role === 'viewer'
+        ? 'advisor'
+        : role === 'admin'
+          ? 'manager'
+          : role
     const { error: insertError } = await supabase.from('tenant_users').insert({
       tenant_id: ctx.tenant.id,
       auth_user_id: invitedUserId,
       email,
-      role,
+      role: tenantUsersDbRole,
       is_active: false, // becomes true once they accept and we receive the event
       phone: null,
       first_name: inviteFirstName,
