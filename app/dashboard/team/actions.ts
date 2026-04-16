@@ -280,6 +280,7 @@ export async function inviteUser(
           email,
           role: tenantUsersDbRole,
           is_active: true,
+          invite_status: 'pending',
           first_name: existingFirstName,
           last_name: existingLastName,
         })
@@ -364,6 +365,7 @@ export async function inviteUser(
       email,
       role: tenantUsersDbRole,
       is_active: true,
+      invite_status: 'pending',
       phone: null,
       first_name: inviteFirstName,
       last_name: inviteLastName,

@@ -30,6 +30,8 @@ const MAP: Record<string, BadgeVariant> = {
   failed:      'red',
   // Customer
   inactive:    'gray',
+  // Team member (invite_status + is_active)
+  invited:     'yellow',
 }
 
 interface BadgeProps {

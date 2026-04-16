@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { markTenantInviteAccepted } from '@/app/auth/actions'
 
 const fieldLabel: React.CSSProperties = {
   display: 'block',
@@ -57,6 +58,12 @@ export default function SetPasswordPage() {
       setError(updateErr.message)
       setPending(false)
       return
+    }
+
+    const markErr = await markTenantInviteAccepted()
+    if (markErr?.error) {
+      // Password is set; invite_status update is best-effort — still continue to dashboard
+      console.error('[set-password] markTenantInviteAccepted:', markErr.error)
     }
 
     router.replace('/dashboard')

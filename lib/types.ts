@@ -41,6 +41,11 @@ export interface TenantUser {
   /** Present only if the DB column exists / is populated */
   language_pref?: 'en' | 'es' | null
   is_active: boolean
+  /**
+   * Invite onboarding: pending until set-password succeeds; accepted after.
+   * Null/undefined = legacy row (treat as fully onboarded in UI).
+   */
+  invite_status?: 'pending' | 'accepted' | null
   created_at: string
 }
 

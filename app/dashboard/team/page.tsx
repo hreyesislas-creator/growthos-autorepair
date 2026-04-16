@@ -12,6 +12,13 @@ const ROLE_LABELS: Record<string, string> = {
   technician: 'Technician', viewer: 'Viewer',
 }
 
+/** Combined membership enablement + invite onboarding (legacy: invite_status null = Active). */
+function teamMemberStatusKey(u: { is_active: boolean; invite_status?: string | null }) {
+  if (!u.is_active) return 'inactive' as const
+  if (u.invite_status === 'pending') return 'invited' as const
+  return 'active' as const
+}
+
 export default async function TeamPage() {
   const ctx      = await getDashboardTenant()
   const tenantId = ctx?.tenant.id ?? ''
@@ -48,6 +55,7 @@ export default async function TeamPage() {
                 {users.map(u => {
                   const displayName  = u.full_name?.trim() || u.email?.trim() || 'Unnamed User'
                   const avatarLetter = displayName.charAt(0).toUpperCase()
+                  const statusKey    = teamMemberStatusKey(u)
                   return (
                   <tr key={u.id}>
                     <td>
@@ -59,7 +67,12 @@ export default async function TeamPage() {
                     <td style={{ fontSize: "12px" }}>{u.email}</td>
                     <td><span className="badge badge-blue">{ROLE_LABELS[u.role] ?? u.role ?? '—'}</span></td>
                     <td><span className="badge badge-gray">{u.language_pref === "es" ? "ES" : "EN"}</span></td>
-                    <td><StatusBadge status={u.is_active ? "active" : "inactive"} /></td>
+                    <td>
+                      <StatusBadge
+                        status={statusKey}
+                        label={statusKey === 'invited' ? 'Invited' : statusKey === 'inactive' ? 'Inactive' : 'Active'}
+                      />
+                    </td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                       <DeactivateTeamMemberButton
                         tenantUserId={u.id}
