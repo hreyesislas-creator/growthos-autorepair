@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -180,6 +181,32 @@ export default function LoginForm() {
       >
         {pending ? 'Signing In...' : 'Sign In'}
       </button>
+
+      {searchParams.get('reset') === 'success' && (
+        <div
+          style={{
+            marginTop: '14px',
+            padding: '10px 12px',
+            borderRadius: '6px',
+            background: 'rgba(34, 197, 94, 0.12)',
+            border: '1px solid rgba(34, 197, 94, 0.25)',
+            color: '#86efac',
+            fontSize: '13px',
+            textAlign: 'center',
+          }}
+        >
+          Password updated. Sign in with your new password.
+        </div>
+      )}
+
+      <p style={{ textAlign: 'center', marginTop: '16px', marginBottom: 0 }}>
+        <Link
+          href="/auth/forgot-password"
+          style={{ color: 'rgba(255,255,255,.55)', fontSize: '13px', textDecoration: 'underline' }}
+        >
+          Forgot your password?
+        </Link>
+      </p>
     </form>
   )
 }

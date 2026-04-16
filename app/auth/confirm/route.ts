@@ -6,7 +6,8 @@ export async function GET(request: Request) {
 
   const token_hash = searchParams.get('token_hash')
   const type = searchParams.get('type')
-  const rawNext = searchParams.get('next') ?? '/dashboard'
+  const rawNext =
+    searchParams.get('next') ?? (type === 'invite' ? '/auth/set-password' : '/dashboard')
   const next = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/dashboard'
 
   if (!token_hash || !type) {
