@@ -369,7 +369,7 @@ export async function inviteUser(
       auth_user_id: invitedUserId,
       email,
       role: tenantUsersDbRole,
-      is_active: false, // becomes true once they accept and we receive the event
+      is_active: true,
       phone: null,
       first_name: inviteFirstName,
       last_name: inviteLastName,
