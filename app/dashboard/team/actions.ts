@@ -264,12 +264,7 @@ export async function inviteUser(
           existingFirstName = email.split('@')[0] || email
           existingLastName = '-'
         }
-        const tenantUsersDbRole =
-          role === 'technician' || role === 'viewer'
-            ? 'advisor'
-            : role === 'admin'
-              ? 'manager'
-              : role
+        const tenantUsersDbRole = role === 'admin' ? 'manager' : role
         console.log(
           TEAM_INVITE_LOG_PREFIX,
           'debug_role_mapping',
@@ -362,12 +357,7 @@ export async function inviteUser(
       inviteFirstName = email.split('@')[0] || email
       inviteLastName = '-'
     }
-    const tenantUsersDbRole =
-      role === 'technician' || role === 'viewer'
-        ? 'advisor'
-        : role === 'admin'
-          ? 'manager'
-          : role
+    const tenantUsersDbRole = role === 'admin' ? 'manager' : role
     const { error: insertError } = await supabase.from('tenant_users').insert({
       tenant_id: ctx.tenant.id,
       auth_user_id: invitedUserId,
