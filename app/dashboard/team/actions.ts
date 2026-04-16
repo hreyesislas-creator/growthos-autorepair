@@ -260,7 +260,12 @@ export async function inviteUser(
           existingFirstName = email.split('@')[0] || email
           existingLastName = '-'
         }
-        const tenantUsersDbRole = role === 'technician' || role === 'viewer' ? 'staff' : 'manager'
+        const tenantUsersDbRole =
+          role === 'technician' || role === 'viewer'
+            ? 'advisor'
+            : role === 'admin'
+              ? 'manager'
+              : role
         console.log(
           TEAM_INVITE_LOG_PREFIX,
           'debug_role_mapping',
