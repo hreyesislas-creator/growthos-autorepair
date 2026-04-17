@@ -281,13 +281,11 @@ export default async function DashboardPage() {
     { label: 'Messages', value: msgCount, hint: 'This week', href: '/dashboard/communications', accent: 'blue' },
   ]
 
-  const quickActions = [
-    { label: 'New Appointment', icon: '\u{1F4C5}', href: '/dashboard/appointments' },
-    { label: 'Add Customer', icon: '\u{1F464}', href: '/dashboard/customers' },
-    { label: 'Add Vehicle', icon: '\u{1F697}', href: '/dashboard/vehicles' },
-    { label: 'Inspection', icon: '\u{1F50D}', href: '/dashboard/inspections' },
-    { label: 'Send Message', icon: '\u{1F4AC}', href: '/dashboard/communications' },
-    { label: 'Edit Website', icon: '\u{1F310}', href: '/dashboard/website' },
+  const dashboardHeaderQuickLinks = [
+    { label: 'New Appointment', href: '/dashboard/appointments' },
+    { label: 'Add Customer', href: '/dashboard/customers' },
+    { label: 'Add Vehicle', href: '/dashboard/vehicles' },
+    { label: 'Inspection', href: '/dashboard/inspections' },
   ]
 
   const inset: React.CSSProperties = {
@@ -299,45 +297,73 @@ export default async function DashboardPage() {
 
   return (
     <>
-      <Topbar title="Dashboard" subtitle={today} />
+      <Topbar title="Dashboard" subtitle={today} quickLinks={dashboardHeaderQuickLinks} />
       <div className="dash-content">
 
         {/* ── Shop overview: cash + jobs (single KPI row) ────────────────── */}
-        <div className="shop-today-section" style={{ marginBottom: 24 }}>
+        <div className="shop-today-section" style={{ marginBottom: 16 }}>
           <div style={{ ...sectionLabel, marginBottom: 8 }}>Shop overview</div>
           <div style={overviewKpiGridStyle}>
             {overviewAll.map(item => (
               <OverviewKpi key={item.label} {...item} />
             ))}
           </div>
-          <div className="card" style={{ marginTop: 16, padding: '16px 18px' }}>
-            <div style={{ ...sectionLabel, marginBottom: 10 }}>Revenue opportunities</div>
-            <div style={{ fontSize: 14, color: 'var(--text)', lineHeight: 1.75 }}>
-              <div>
-                • {revenueOpportunities.pendingEstimatesCount} pending estimate
-                {revenueOpportunities.pendingEstimatesCount === 1 ? '' : 's'} →{' '}
-                {fmtMoney(revenueOpportunities.pendingEstimatesPotential)} potential
-              </div>
-              <div>
-                • {revenueOpportunities.readyPickupCount} ready for pickup →{' '}
-                {fmtMoney(revenueOpportunities.readyPickupInvoiceTotal)} waiting
-              </div>
-              <div>
-                • {revenueOpportunities.unpaidInvoiceCount} unpaid invoice
-                {revenueOpportunities.unpaidInvoiceCount === 1 ? '' : 's'} →{' '}
-                {fmtMoney(revenueOpportunities.unpaidOutstanding)} outstanding
-              </div>
+          <div className="revenue-opportunities-module">
+            <div className="revenue-opportunities-module__head">
+              <div className="revenue-opportunities-module__title">Revenue Opportunities</div>
+              <p className="revenue-opportunities-module__sub">
+                Money that still needs action — follow up to move revenue today.
+              </p>
             </div>
-          </div>
-          <div className="card shop-today-quick" style={{ marginTop: 16 }}>
-            <div style={{ ...sectionLabel, marginBottom: 8 }}>Quick actions</div>
-            <div className="quick-actions quick-actions--shop-today">
-              {quickActions.map(a => (
-                <Link key={a.label} href={a.href} className="quick-action-btn">
-                  <div className="quick-action-icon">{a.icon}</div>
-                  {a.label}
-                </Link>
-              ))}
+            <div className="revenue-opportunities-module__grid">
+              <Link href="/dashboard/estimates" className="revenue-opp-card revenue-opp-card--estimates">
+                <div className="revenue-opp-card__label">Pending Estimates</div>
+                <div className="revenue-opp-card__metrics">
+                  <span className="revenue-opp-card__count">{revenueOpportunities.pendingEstimatesCount}</span>
+                  <div className="revenue-opp-card__amount-block">
+                    <span className="revenue-opp-card__amount">
+                      {fmtMoney(revenueOpportunities.pendingEstimatesPotential)}
+                    </span>
+                    <span className="revenue-opp-card__amount-suffix">potential</span>
+                  </div>
+                </div>
+                <div className="revenue-opp-card__footer">
+                  <span className="revenue-opp-card__hint">Needs follow-up</span>
+                  <span className="revenue-opp-card__cta">View estimates →</span>
+                </div>
+              </Link>
+              <Link href="/dashboard/work-orders" className="revenue-opp-card revenue-opp-card--pickup">
+                <div className="revenue-opp-card__label">Ready for Pickup</div>
+                <div className="revenue-opp-card__metrics">
+                  <span className="revenue-opp-card__count">{revenueOpportunities.readyPickupCount}</span>
+                  <div className="revenue-opp-card__amount-block">
+                    <span className="revenue-opp-card__amount">
+                      {fmtMoney(revenueOpportunities.readyPickupInvoiceTotal)}
+                    </span>
+                    <span className="revenue-opp-card__amount-suffix">waiting</span>
+                  </div>
+                </div>
+                <div className="revenue-opp-card__footer">
+                  <span className="revenue-opp-card__hint">Ready to collect</span>
+                  <span className="revenue-opp-card__cta">View active jobs →</span>
+                </div>
+              </Link>
+              <Link href="/dashboard/invoices" className="revenue-opp-card revenue-opp-card--invoices">
+                <div className="revenue-opp-card__label">Unpaid Invoices</div>
+                <div className="revenue-opp-card__metrics">
+                  <span className="revenue-opp-card__count">{revenueOpportunities.unpaidInvoiceCount}</span>
+                  <div className="revenue-opp-card__amount-block">
+                    <span className="revenue-opp-card__amount">
+                      {fmtMoney(revenueOpportunities.unpaidOutstanding)}
+                    </span>
+                    <span className="revenue-opp-card__amount-suffix">outstanding</span>
+                  </div>
+                </div>
+                <div className="revenue-opp-card__footer">
+                  <span className="revenue-opp-card__hint">Payment follow-up needed</span>
+                  <span className="revenue-opp-card__cta">View invoices →</span>
+                </div>
+              </Link>
             </div>
           </div>
         </div>

@@ -79,10 +79,34 @@ body { font-family: var(--font-body); background: var(--bg); color: var(--text);
 
 .dash-main { margin-left: var(--sidebar-w); flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
-.dash-topbar { height: var(--topbar-h); background: var(--topbar-bg); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 24px; position: sticky; top: 0; z-index: 50; gap: 16px; }
+.dash-topbar { min-height: var(--topbar-h); background: var(--topbar-bg); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 24px; position: sticky; top: 0; z-index: 50; gap: 12px 16px; flex-wrap: wrap; }
+.topbar-heading { min-width: 0; flex: 1 1 auto; }
 .topbar-title { font-family: var(--font-display); font-size: 18px; font-weight: 700; color: var(--text); }
 .topbar-sub { font-size: 13px; color: var(--text-3); }
-.topbar-right { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.topbar-right { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
+.topbar-quick-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+.topbar-quick-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  padding: 0 11px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-body);
+  color: var(--text-2);
+  text-decoration: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r6);
+  background: transparent;
+  white-space: nowrap;
+  transition: border-color .15s ease, color .15s ease, background .15s ease;
+}
+.topbar-quick-btn:hover {
+  border-color: rgba(255, 255, 255, .16);
+  color: var(--text);
+  background: rgba(255, 255, 255, .04);
+}
 
 /* Dashboard: KPI row + Quick Actions in one operational band */
 .shop-today-section { margin-bottom: 12px; }
@@ -146,6 +170,140 @@ body { font-family: var(--font-body); background: var(--bg); color: var(--text);
 .kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; margin-bottom: 24px; }
 .kpi-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r10); padding: 18px 20px; transition: border-color .15s; }
 .kpi-card:hover { border-color: rgba(255,255,255,.14); }
+
+/* Revenue Opportunities — highlighted advisor module (compact) */
+.revenue-opportunities-module {
+  margin-top: 12px;
+  margin-bottom: 0;
+  padding: 14px 16px 13px;
+  border-radius: var(--r12);
+  border: 1px solid rgba(255, 255, 255, .1);
+  background: linear-gradient(165deg, rgba(31, 45, 64, .55) 0%, var(--surface) 42%);
+  box-shadow: var(--shadow-sm), 0 0 0 1px rgba(0, 112, 201, .06);
+}
+.revenue-opportunities-module__head {
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-2);
+}
+.revenue-opportunities-module__title {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+.revenue-opportunities-module__sub {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-top: 3px;
+  line-height: 1.4;
+  max-width: 36em;
+}
+.revenue-opportunities-module__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(188px, 1fr));
+  gap: 10px;
+  align-items: stretch;
+}
+.revenue-opp-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding: 11px 12px 10px;
+  border-radius: var(--r10);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+  border-left-width: 3px;
+  border-left-style: solid;
+}
+.revenue-opp-card:hover {
+  border-color: rgba(255, 255, 255, .12);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .28);
+  transform: translateY(-1px);
+}
+.revenue-opp-card--estimates { border-left-color: rgba(245, 158, 11, .75); }
+.revenue-opp-card--pickup { border-left-color: rgba(0, 112, 201, .85); }
+.revenue-opp-card--invoices { border-left-color: rgba(34, 197, 94, .8); }
+.revenue-opp-card__label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 8px;
+}
+.revenue-opp-card__metrics {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: end;
+  gap: 6px 12px;
+  flex: 1;
+  min-height: 0;
+}
+.revenue-opp-card__count {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--text);
+  letter-spacing: -0.03em;
+}
+.revenue-opp-card__amount-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  text-align: right;
+  min-width: 0;
+}
+.revenue-opp-card__amount {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 700;
+  color: #b8f5c4;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+.revenue-opp-card--estimates .revenue-opp-card__amount { color: #fcd34d; }
+.revenue-opp-card--pickup .revenue-opp-card__amount { color: #7dd3fc; }
+.revenue-opp-card__amount-suffix {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: lowercase;
+}
+.revenue-opp-card__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 10px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-2);
+}
+.revenue-opp-card__hint {
+  font-size: 11px;
+  color: var(--text-2);
+  line-height: 1.35;
+  flex: 1 1 120px;
+  min-width: 0;
+}
+.revenue-opp-card__cta {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--blue-light);
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+.revenue-opp-card:hover .revenue-opp-card__cta {
+  color: #5ec0f5;
+}
+
 .kpi-label { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); margin-bottom: 8px; }
 .kpi-value { font-family: var(--font-display); font-size: 32px; font-weight: 700; color: var(--text); line-height: 1; }
 .kpi-sub { font-size: 12px; color: var(--text-3); margin-top: 4px; }
