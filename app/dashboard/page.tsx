@@ -11,6 +11,7 @@ import {
   getCustomerName,
   getVehicleDisplay,
   getCompletedWorkOrderCounts,
+  getRevenueOpportunitiesSummary,
 } from '@/lib/queries'
 import { getFinancialDashboardData } from '@/lib/financial-queries'
 import Topbar from '@/components/dashboard/Topbar'
@@ -154,6 +155,7 @@ export default async function DashboardPage() {
     estimates,
     workOrders,
     woCompleted,
+    revenueOpportunities,
   ] = await Promise.all([
     getTodayAppointments(tenantId),
     getCustomerCount(tenantId),
@@ -165,6 +167,7 @@ export default async function DashboardPage() {
     getEstimatesByTenant(tenantId),
     getWorkOrdersForTenant(tenantId),
     getCompletedWorkOrderCounts(tenantId),
+    getRevenueOpportunitiesSummary(tenantId),
   ])
 
   const pipelineEstimates = estimates
@@ -306,6 +309,25 @@ export default async function DashboardPage() {
             {overviewAll.map(item => (
               <OverviewKpi key={item.label} {...item} />
             ))}
+          </div>
+          <div className="card" style={{ marginTop: 16, padding: '16px 18px' }}>
+            <div style={{ ...sectionLabel, marginBottom: 10 }}>Revenue opportunities</div>
+            <div style={{ fontSize: 14, color: 'var(--text)', lineHeight: 1.75 }}>
+              <div>
+                • {revenueOpportunities.pendingEstimatesCount} pending estimate
+                {revenueOpportunities.pendingEstimatesCount === 1 ? '' : 's'} →{' '}
+                {fmtMoney(revenueOpportunities.pendingEstimatesPotential)} potential
+              </div>
+              <div>
+                • {revenueOpportunities.readyPickupCount} ready for pickup →{' '}
+                {fmtMoney(revenueOpportunities.readyPickupInvoiceTotal)} waiting
+              </div>
+              <div>
+                • {revenueOpportunities.unpaidInvoiceCount} unpaid invoice
+                {revenueOpportunities.unpaidInvoiceCount === 1 ? '' : 's'} →{' '}
+                {fmtMoney(revenueOpportunities.unpaidOutstanding)} outstanding
+              </div>
+            </div>
           </div>
           <div className="card shop-today-quick" style={{ marginTop: 16 }}>
             <div style={{ ...sectionLabel, marginBottom: 8 }}>Quick actions</div>
