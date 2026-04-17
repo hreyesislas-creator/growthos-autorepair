@@ -10,9 +10,9 @@ import {
   getWorkOrdersForTenant,
   getCustomerName,
   getVehicleDisplay,
+  getCompletedWorkOrderCounts,
 } from '@/lib/queries'
 import { getFinancialDashboardData } from '@/lib/financial-queries'
-import type { DashboardActivityItem } from '@/lib/financial-queries'
 import Topbar from '@/components/dashboard/Topbar'
 import StatusBadge from '@/components/dashboard/StatusBadge'
 import Link from 'next/link'
@@ -31,28 +31,6 @@ const sectionLabel: React.CSSProperties = {
   letterSpacing: '0.1em',
   color: 'var(--text-3)',
   marginBottom: 12,
-}
-
-const ACTIVITY_KIND: Record<DashboardActivityItem['kind'], string> = {
-  payment: 'Payment',
-  invoice: 'Invoice',
-  inspection: 'Inspection',
-  message: 'Message',
-}
-
-function activityBadgeStyle(kind: DashboardActivityItem['kind']): React.CSSProperties {
-  switch (kind) {
-    case 'payment':
-      return { background: '#dcfce7', color: '#166534' }
-    case 'message':
-      return { background: '#dbeafe', color: '#1d4ed8' }
-    case 'invoice':
-      return { background: '#f3e8ff', color: '#7e22ce' }
-    case 'inspection':
-      return { background: '#fef3c7', color: '#b45309' }
-    default:
-      return { background: '#f1f5f9', color: '#475569' }
-  }
 }
 
 type KpiAccent = 'revenue' | 'yellow' | 'blue' | 'green' | 'neutral'
@@ -103,6 +81,56 @@ function kpiTileStyles(accent: KpiAccent): React.CSSProperties {
   }
 }
 
+type OverviewKpiItem = {
+  label: string
+  value: string | number
+  hint: string
+  href: string
+  accent: KpiAccent
+  monoValue?: boolean
+}
+
+const overviewKpiGridStyle: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+  gap: 12,
+}
+
+function OverviewKpi({ label, value, hint, href, accent, monoValue }: OverviewKpiItem) {
+  return (
+    <Link href={href} style={{ textDecoration: 'none', color: 'inherit' }}>
+      <div style={kpiTileStyles(accent)}>
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+            color: 'var(--text-3)',
+          }}
+        >
+          {label}
+        </div>
+        <div
+          style={{
+            fontSize: accent === 'revenue' ? 26 : 22,
+            fontWeight: 800,
+            lineHeight: 1.1,
+            color: 'var(--text)',
+            fontFamily: monoValue ? 'var(--font-mono)' : 'inherit',
+            marginTop: 8,
+          }}
+        >
+          {value}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 6, lineHeight: 1.35 }}>
+          {hint}
+        </div>
+      </div>
+    </Link>
+  )
+}
+
 /** Subtle tinted borders for pipeline item cards */
 const pipelineCardBorder = {
   estimates: '1px solid rgba(234, 179, 8, 0.35)',
@@ -125,6 +153,7 @@ export default async function DashboardPage() {
     financial,
     estimates,
     workOrders,
+    woCompleted,
   ] = await Promise.all([
     getTodayAppointments(tenantId),
     getCustomerCount(tenantId),
@@ -135,9 +164,8 @@ export default async function DashboardPage() {
     getFinancialDashboardData(tenantId),
     getEstimatesByTenant(tenantId),
     getWorkOrdersForTenant(tenantId),
+    getCompletedWorkOrderCounts(tenantId),
   ])
-
-  const scheduledToday = todayAppts.length
 
   const pipelineEstimates = estimates
     .filter(e => PENDING_PIPELINE_ESTIMATE_STATUSES.has(e.status))
@@ -175,54 +203,67 @@ export default async function DashboardPage() {
   const fmtMoney = (n: number) =>
     `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
-  const readyForPickupTotal = workOrders
-    .filter(w => w.status === 'completed')
-    .reduce((s, w) => s + w.total, 0)
+  const activeJobCount = financial.carsInServiceCount
 
-  const commandMetrics: {
-    label: string
-    value: string | number
-    hint: string
-    href: string
-    accent: KpiAccent
-    monoValue?: boolean
-  }[] = [
+  const overviewRow1: OverviewKpiItem[] = [
     {
-      label: 'Pending inspections',
-      value: pendingInsp,
-      hint: 'Awaiting review',
-      href: '/dashboard/inspections',
-      accent: 'yellow',
+      label: "Today's cash",
+      value: fmtMoney(financial.revenueToday),
+      hint: 'Payments recorded today',
+      href: '/dashboard/invoices',
+      accent: 'revenue',
+      monoValue: true,
     },
     {
-      label: 'Cars in service',
-      value: financial.carsInServiceCount,
+      label: 'Cash this week',
+      value: fmtMoney(financial.revenueThisWeek),
+      hint: 'Payments (week to date)',
+      href: '/dashboard/invoices',
+      accent: 'revenue',
+      monoValue: true,
+    },
+    {
+      label: 'Cash this month',
+      value: fmtMoney(financial.revenueThisMonth),
+      hint: 'Payments (month to date)',
+      href: '/dashboard/invoices',
+      accent: 'revenue',
+      monoValue: true,
+    },
+    {
+      label: 'Active jobs',
+      value: activeJobCount,
       hint: 'Ready + in progress',
       href: '/dashboard/work-orders',
       accent: 'blue',
     },
     {
-      label: 'Pending estimates',
-      value: financial.pendingEstimatesCount,
-      hint: `${fmtMoney(financial.pendingEstimatesAmount)} open`,
-      href: '/dashboard/estimates',
-      accent: 'yellow',
+      label: 'Vehicles in shop',
+      value: activeJobCount,
+      hint: 'Active work orders (same as jobs for now)',
+      href: '/dashboard/work-orders',
+      accent: 'blue',
     },
+  ]
+
+  const overviewRow2: OverviewKpiItem[] = [
     {
-      label: 'Ready for pickup',
-      value: financial.readyForPickupCount,
-      hint: `${fmtMoney(readyForPickupTotal)} in completed work orders`,
+      label: 'Completed today',
+      value: woCompleted.completedToday,
+      hint: 'Work orders marked complete',
       href: '/dashboard/work-orders',
       accent: 'green',
     },
     {
-      label: 'Scheduled today',
-      value: scheduledToday,
-      hint: 'Appointments',
-      href: '/dashboard/appointments',
-      accent: 'neutral',
+      label: 'Completed this week',
+      value: woCompleted.completedThisWeek,
+      hint: 'Week to date',
+      href: '/dashboard/work-orders',
+      accent: 'green',
     },
   ]
+
+  const overviewAll = [...overviewRow1, ...overviewRow2]
 
   const secondaryKpis: {
     label: string
@@ -258,56 +299,23 @@ export default async function DashboardPage() {
       <Topbar title="Dashboard" subtitle={today} />
       <div className="dash-content">
 
-        {/* ── Shop pulse: KPIs + Quick Actions (one operational row) ─────── */}
-        <div className="shop-today-section">
-          <div style={{ ...sectionLabel, marginBottom: 8 }}>Shop today</div>
-          <div className="shop-today-row">
-            <div className="shop-today-kpis">
-              <div className="shop-today-kpi-grid">
-                {commandMetrics.map(k => (
-                  <Link key={k.label} href={k.href} style={{ textDecoration: 'none', color: 'inherit' }}>
-                    <div style={kpiTileStyles(k.accent)}>
-                      <div
-                        style={{
-                          fontSize: 10,
-                          fontWeight: 700,
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.06em',
-                          color: 'var(--text-3)',
-                        }}
-                      >
-                        {k.label}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: k.accent === 'revenue' ? 26 : 22,
-                          fontWeight: 800,
-                          lineHeight: 1.1,
-                          color: 'var(--text)',
-                          fontFamily: k.monoValue ? 'var(--font-mono)' : 'inherit',
-                          marginTop: 8,
-                        }}
-                      >
-                        {k.value}
-                      </div>
-                      <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 6, lineHeight: 1.35 }}>
-                        {k.hint}
-                      </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </div>
-            <div className="card shop-today-quick">
-              <div style={{ ...sectionLabel, marginBottom: 8 }}>Quick actions</div>
-              <div className="quick-actions quick-actions--shop-today">
-                {quickActions.map(a => (
-                  <Link key={a.label} href={a.href} className="quick-action-btn">
-                    <div className="quick-action-icon">{a.icon}</div>
-                    {a.label}
-                  </Link>
-                ))}
-              </div>
+        {/* ── Shop overview: cash + jobs (single KPI row) ────────────────── */}
+        <div className="shop-today-section" style={{ marginBottom: 24 }}>
+          <div style={{ ...sectionLabel, marginBottom: 8 }}>Shop overview</div>
+          <div style={overviewKpiGridStyle}>
+            {overviewAll.map(item => (
+              <OverviewKpi key={item.label} {...item} />
+            ))}
+          </div>
+          <div className="card shop-today-quick" style={{ marginTop: 16 }}>
+            <div style={{ ...sectionLabel, marginBottom: 8 }}>Quick actions</div>
+            <div className="quick-actions quick-actions--shop-today">
+              {quickActions.map(a => (
+                <Link key={a.label} href={a.href} className="quick-action-btn">
+                  <div className="quick-action-icon">{a.icon}</div>
+                  {a.label}
+                </Link>
+              ))}
             </div>
           </div>
         </div>
@@ -490,66 +498,8 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        {/* ── Activity + today&apos;s schedule ─────────────────────────────── */}
-        <div className="two-col" style={{ marginBottom: 24, alignItems: 'start' }}>
-          <div className="card" style={{ minHeight: 320 }}>
-            <div className="section-header">
-              <div>
-                <div className="section-title">Recent activity</div>
-                <div className="section-subtitle">Payments, invoices, inspections, messages</div>
-              </div>
-              <Link href="/dashboard/communications" className="btn-ghost">Comms</Link>
-            </div>
-            {financial.recentActivity.length === 0 ? (
-              <div className="empty-state" style={{ padding: '32px 16px' }}>
-                <div className="empty-state-icon">📋</div>
-                <div className="empty-state-title">Nothing recent yet</div>
-                <div className="empty-state-body">Send an estimate link or record a payment to see activity here.</div>
-              </div>
-            ) : (
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                {financial.recentActivity.map(item => (
-                  <li key={`${item.kind}-${item.at}-${item.title}`} style={{ borderBottom: '1px solid var(--border-2)' }}>
-                    <Link
-                      href={item.href}
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'auto 1fr',
-                        gap: '10px 14px',
-                        padding: '12px 0',
-                        textDecoration: 'none',
-                        color: 'inherit',
-                        alignItems: 'start',
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: 10,
-                          fontWeight: 700,
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.04em',
-                          padding: '3px 8px',
-                          borderRadius: 4,
-                          whiteSpace: 'nowrap',
-                          ...activityBadgeStyle(item.kind),
-                        }}
-                      >
-                        {ACTIVITY_KIND[item.kind]}
-                      </span>
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{item.title}</div>
-                        <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 3, lineHeight: 1.4 }}>{item.detail}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4, fontFamily: 'var(--font-mono)' }}>
-                          {format(new Date(item.at), 'MMM d · h:mm a')}
-                        </div>
-                      </div>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
+        {/* ── Today&apos;s schedule ───────────────────────────────────────── */}
+        <div style={{ marginBottom: 24 }}>
           <div className="card">
             <div className="section-header">
               <div>
@@ -601,7 +551,7 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        {/* ── Secondary pulse + quick actions ──────────────────────────────── */}
+        {/* ── Secondary pulse ───────────────────────────────────────────── */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10, marginBottom: 20 }}>
           {secondaryKpis.map(k => (
             <Link key={k.label} href={k.href} style={{ textDecoration: 'none', color: 'inherit' }}>
