@@ -3,6 +3,7 @@
 // All server-side data fetching functions by domain
 // ============================================================
 
+import { startOfDay, endOfDay, startOfWeek } from 'date-fns'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import type {
   Appointment,
@@ -1251,6 +1252,152 @@ export async function getWorkOrdersForTenant(tenantId: string, limit = 200): Pro
 }
 
 /**
+ * Accurate counts of completed work orders (not limited by list pagination).
+ * Uses completed_at; excludes rows with null completed_at.
+ */
+export async function getCompletedWorkOrderCounts(tenantId: string): Promise<{
+  completedToday: number
+  completedThisWeek: number
+}> {
+  if (!hasValue(tenantId)) return { completedToday: 0, completedThisWeek: 0 }
+
+  const supabase = createAdminClient()
+  const now = new Date()
+  const dayStart = startOfDay(now).toISOString()
+  const dayEnd = endOfDay(now).toISOString()
+  const weekStart = startOfWeek(now, { weekStartsOn: 1 }).toISOString()
+  const nowIso = now.toISOString()
+
+  const [todayRes, weekRes] = await Promise.all([
+    supabase
+      .from('work_orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+      .eq('is_archived', false)
+      .eq('status', 'completed')
+      .not('completed_at', 'is', null)
+      .gte('completed_at', dayStart)
+      .lte('completed_at', dayEnd),
+    supabase
+      .from('work_orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+      .eq('is_archived', false)
+      .eq('status', 'completed')
+      .not('completed_at', 'is', null)
+      .gte('completed_at', weekStart)
+      .lte('completed_at', nowIso),
+  ])
+
+  if (todayRes.error) {
+    console.error('[getCompletedWorkOrderCounts] today:', todayRes.error.message)
+  }
+  if (weekRes.error) {
+    console.error('[getCompletedWorkOrderCounts] week:', weekRes.error.message)
+  }
+
+  return {
+    completedToday: todayRes.count ?? 0,
+    completedThisWeek: weekRes.count ?? 0,
+  }
+}
+
+function revOppNum(v: number | string | null | undefined): number {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : 0
+}
+
+/**
+ * Dashboard "Revenue opportunities" — aggregates from estimates, work_orders, invoices only.
+ */
+export async function getRevenueOpportunitiesSummary(tenantId: string): Promise<{
+  pendingEstimatesCount: number
+  pendingEstimatesPotential: number
+  readyPickupCount: number
+  readyPickupInvoiceTotal: number
+  unpaidInvoiceCount: number
+  unpaidOutstanding: number
+}> {
+  const empty = {
+    pendingEstimatesCount: 0,
+    pendingEstimatesPotential: 0,
+    readyPickupCount: 0,
+    readyPickupInvoiceTotal: 0,
+    unpaidInvoiceCount: 0,
+    unpaidOutstanding: 0,
+  }
+  if (!hasValue(tenantId)) return empty
+
+  const supabase = createAdminClient()
+
+  const [estRes, readyRes, unpaidRes] = await Promise.all([
+    supabase
+      .from('estimates')
+      .select('total')
+      .eq('tenant_id', tenantId)
+      .eq('is_archived', false)
+      .in('status', ['draft', 'presented']),
+    supabase
+      .from('work_orders')
+      .select('invoice_id')
+      .eq('tenant_id', tenantId)
+      .eq('is_archived', false)
+      .eq('status', 'ready'),
+    supabase
+      .from('invoices')
+      .select('balance_due')
+      .eq('tenant_id', tenantId)
+      .neq('payment_status', 'paid'),
+  ])
+
+  if (estRes.error) {
+    console.error('[getRevenueOpportunitiesSummary] estimates:', estRes.error.message)
+  }
+  if (readyRes.error) {
+    console.error('[getRevenueOpportunitiesSummary] ready WOs:', readyRes.error.message)
+  }
+  if (unpaidRes.error) {
+    console.error('[getRevenueOpportunitiesSummary] unpaid invoices:', unpaidRes.error.message)
+  }
+
+  const estRows = (estRes.data ?? []) as { total: number | string | null }[]
+  const pendingEstimatesCount = estRows.length
+  const pendingEstimatesPotential = estRows.reduce((s, r) => s + revOppNum(r.total), 0)
+
+  const readyRows = (readyRes.data ?? []) as { invoice_id: string | null }[]
+  const readyPickupCount = readyRows.length
+  const invoiceIds = [...new Set(readyRows.map(r => r.invoice_id).filter(Boolean))] as string[]
+
+  let readyPickupInvoiceTotal = 0
+  if (invoiceIds.length > 0) {
+    const invRes = await supabase
+      .from('invoices')
+      .select('total')
+      .eq('tenant_id', tenantId)
+      .in('id', invoiceIds)
+    if (invRes.error) {
+      console.error('[getRevenueOpportunitiesSummary] invoice totals:', invRes.error.message)
+    } else {
+      const invRows = (invRes.data ?? []) as { total: number | string | null }[]
+      readyPickupInvoiceTotal = invRows.reduce((s, r) => s + revOppNum(r.total), 0)
+    }
+  }
+
+  const unpaidRows = (unpaidRes.data ?? []) as { balance_due: number | string | null }[]
+  const unpaidInvoiceCount = unpaidRows.length
+  const unpaidOutstanding = unpaidRows.reduce((s, r) => s + revOppNum(r.balance_due), 0)
+
+  return {
+    pendingEstimatesCount,
+    pendingEstimatesPotential: Math.round(pendingEstimatesPotential * 100) / 100,
+    readyPickupCount,
+    readyPickupInvoiceTotal: Math.round(readyPickupInvoiceTotal * 100) / 100,
+    unpaidInvoiceCount,
+    unpaidOutstanding: Math.round(unpaidOutstanding * 100) / 100,
+  }
+}
+
+/**
  * Fetch a single work order by ID, including all its line items.
  * Returns null if not found or auth check fails.
  */
@@ -1557,7 +1704,9 @@ export async function getInspectionsForVehicle(
 
   const { data, error } = await supabase
     .from('inspections')
-    .select('id, vehicle_id, status, completed_at, created_at, total_items, critical_count')
+    .select(
+      'id, vehicle_id, appointment_id, status, completed_at, created_at, total_items, critical_count, warning_count',
+    )
     .eq('tenant_id', tenantId)
     .eq('vehicle_id', vehicleId)
     .eq('is_archived', false)
@@ -1613,7 +1762,10 @@ export async function getWorkOrdersForVehicle(
 
   const { data, error } = await supabase
     .from('work_orders')
-    .select('id, vehicle_id, work_order_number, status, total, created_at, completed_at')
+    .select(
+      'id, vehicle_id, work_order_number, status, total, created_at, completed_at, ' +
+      'inspection_id, estimate_id, invoice_id, estimate_number',
+    )
     .eq('tenant_id', tenantId)
     .eq('vehicle_id', vehicleId)
     .eq('is_archived', false)
@@ -1624,7 +1776,7 @@ export async function getWorkOrdersForVehicle(
     return []
   }
 
-  return (data ?? []) as WorkOrder[]
+  return (data ?? []) as unknown as WorkOrder[]
 }
 
 /**
@@ -1641,7 +1793,7 @@ export async function getInvoicesForVehicle(
 
   const { data, error } = await supabase
     .from('invoices')
-    .select('id, vehicle_id, invoice_number, status, total, created_at')
+    .select('id, vehicle_id, work_order_id, invoice_number, status, payment_status, total, created_at')
     .eq('tenant_id', tenantId)
     .eq('vehicle_id', vehicleId)
     .order('created_at', { ascending: false })
@@ -1652,6 +1804,42 @@ export async function getInvoicesForVehicle(
   }
 
   return (data ?? []) as Invoice[]
+}
+
+/**
+ * Short line-item title previews per work order (for vehicle history / summaries).
+ */
+export async function getWorkOrderLinePreviews(
+  tenantId: string,
+  workOrderIds: string[],
+  maxTitlesPerOrder = 4,
+): Promise<Map<string, string>> {
+  if (!hasValue(tenantId) || workOrderIds.length === 0) return new Map()
+
+  const supabase = createAdminClient()
+
+  const { data, error } = await supabase
+    .from('work_order_items')
+    .select('work_order_id, title, display_order')
+    .eq('tenant_id', tenantId)
+    .in('work_order_id', workOrderIds)
+    .order('display_order', { ascending: true })
+
+  if (error || !data?.length) {
+    if (error) console.error('[getWorkOrderLinePreviews]', error.message)
+    return new Map()
+  }
+
+  const buckets = new Map<string, string[]>()
+  for (const row of data as { work_order_id: string; title: string }[]) {
+    const list = buckets.get(row.work_order_id) ?? []
+    if (list.length < maxTitlesPerOrder) list.push(row.title)
+    buckets.set(row.work_order_id, list)
+  }
+
+  return new Map(
+    [...buckets.entries()].map(([id, titles]) => [id, titles.join(' · ')]),
+  )
 }
 
 // ── Call logs (Twilio) ─────────────────────────────────────────
