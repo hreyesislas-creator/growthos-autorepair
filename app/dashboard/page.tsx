@@ -17,7 +17,7 @@ import { getFinancialDashboardData } from '@/lib/financial-queries'
 import Topbar from '@/components/dashboard/Topbar'
 import StatusBadge from '@/components/dashboard/StatusBadge'
 import Link from 'next/link'
-import { format } from 'date-fns'
+import { differenceInCalendarDays, format, parseISO, startOfDay } from 'date-fns'
 
 export const metadata = { title: 'Overview' }
 
@@ -139,6 +139,58 @@ const pipelineCardBorder = {
   completed: '1px solid rgba(34, 197, 94, 0.4)',
 } as const
 
+type PipelineAgingBucket = 'fresh' | 'recent' | 'stale' | 'urgent'
+
+/** Calendar days since `iso` (local); 0 = today; clamped ≥0. */
+function pipelineCalendarAgeDays(iso: string | null | undefined): number {
+  if (!iso) return 0
+  const d = parseISO(iso)
+  if (Number.isNaN(d.getTime())) return 0
+  return Math.max(0, differenceInCalendarDays(startOfDay(new Date()), startOfDay(d)))
+}
+
+function pipelineAgingShortSuffix(days: number): string {
+  if (days <= 0) return 'today'
+  if (days === 1) return '1 day'
+  if (days < 5) return `${days} days`
+  return '5+ days'
+}
+
+function pipelineAgingBucket(days: number): PipelineAgingBucket {
+  if (days <= 0) return 'fresh'
+  if (days <= 2) return 'recent'
+  if (days <= 4) return 'stale'
+  return 'urgent'
+}
+
+function estimatePipelineAging(updatedAt: string): { line: string; bucket: PipelineAgingBucket } {
+  const days = pipelineCalendarAgeDays(updatedAt)
+  const bucket = pipelineAgingBucket(days)
+  const suf = pipelineAgingShortSuffix(days)
+  const line = days <= 0 ? 'Updated today' : `Waiting · ${suf}`
+  return { line, bucket }
+}
+
+function activeWorkOrderPipelineAging(updatedAt: string): { line: string; bucket: PipelineAgingBucket } {
+  const days = pipelineCalendarAgeDays(updatedAt)
+  const bucket = pipelineAgingBucket(days)
+  const suf = pipelineAgingShortSuffix(days)
+  const line = days <= 0 ? 'Updated today' : `Open · ${suf}`
+  return { line, bucket }
+}
+
+function completedWorkOrderPipelineAging(
+  completedAt: string | null | undefined,
+  updatedAt: string,
+): { line: string; bucket: PipelineAgingBucket } {
+  const ref = completedAt ?? updatedAt
+  const days = pipelineCalendarAgeDays(ref)
+  const bucket = pipelineAgingBucket(days)
+  const suf = pipelineAgingShortSuffix(days)
+  const line = days <= 0 ? 'Completed today' : `Ready · ${suf}`
+  return { line, bucket }
+}
+
 export default async function DashboardPage() {
   const ctx      = await getDashboardTenant()
   const tenantId = ctx?.tenant.id ?? ''
@@ -172,17 +224,18 @@ export default async function DashboardPage() {
 
   const pipelineEstimates = estimates
     .filter(e => PENDING_PIPELINE_ESTIMATE_STATUSES.has(e.status))
+    .sort((a, b) => a.updated_at.localeCompare(b.updated_at))
     .slice(0, PIPELINE_LIMIT)
 
   const inProgressWO = workOrders
     .filter(w => w.status === 'in_progress' || w.status === 'ready')
-    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+    .sort((a, b) => a.updated_at.localeCompare(b.updated_at))
     .slice(0, PIPELINE_LIMIT)
 
   const completedWO = workOrders
     .filter(w => w.status === 'completed')
     .sort((a, b) =>
-      (b.completed_at ?? b.updated_at).localeCompare(a.completed_at ?? a.updated_at),
+      (a.completed_at ?? a.updated_at).localeCompare(b.completed_at ?? b.updated_at),
     )
     .slice(0, PIPELINE_LIMIT)
 
@@ -368,6 +421,58 @@ export default async function DashboardPage() {
           </div>
         </div>
 
+        {/* ── Today's Priorities (shop-floor ops; uses data already loaded — not revenue duplicates) ─ */}
+        <div className="todays-priorities-module">
+          <div className="todays-priorities-module__head">
+            <div className="todays-priorities-module__title">Today&apos;s Priorities</div>
+            <p className="todays-priorities-module__sub">
+              Schedule and shop floor — use Revenue Opportunities for money still in play.
+            </p>
+          </div>
+          <div className="todays-priorities-module__grid">
+            <Link href="/dashboard/appointments" className="today-priority-card today-priority-card--appts">
+              <div className="today-priority-card__label">Today&apos;s Appointments</div>
+              <div className="today-priority-card__metrics">
+                <span className="today-priority-card__count">{todayAppts.length}</span>
+              </div>
+              <div className="today-priority-card__footer">
+                <span className="today-priority-card__hint">Check arrivals</span>
+                <span className="today-priority-card__cta">Calendar →</span>
+              </div>
+            </Link>
+            <Link href="/dashboard/work-orders" className="today-priority-card today-priority-card--active-jobs">
+              <div className="today-priority-card__label">Active Jobs</div>
+              <div className="today-priority-card__metrics">
+                <span className="today-priority-card__count">{activeJobCount}</span>
+              </div>
+              <div className="today-priority-card__footer">
+                <span className="today-priority-card__hint">In progress + ready</span>
+                <span className="today-priority-card__cta">View jobs →</span>
+              </div>
+            </Link>
+            <Link href="/dashboard/work-orders" className="today-priority-card today-priority-card--completed-today">
+              <div className="today-priority-card__label">Completed Today</div>
+              <div className="today-priority-card__metrics">
+                <span className="today-priority-card__count">{woCompleted.completedToday}</span>
+              </div>
+              <div className="today-priority-card__footer">
+                <span className="today-priority-card__hint">Jobs closed today</span>
+                <span className="today-priority-card__cta">View jobs →</span>
+              </div>
+            </Link>
+            <Link href="/dashboard/inspections" className="today-priority-card today-priority-card--inspections">
+              <div className="today-priority-card__label">Pending Inspections</div>
+              <div className="today-priority-card__metrics">
+                <span className="today-priority-card__count">{pendingInsp}</span>
+              </div>
+              <div className="today-priority-card__footer">
+                <span className="today-priority-card__hint">Awaiting review</span>
+                <span className="today-priority-card__cta">Inspect →</span>
+              </div>
+            </Link>
+          </div>
+        </div>
+
         {/* ── Operational pipeline (3 columns) ───────────────────────────── */}
         <div className="card" style={{ marginBottom: 24, padding: '18px 18px 16px' }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
@@ -405,35 +510,39 @@ export default async function DashboardPage() {
                 <div style={{ fontSize: 12, color: 'var(--text-3)', padding: '12px 0' }}>None in this stage.</div>
               ) : (
                 <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {pipelineEstimates.map(e => (
-                    <li key={e.id}>
-                      <Link
-                        href={`/dashboard/estimates/${e.id}`}
-                        style={{
-                          display: 'block',
-                          textDecoration: 'none',
-                          color: 'inherit',
-                          padding: '10px 10px',
-                          borderRadius: 8,
-                          border: pipelineCardBorder.estimates,
-                          background: 'var(--surface-2)',
-                        }}
-                      >
-                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
-                          {e.customer_id ? (customerNames.get(e.customer_id) ?? '—') : '—'}
-                        </div>
-                        <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4, lineHeight: 1.35 }}>
-                          {e.vehicle_id ? (vehicleLabels.get(e.vehicle_id) ?? '—') : '—'}
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 10 }}>
-                          <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>
-                            {fmtMoney(e.total)}
-                          </span>
-                          <StatusBadge status={e.status} />
-                        </div>
-                      </Link>
-                    </li>
-                  ))}
+                  {pipelineEstimates.map(e => {
+                    const aging = estimatePipelineAging(e.updated_at)
+                    return (
+                      <li key={e.id}>
+                        <Link
+                          href={`/dashboard/estimates/${e.id}`}
+                          style={{
+                            display: 'block',
+                            textDecoration: 'none',
+                            color: 'inherit',
+                            padding: '10px 10px',
+                            borderRadius: 8,
+                            border: pipelineCardBorder.estimates,
+                            background: 'var(--surface-2)',
+                          }}
+                        >
+                          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
+                            {e.customer_id ? (customerNames.get(e.customer_id) ?? '—') : '—'}
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4, lineHeight: 1.35 }}>
+                            {e.vehicle_id ? (vehicleLabels.get(e.vehicle_id) ?? '—') : '—'}
+                          </div>
+                          <div className={`pipeline-aging pipeline-aging--${aging.bucket}`}>{aging.line}</div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 10 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>
+                              {fmtMoney(e.total)}
+                            </span>
+                            <StatusBadge status={e.status} />
+                          </div>
+                        </Link>
+                      </li>
+                    )
+                  })}
                 </ul>
               )}
             </div>
@@ -458,35 +567,39 @@ export default async function DashboardPage() {
                 <div style={{ fontSize: 12, color: 'var(--text-3)', padding: '12px 0' }}>Bay clear.</div>
               ) : (
                 <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {inProgressWO.map(w => (
-                    <li key={w.id}>
-                      <Link
-                        href={`/dashboard/work-orders/${w.id}`}
-                        style={{
-                          display: 'block',
-                          textDecoration: 'none',
-                          color: 'inherit',
-                          padding: '10px 10px',
-                          borderRadius: 8,
-                          border: pipelineCardBorder.workOrders,
-                          background: 'var(--surface-2)',
-                        }}
-                      >
-                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
-                          {w.customer_id ? (customerNames.get(w.customer_id) ?? '—') : '—'}
-                        </div>
-                        <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4, lineHeight: 1.35 }}>
-                          {w.vehicle_id ? (vehicleLabels.get(w.vehicle_id) ?? '—') : '—'}
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 10 }}>
-                          <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>
-                            {fmtMoney(w.total)}
-                          </span>
-                          <StatusBadge status={w.status} />
-                        </div>
-                      </Link>
-                    </li>
-                  ))}
+                  {inProgressWO.map(w => {
+                    const aging = activeWorkOrderPipelineAging(w.updated_at)
+                    return (
+                      <li key={w.id}>
+                        <Link
+                          href={`/dashboard/work-orders/${w.id}`}
+                          style={{
+                            display: 'block',
+                            textDecoration: 'none',
+                            color: 'inherit',
+                            padding: '10px 10px',
+                            borderRadius: 8,
+                            border: pipelineCardBorder.workOrders,
+                            background: 'var(--surface-2)',
+                          }}
+                        >
+                          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
+                            {w.customer_id ? (customerNames.get(w.customer_id) ?? '—') : '—'}
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4, lineHeight: 1.35 }}>
+                            {w.vehicle_id ? (vehicleLabels.get(w.vehicle_id) ?? '—') : '—'}
+                          </div>
+                          <div className={`pipeline-aging pipeline-aging--${aging.bucket}`}>{aging.line}</div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 10 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>
+                              {fmtMoney(w.total)}
+                            </span>
+                            <StatusBadge status={w.status} />
+                          </div>
+                        </Link>
+                      </li>
+                    )
+                  })}
                 </ul>
               )}
             </div>
@@ -511,7 +624,9 @@ export default async function DashboardPage() {
                 <div style={{ fontSize: 12, color: 'var(--text-3)', padding: '12px 0' }}>No completed jobs yet.</div>
               ) : (
                 <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {completedWO.map(w => (
+                  {completedWO.map(w => {
+                    const aging = completedWorkOrderPipelineAging(w.completed_at, w.updated_at)
+                    return (
                     <li key={w.id}>
                       <Link
                         href={`/dashboard/work-orders/${w.id}`}
@@ -531,6 +646,7 @@ export default async function DashboardPage() {
                         <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4, lineHeight: 1.35 }}>
                           {w.vehicle_id ? (vehicleLabels.get(w.vehicle_id) ?? '—') : '—'}
                         </div>
+                        <div className={`pipeline-aging pipeline-aging--${aging.bucket}`}>{aging.line}</div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 10 }}>
                           <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>
                             {fmtMoney(w.total)}
@@ -539,7 +655,8 @@ export default async function DashboardPage() {
                         </div>
                       </Link>
                     </li>
-                  ))}
+                    )
+                  })}
                 </ul>
               )}
             </div>

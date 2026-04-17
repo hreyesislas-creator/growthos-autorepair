@@ -304,6 +304,138 @@ body { font-family: var(--font-body); background: var(--bg); color: var(--text);
   color: #5ec0f5;
 }
 
+/* Today's Priorities — compact operational queue */
+.todays-priorities-module {
+  margin-bottom: 16px;
+  padding: 12px 14px 11px;
+  border-radius: var(--r10);
+  border: 1px solid rgba(255, 255, 255, .09);
+  background: var(--surface-2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
+}
+.todays-priorities-module__head {
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-2);
+}
+.todays-priorities-module__title {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+.todays-priorities-module__sub {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 3px;
+  line-height: 1.35;
+}
+.todays-priorities-module__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
+  gap: 8px;
+  align-items: stretch;
+}
+.today-priority-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding: 10px 11px 9px;
+  border-radius: var(--r8);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color .15s ease, background .15s ease;
+  border-left-width: 3px;
+  border-left-style: solid;
+}
+.today-priority-card:hover {
+  border-color: rgba(255, 255, 255, .12);
+  background: rgba(255, 255, 255, .02);
+}
+.today-priority-card--appts { border-left-color: rgba(168, 85, 247, .75); }
+.today-priority-card--active-jobs { border-left-color: rgba(0, 112, 201, .8); }
+.today-priority-card--completed-today { border-left-color: rgba(34, 197, 94, .75); }
+.today-priority-card--inspections { border-left-color: rgba(245, 158, 11, .7); }
+.today-priority-card__label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 6px;
+}
+.today-priority-card__metrics {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  margin-bottom: 6px;
+}
+.today-priority-card__count {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--text);
+}
+.today-priority-card__amount {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-2);
+  letter-spacing: -0.02em;
+}
+.today-priority-card__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 4px 8px;
+  margin-top: auto;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-2);
+}
+.today-priority-card__hint {
+  font-size: 10px;
+  color: var(--text-2);
+  line-height: 1.3;
+  flex: 1 1 100px;
+  min-width: 0;
+}
+.today-priority-card__cta {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--blue-light);
+  white-space: nowrap;
+}
+.today-priority-card:hover .today-priority-card__cta {
+  color: #5ec0f5;
+}
+
+/* Shop pipeline — per-card aging / urgency (subtle) */
+.pipeline-aging {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  margin-top: 6px;
+  line-height: 1.25;
+}
+.pipeline-aging--fresh {
+  color: var(--text-3);
+}
+.pipeline-aging--recent {
+  color: rgba(245, 158, 11, 0.88);
+}
+.pipeline-aging--stale {
+  color: #fbbf24;
+}
+.pipeline-aging--urgent {
+  color: #fb923c;
+}
+
 .kpi-label { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); margin-bottom: 8px; }
 .kpi-value { font-family: var(--font-display); font-size: 32px; font-weight: 700; color: var(--text); line-height: 1; }
 .kpi-sub { font-size: 12px; color: var(--text-3); margin-top: 4px; }
