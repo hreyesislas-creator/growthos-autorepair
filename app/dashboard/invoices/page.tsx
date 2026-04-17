@@ -100,7 +100,10 @@ export default async function InvoicesPage() {
 
   return (
     <>
-      <Topbar title="Invoices" />
+      <Topbar
+        title="Invoices"
+        subtitle="Track balances, record payments, and print customer copies"
+      />
       <InvoicesList invoices={resolvedRows} />
     </>
   )

@@ -22,6 +22,9 @@ interface InvoiceData {
   vehicle_id: string | null
   invoice_number: string
   status: string
+  payment_status: string | null
+  amount_paid: number | string | null
+  balance_due: number | string | null
   subtotal_labor: number | string
   subtotal_parts: number | string
   subtotal_other: number | string
@@ -34,7 +37,7 @@ interface InvoiceData {
   work_order_id: string | null
 }
 
-// Local type for business_profiles shape (matches selected fields in this page)
+// Matches dashboard settings / DB columns for business_profiles
 interface BusinessProfileData {
   business_name: string | null
   address_line_1: string | null
@@ -87,6 +90,7 @@ export default async function InvoicePrintPage({
     .from('invoices')
     .select(
       'id, tenant_id, customer_id, vehicle_id, invoice_number, status, ' +
+      'payment_status, amount_paid, balance_due, ' +
       'subtotal_labor, subtotal_parts, subtotal_other, subtotal, ' +
       'tax_rate, tax_amount, total, notes, created_at, work_order_id',
     )
@@ -170,25 +174,37 @@ export default async function InvoicePrintPage({
   const taxRate = Number(invoice.tax_rate ?? 0)
   const taxAmount = Number(invoice.tax_amount ?? 0)
   const total = Number(invoice.total ?? 0)
+  const amountPaid = Number(invoice.amount_paid ?? 0)
+  const balanceDue = Math.max(0, Math.round((total - amountPaid) * 100) / 100)
+  const paymentStatus = invoice.payment_status ?? 'unpaid'
+  const isVoid = invoice.status === 'void'
+
+  const cityStateZip = [profile?.city, profile?.state, profile?.zip_code]
+    .filter(Boolean)
+    .join(', ')
+
+  const paymentStatusLabel =
+    paymentStatus === 'paid'
+      ? 'Paid in full'
+      : paymentStatus === 'partially_paid'
+        ? 'Partially paid'
+        : 'Unpaid'
 
   return (
     <div className="page">
       {/* Header */}
       <div className="header">
         <div className="shop-info">
+          {profile?.logo_url && (
+            <img src={profile.logo_url} alt="" className="shop-logo" />
+          )}
           <h1>{profile?.business_name ?? tenant?.name ?? 'Auto Shop'}</h1>
           {/* Address block */}
-          {(profile?.address_line_1 || profile?.city || profile?.state) && (
+          {(profile?.address_line_1 || profile?.address_line_2 || cityStateZip) && (
             <div style={{ fontSize: '11px', color: '#555', marginTop: '8px', lineHeight: '1.4' }}>
               {profile?.address_line_1 && <p>{profile.address_line_1}</p>}
               {profile?.address_line_2 && <p>{profile.address_line_2}</p>}
-              {(profile?.city || profile?.state || profile?.zip_code) && (
-                <p>
-                  {[profile?.city, profile?.state, profile?.zip_code]
-                    .filter(Boolean)
-                    .join(', ')}
-                </p>
-              )}
+              {cityStateZip && <p>{cityStateZip}</p>}
             </div>
           )}
           {/* Contact info */}
@@ -209,6 +225,10 @@ export default async function InvoicePrintPage({
               year: 'numeric',
             })}
           </p>
+          {isVoid && <p className="invoice-status-void">VOID</p>}
+          {!isVoid && (
+            <p className="invoice-payment-status">{paymentStatusLabel}</p>
+          )}
         </div>
       </div>
 
@@ -242,23 +262,32 @@ export default async function InvoicePrintPage({
             </tr>
           </thead>
           <tbody>
-            {items.map(item => (
-              <tr key={item.id}>
-                <td>
-                  <strong>{item.title}</strong>
-                  {item.description && <p style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}>{item.description}</p>}
-                </td>
-                <td className="number">
-                  {item.labor_total > 0 ? `$${item.labor_total.toFixed(2)}` : '—'}
-                </td>
-                <td className="number">
-                  {item.parts_total > 0 ? `$${item.parts_total.toFixed(2)}` : '—'}
-                </td>
-                <td className="number">
-                  <strong>${item.line_total.toFixed(2)}</strong>
-                </td>
-              </tr>
-            ))}
+            {items.map(item => {
+              const labor = Number(item.labor_total ?? 0)
+              const parts = Number(item.parts_total ?? 0)
+              const line = Number(item.line_total ?? 0)
+              return (
+                <tr key={item.id}>
+                  <td>
+                    <strong>{item.title}</strong>
+                    {item.description && (
+                      <p style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}>
+                        {item.description}
+                      </p>
+                    )}
+                  </td>
+                  <td className="number">
+                    {labor > 0 ? `$${labor.toFixed(2)}` : '—'}
+                  </td>
+                  <td className="number">
+                    {parts > 0 ? `$${parts.toFixed(2)}` : '—'}
+                  </td>
+                  <td className="number">
+                    <strong>${line.toFixed(2)}</strong>
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       ) : (
@@ -296,9 +325,26 @@ export default async function InvoicePrintPage({
 
         {/* Grand total */}
         <div className="total-row final">
-          <span>Total Due:</span>
+          <span>Invoice total:</span>
           <strong>${total.toFixed(2)}</strong>
         </div>
+        {!isVoid && amountPaid > 0 && (
+          <div className="total-row">
+            <span>Amount paid:</span>
+            <strong>${amountPaid.toFixed(2)}</strong>
+          </div>
+        )}
+        {!isVoid && balanceDue > 0 && (
+          <div className="total-row final balance-due">
+            <span>Balance due:</span>
+            <strong>${balanceDue.toFixed(2)}</strong>
+          </div>
+        )}
+        {!isVoid && balanceDue <= 0 && paymentStatus === 'paid' && (
+          <div className="total-row paid-in-full">
+            <span>Paid in full</span>
+          </div>
+        )}
       </div>
 
       {/* Notes */}

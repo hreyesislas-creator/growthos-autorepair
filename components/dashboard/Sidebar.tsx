@@ -16,6 +16,8 @@ const NAV = [
   { href: '/dashboard/vehicles',      icon: '🚗', key: 'nav_vehicles'       },
   { href: '/dashboard/inspections',   icon: '🔍', key: 'nav_inspections'    },
   { href: '/dashboard/estimates',     icon: '📋', key: 'nav_estimates'      },
+  { href: '/dashboard/services',      icon: '\u{1F4C4}', key: 'nav_job_templates' },
+  { href: '/dashboard/parts',         icon: '\u{1F4E6}', key: 'nav_parts' },
   { href: '/dashboard/work-orders',   icon: '🔧', key: 'nav_work_orders'    },
   { href: '/dashboard/invoices',      icon: '🧾', key: 'nav_invoices'       },
   { href: '/dashboard/communications',icon: '💬', key: 'nav_communications' },

@@ -538,6 +538,47 @@ export interface ServiceJobWithCategory extends ServiceJob {
   category: ServiceCategory
 }
 
+// ── Tenant service catalog (canned jobs) ─────────────────────
+
+/**
+ * One row per tenant — advisor-defined packages (oil change, brakes, etc.).
+ * `default_parts` is a JSON array of {@link ServiceCatalogDefaultPart}.
+ */
+export interface ServiceCatalog {
+  id: string
+  tenant_id: string
+  name: string
+  description: string | null
+  default_labor_hours: number | null
+  default_labor_rate: number | null
+  default_parts: Json | null
+  default_notes: string | null
+  is_active: boolean
+  created_at: string
+}
+
+/** Shape stored in `service_catalog.default_parts` (JSON array). */
+export interface ServiceCatalogDefaultPart {
+  name: string
+  quantity?: number
+  unit_cost?: number
+}
+
+// ── Parts catalog (Inventory Light) ──────────────────────────
+
+/** Tenant-owned reusable part row — pricing reference only (no stock). */
+export interface PartsCatalog {
+  id: string
+  tenant_id: string
+  part_number: string | null
+  name: string
+  description: string | null
+  default_unit_cost: number | null
+  default_unit_price: number | null
+  is_active: boolean
+  created_at: string
+}
+
 // ── Estimate types ────────────────────────────────────────────
 //
 // One estimate system, three creation modes.

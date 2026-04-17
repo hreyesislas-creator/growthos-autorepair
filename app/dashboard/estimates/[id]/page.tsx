@@ -4,6 +4,7 @@ import {
   getEstimateWithItems,
   getEstimateItemDecisions,
   getServiceJobs,
+  getServicesByTenant,
   getTenantPricingConfig,
 } from '@/lib/queries'
 import { createClient } from '@/lib/supabase/server'
@@ -28,9 +29,10 @@ export default async function EstimateDetailPage({
     tenantId,
   })
 
-  const [estimate, serviceJobs, pricingConfig, initialDecisions] = await Promise.all([
+  const [estimate, serviceJobs, catalogServices, pricingConfig, initialDecisions] = await Promise.all([
     getEstimateWithItems(tenantId, params.id),
     getServiceJobs(),
+    getServicesByTenant(tenantId),
     getTenantPricingConfig(tenantId),
     getEstimateItemDecisions(tenantId, params.id),
   ])
@@ -91,9 +93,11 @@ export default async function EstimateDetailPage({
         action={{ label: '← Estimates', href: '/dashboard/estimates' }}
       />
       <EstimateEditor
+        key={estimate.updated_at}
         estimate={estimate}
         inspectionId={estimate.inspection_id}
         serviceJobs={serviceJobs}
+        catalogServices={catalogServices}
         defaultLaborRate={defaultLaborRate}
         initialDecisions={initialDecisions}
         readOnly={!canEditEstimates}

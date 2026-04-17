@@ -105,8 +105,17 @@ function todayISO() {
 const CARD_TYPES: CardType[] = ['debit', 'visa', 'mastercard', 'amex', 'other']
 const PAYMENT_METHODS: PaymentMethod[] = ['card', 'cash', 'zelle', 'check', 'financing', 'other']
 
+export type InvoiceShopHeader = {
+  businessName: string
+  addressLines: string[]
+  phone:        string | null
+  email:        string | null
+  logoUrl:      string | null
+}
+
 interface InvoiceDetailProps {
   invoice:        InvoiceWithItems
+  shopHeader:     InvoiceShopHeader
   customerName:   string | null
   vehicleDisplay: string | null
   payments:       InvoicePayment[]
@@ -117,6 +126,7 @@ interface InvoiceDetailProps {
 
 export default function InvoiceDetail({
   invoice,
+  shopHeader,
   customerName,
   vehicleDisplay,
   payments,
@@ -125,13 +135,16 @@ export default function InvoiceDetail({
   const router        = useRouter()
   const status        = statusStyle(invoice.status)
   const paymentStatus = paymentStatusStyle(invoice.payment_status ?? 'unpaid')
-  const balanceDue    = Number(invoice.balance_due ?? invoice.total)
   const amountPaid    = Number(invoice.amount_paid ?? 0)
+  const total         = Number(invoice.total ?? 0)
+  // Outstanding balance from totals − payments (avoids stale balance_due === 0 on unpaid rows).
+  const outstandingBalance = Math.max(0, Math.round((total - amountPaid) * 100) / 100)
   const isFullyPaid   = (invoice.payment_status ?? 'unpaid') === 'paid'
+  const isVoid        = invoice.status === 'void'
 
   // ── Form state ────────────────────────────────────────────────────────────
   const [showForm, setShowForm]   = useState(false)
-  const [amount, setAmount]       = useState(balanceDue > 0 ? balanceDue.toFixed(2) : '')
+  const [amount, setAmount]       = useState(outstandingBalance > 0 ? outstandingBalance.toFixed(2) : '')
   const [method, setMethod]       = useState<PaymentMethod>('cash')
   const [paidAt, setPaidAt]       = useState(todayISO())
   const [note, setNote]           = useState('')
@@ -207,46 +220,97 @@ export default function InvoiceDetail({
   return (
     <div style={{ maxWidth: 900, margin: '0 auto' }}>
 
-      {/* ── Payment status banner ──────────────────────────────────────────── */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '12px 16px', marginBottom: 16,
-        borderRadius: 8, border: `1px solid ${paymentStatus.border}`,
-        background: paymentStatus.bg,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: paymentStatus.color }}>
-            {paymentStatus.label}
-          </span>
-          {amountPaid > 0 && (
-            <span style={{ fontSize: 12, color: paymentStatus.color, opacity: 0.85 }}>
-              ${amountPaid.toFixed(2)} received
-              {balanceDue > 0 ? ` · $${balanceDue.toFixed(2)} remaining` : ''}
-            </span>
+      {/* ── Shop header ────────────────────────────────────────────────────── */}
+      <div
+        className="card"
+        style={{
+          marginBottom: 16,
+          display: 'flex',
+          gap: 16,
+          alignItems: 'flex-start',
+        }}
+      >
+        {shopHeader.logoUrl && (
+          <img
+            src={shopHeader.logoUrl}
+            alt=""
+            style={{ maxHeight: 52, maxWidth: 160, objectFit: 'contain' }}
+          />
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>
+            {shopHeader.businessName}
+          </div>
+          {shopHeader.addressLines.length > 0 && (
+            <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 6, lineHeight: 1.45 }}>
+              {shopHeader.addressLines.map((line, i) => (
+                <div key={i}>{line}</div>
+              ))}
+            </div>
           )}
-          {amountPaid === 0 && (
-            <span style={{ fontSize: 12, color: paymentStatus.color, opacity: 0.85 }}>
-              Balance due: ${balanceDue.toFixed(2)}
-            </span>
+          {(shopHeader.phone || shopHeader.email) && (
+            <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 8, lineHeight: 1.5 }}>
+              {shopHeader.phone && <div>Phone: {shopHeader.phone}</div>}
+              {shopHeader.email && <div>Email: {shopHeader.email}</div>}
+            </div>
           )}
         </div>
-        {!isFullyPaid && canRecordPayment && (
-          <button
-            onClick={() => setShowForm(v => !v)}
-            style={{
-              padding: '6px 14px', borderRadius: 6,
-              fontSize: 12, fontWeight: 600,
-              border: `1px solid ${paymentStatus.border}`,
-              background: 'white', color: paymentStatus.color, cursor: 'pointer',
-            }}
-          >
-            {showForm ? 'Cancel' : 'Record Payment'}
-          </button>
-        )}
       </div>
 
+      {/* ── Payment status banner ──────────────────────────────────────────── */}
+      {isVoid ? (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '12px 16px', marginBottom: 16,
+          borderRadius: 8, border: '1px solid #e2e8f0',
+          background: '#f8fafc',
+        }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>
+            This invoice is void. It is not collectible and payments cannot be recorded.
+          </span>
+        </div>
+      ) : (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '12px 16px', marginBottom: 16,
+          borderRadius: 8, border: `1px solid ${paymentStatus.border}`,
+          background: paymentStatus.bg,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: paymentStatus.color }}>
+              {paymentStatus.label}
+            </span>
+            {amountPaid > 0 && (
+              <span style={{ fontSize: 12, color: paymentStatus.color, opacity: 0.85 }}>
+                ${amountPaid.toFixed(2)} received
+                {outstandingBalance > 0 ? ` · $${outstandingBalance.toFixed(2)} remaining` : ''}
+              </span>
+            )}
+            {amountPaid === 0 && outstandingBalance > 0 && (
+              <span style={{ fontSize: 12, color: paymentStatus.color, opacity: 0.85 }}>
+                Balance due: ${outstandingBalance.toFixed(2)}
+              </span>
+            )}
+          </div>
+          {!isFullyPaid && canRecordPayment && outstandingBalance > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowForm(v => !v)}
+              style={{
+                padding: '6px 14px', borderRadius: 6,
+                fontSize: 12, fontWeight: 600,
+                border: `1px solid ${paymentStatus.border}`,
+                background: 'white', color: paymentStatus.color, cursor: 'pointer',
+              }}
+            >
+              {showForm ? 'Cancel' : 'Record Payment'}
+            </button>
+          )}
+        </div>
+      )}
+
       {/* ── Record Payment form ────────────────────────────────────────────── */}
-      {showForm && !isFullyPaid && canRecordPayment && (
+      {showForm && !isFullyPaid && !isVoid && canRecordPayment && outstandingBalance > 0 && (
         <div className="card" style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 14 }}>
             Record Payment
@@ -258,11 +322,16 @@ export default function InvoiceDetail({
               <div>
                 <label style={labelStyle}>Amount</label>
                 <input
-                  type="number" step="0.01" min="0.01" max={balanceDue}
+                  type="number" step="0.01" min="0.01" max={outstandingBalance}
                   value={amount} onChange={e => setAmount(e.target.value)}
                   required className="field-input"
                   style={{ width: '100%', fontSize: 13 }} placeholder="0.00"
                 />
+                {outstandingBalance > 0 && (
+                  <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>
+                    Outstanding balance: ${outstandingBalance.toFixed(2)}
+                  </div>
+                )}
               </div>
               <div>
                 <label style={labelStyle}>Payment Method</label>
@@ -277,12 +346,16 @@ export default function InvoiceDetail({
                 </select>
               </div>
               <div>
-                <label style={labelStyle}>Date Received</label>
+                <label style={labelStyle}>Payment date</label>
                 <input
                   type="datetime-local" value={paidAt}
                   onChange={e => setPaidAt(e.target.value)}
                   required className="field-input" style={{ width: '100%', fontSize: 13 }}
+                  title="Date and time the payment was received"
                 />
+                <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>
+                  Use the date the customer paid (you can adjust time if needed).
+                </div>
               </div>
             </div>
 
@@ -404,7 +477,15 @@ export default function InvoiceDetail({
             >
               Print
             </button>
-            <div style={{ ...status, padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600 }}>
+            <div style={{
+              background: status.bg,
+              color: status.color,
+              padding: '6px 12px',
+              borderRadius: 6,
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+            >
               {status.label}
             </div>
           </div>
@@ -449,7 +530,14 @@ export default function InvoiceDetail({
             <tbody>
               {invoice.items.map(item => (
                 <tr key={item.id}>
-                  <td style={{ fontWeight: 600, color: 'var(--text)' }}>{item.title}</td>
+                  <td style={{ fontWeight: 600, color: 'var(--text)' }}>
+                    {item.title}
+                    {item.description && (
+                      <div style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-2)', marginTop: 4 }}>
+                        {item.description}
+                      </div>
+                    )}
+                  </td>
                   <td style={{ textAlign: 'right', fontSize: 12, fontFamily: 'var(--font-mono)' }}>
                     {item.labor_total > 0 ? `$${item.labor_total.toFixed(2)}` : '—'}
                   </td>
@@ -493,9 +581,9 @@ export default function InvoiceDetail({
             {amountPaid > 0 && (
               <Row label="Paid" value={`−$${amountPaid.toFixed(2)}`} green />
             )}
-            {balanceDue > 0 && (
+            {outstandingBalance > 0 && (
               <div style={{ borderTop: '1px solid var(--border-2)', paddingTop: 6, marginTop: 4 }}>
-                <Row label="Balance Due" value={`$${balanceDue.toFixed(2)}`} bold red />
+                <Row label="Balance Due" value={`$${outstandingBalance.toFixed(2)}`} bold red />
               </div>
             )}
           </div>
@@ -535,7 +623,7 @@ export default function InvoiceDetail({
                         {meta}
                       </span>
                     )}
-                    {p.note && p.payment_method !== 'card' && (
+                    {p.note && (
                       <span style={{ fontSize: 11, color: 'var(--text-3)', fontStyle: 'italic', paddingLeft: 2 }}>
                         {p.note}
                       </span>

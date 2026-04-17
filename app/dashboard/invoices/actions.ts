@@ -49,13 +49,19 @@ export async function recordInvoicePayment(
     .maybeSingle()
 
   if (invErr || !invoice) return { error: 'Invoice not found.' }
+  if (invoice.status === 'void') return { error: 'Cannot record payments on a void invoice.' }
   if (invoice.payment_status === 'paid') return { error: 'Invoice is already fully paid.' }
 
-  const total       = Number(invoice.total)
-  const currentPaid = Number(invoice.amount_paid ?? 0)
+  const total         = Number(invoice.total)
+  const currentPaid   = Number(invoice.amount_paid ?? 0)
+  const outstanding   = Math.max(0, Math.round((total - currentPaid) * 100) / 100)
+
+  if (outstanding <= 0) {
+    return { error: 'No outstanding balance to apply a payment to.' }
+  }
 
   if (input.amount <= 0) return { error: 'Payment amount must be greater than zero.' }
-  if (input.amount > Number(invoice.balance_due ?? total) + 0.01) {
+  if (input.amount > outstanding + 0.01) {
     return { error: 'Payment amount exceeds the outstanding balance.' }
   }
 

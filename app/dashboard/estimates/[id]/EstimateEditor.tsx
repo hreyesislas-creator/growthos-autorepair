@@ -2,11 +2,12 @@
 
 import { useState, useCallback, useMemo, useId, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import type { EstimateWithItems, EstimateItem, EstimateItemPart, EstimateItemDecision, ServiceJobWithCategory } from '@/lib/types'
+import type { EstimateWithItems, EstimateItem, EstimateItemPart, EstimateItemDecision, ServiceJobWithCategory, ServiceCatalog } from '@/lib/types'
 import {
   saveEstimate,
   saveEstimateItems,
   saveEstimateItemParts,
+  addServiceCatalogToEstimate,
   type EstimateItemInput,
   type EstimateItemPartInput,
 } from '../actions'
@@ -186,6 +187,8 @@ interface Props {
   estimate:          EstimateWithItems
   inspectionId?:     string | null
   serviceJobs:       ServiceJobWithCategory[]
+  /** Tenant job templates — used by "Add Job Template" on the estimate. */
+  catalogServices:   ServiceCatalog[]
   defaultLaborRate:  number
   initialDecisions:  EstimateItemDecision[]   // pre-loaded snapshot from DB — read-only in editor
   /** When true, all mutation controls are disabled (viewer / read-only access). */
@@ -198,6 +201,7 @@ export default function EstimateEditor({
   estimate,
   inspectionId,
   serviceJobs,
+  catalogServices,
   defaultLaborRate,
   initialDecisions,
   readOnly = false,
@@ -328,6 +332,10 @@ export default function EstimateEditor({
   // ── Delete line item confirmation modal state ──────────────────────────────
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [deleteConfirmKey,  setDeleteConfirmKey]  = useState<string | null>(null)  // Item key to delete
+
+  const [catalogModalOpen, setCatalogModalOpen] = useState(false)
+  const [catalogPickError, setCatalogPickError] = useState<string | null>(null)
+  const [catalogAddingId, setCatalogAddingId] = useState<string | null>(null)
 
   // ── Void modal state ───────────────────────────────────────────────────────
   const [voidOpen,    setVoidOpen]    = useState(false)
@@ -467,6 +475,20 @@ export default function EstimateEditor({
       },
     ])
   }, [defaultLaborRate])
+
+  const handleAddCatalogService = useCallback(async (serviceId: string) => {
+    if (ro) return
+    setCatalogPickError(null)
+    setCatalogAddingId(serviceId)
+    const err = await addServiceCatalogToEstimate(estimate.id, serviceId)
+    setCatalogAddingId(null)
+    if (err) {
+      setCatalogPickError(err.error)
+      return
+    }
+    await router.refresh()
+    setCatalogModalOpen(false)
+  }, [ro, estimate.id, router])
 
   const removeItem = useCallback((key: string) => {
     setItems(prev => prev.filter(i => i._key !== key))
@@ -1108,7 +1130,7 @@ export default function EstimateEditor({
           </div>
         )}
 
-        <div style={{ marginTop: 12 }}>
+        <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <button
             type="button"
             className="btn-ghost"
@@ -1117,6 +1139,16 @@ export default function EstimateEditor({
           >
             + Add Item
           </button>
+          {!ro && catalogServices.length > 0 && (
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => { setCatalogPickError(null); setCatalogModalOpen(true) }}
+              style={{ fontSize: 12 }}
+            >
+              + Add Job Template
+            </button>
+          )}
         </div>
       </div>
 
@@ -1738,6 +1770,98 @@ export default function EstimateEditor({
       </div>
 
       </fieldset>
+
+      {/* ── Job template picker ─────────────────────────────────────────────────── */}
+      {catalogModalOpen && !ro && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 50,
+        }}
+        onClick={() => !catalogAddingId && setCatalogModalOpen(false)}
+        role="presentation"
+        >
+          <div
+            className="card"
+            style={{
+              width: '100%',
+              maxWidth: 440,
+              maxHeight: '80vh',
+              margin: 16,
+              padding: 20,
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+            onClick={e => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="catalog-modal-title"
+          >
+            <h3
+              id="catalog-modal-title"
+              style={{ fontSize: 16, fontWeight: 700, marginBottom: 8, color: 'var(--text)' }}
+            >
+              Add job template
+            </h3>
+            <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 12 }}>
+              Inserts labor, included parts, and notes as one estimate line.
+            </p>
+            {catalogPickError && (
+              <div style={{
+                fontSize: 12,
+                color: '#b91c1c',
+                background: '#fee2e2',
+                padding: '8px 10px',
+                borderRadius: 8,
+                marginBottom: 12,
+              }}>
+                {catalogPickError}
+              </div>
+            )}
+            <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {catalogServices.map(s => (
+                <button
+                  key={s.id}
+                  type="button"
+                  className="btn-ghost"
+                  disabled={!!catalogAddingId}
+                  onClick={() => handleAddCatalogService(s.id)}
+                  style={{
+                    textAlign: 'left',
+                    justifyContent: 'flex-start',
+                    fontSize: 13,
+                    padding: '10px 12px',
+                    border: '1px solid var(--border-2)',
+                    borderRadius: 8,
+                  }}
+                >
+                  <span style={{ fontWeight: 600 }}>{s.name}</span>
+                  {catalogAddingId === s.id && (
+                    <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--text-3)' }}>Adding…</span>
+                  )}
+                  {s.description && (
+                    <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4, fontWeight: 400 }}>
+                      {s.description}
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
+            <div style={{ marginTop: 16 }}>
+              <button
+                type="button"
+                className="btn-ghost"
+                disabled={!!catalogAddingId}
+                onClick={() => setCatalogModalOpen(false)}
+                style={{ fontSize: 12 }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Void confirmation modal ───────────────────────────────────────────── */}
       <ArchiveConfirmModal

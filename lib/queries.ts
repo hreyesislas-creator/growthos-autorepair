@@ -36,6 +36,8 @@ import type {
   EstimateItemDecision,
   TenantPricingConfig,
   ServiceJobWithCategory,
+  ServiceCatalog,
+  PartsCatalog,
   WorkOrder,
   WorkOrderItem,
   WorkOrderWithItems,
@@ -1033,6 +1035,118 @@ export async function getServiceJobs(): Promise<ServiceJobWithCategory[]> {
     if (catDiff !== 0) return catDiff
     return a.name.localeCompare(b.name)
   })
+}
+
+// ── Tenant service catalog (canned jobs) ─────────────────────
+
+/**
+ * Returns tenant-defined job templates (service catalog), sorted by name.
+ * @param activeOnly When true (default), excludes soft-deleted rows (`is_active = false`).
+ */
+export async function getServicesByTenant(
+  tenantId: string,
+  opts?: { activeOnly?: boolean },
+): Promise<ServiceCatalog[]> {
+  if (!hasValue(tenantId)) return []
+
+  const supabase = await createClient()
+  const activeOnly = opts?.activeOnly !== false
+
+  let q = supabase
+    .from('service_catalog')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .order('name', { ascending: true })
+
+  if (activeOnly) {
+    q = q.eq('is_active', true)
+  }
+
+  const { data, error } = await q
+
+  if (error) {
+    console.error('[getServicesByTenant]', error.message)
+    return []
+  }
+
+  return (data ?? []) as ServiceCatalog[]
+}
+
+export async function getServiceCatalogById(
+  tenantId: string,
+  id: string,
+): Promise<ServiceCatalog | null> {
+  if (!hasValue(tenantId) || !hasValue(id)) return null
+
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from('service_catalog')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('id', id)
+    .maybeSingle()
+
+  if (error) {
+    console.error('[getServiceCatalogById]', error.message)
+    return null
+  }
+
+  return (data as ServiceCatalog | null) ?? null
+}
+
+// ── Parts catalog (Inventory Light) ────────────────────────────
+
+/**
+ * Returns tenant parts catalog rows, sorted by name then part number.
+ * @param activeOnly When true (default), excludes soft-deleted rows.
+ */
+export async function getPartsByTenant(
+  tenantId: string,
+  opts?: { activeOnly?: boolean },
+): Promise<PartsCatalog[]> {
+  if (!hasValue(tenantId)) return []
+
+  const supabase = await createClient()
+  const activeOnly = opts?.activeOnly !== false
+
+  let q = supabase
+    .from('parts_catalog')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .order('name', { ascending: true })
+    .order('part_number', { ascending: true })
+
+  if (activeOnly) {
+    q = q.eq('is_active', true)
+  }
+
+  const { data, error } = await q
+
+  if (error) {
+    console.error('[getPartsByTenant]', error.message)
+    return []
+  }
+
+  return (data ?? []) as PartsCatalog[]
+}
+
+export async function getPartById(tenantId: string, id: string): Promise<PartsCatalog | null> {
+  if (!hasValue(tenantId) || !hasValue(id)) return null
+
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from('parts_catalog')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('id', id)
+    .maybeSingle()
+
+  if (error) {
+    console.error('[getPartById]', error.message)
+    return null
+  }
+
+  return (data as PartsCatalog | null) ?? null
 }
 
 // ── Tenant pricing config ──────────────────────────────────────

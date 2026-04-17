@@ -30,6 +30,14 @@ body {
   margin-bottom: 20px;
 }
 
+.shop-logo {
+  max-height: 56px;
+  max-width: 200px;
+  object-fit: contain;
+  margin-bottom: 10px;
+  display: block;
+}
+
 .shop-info h1 {
   font-size: 24px;
   font-weight: 700;
@@ -129,17 +137,39 @@ body {
   margin-top: 12px;
 }
 
+.total-row.balance-due {
+  font-size: 15px;
+  font-weight: 700;
+  margin-top: 8px;
+}
+
+.total-row.paid-in-full {
+  justify-content: flex-end;
+  margin-top: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #14532d;
+}
+
 @media print {
+  @page {
+    margin: 0.4in;
+  }
   body {
     margin: 0;
     padding: 0;
     background: #fff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
   .page {
     max-width: 100%;
     margin: 0;
-    padding: 0.5in;
+    padding: 0;
     box-shadow: none;
-    page-break-after: always;
+    page-break-after: auto;
+  }
+  .items-table {
+    page-break-inside: avoid;
   }
 }

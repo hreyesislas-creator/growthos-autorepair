@@ -18,6 +18,7 @@ export type AppModule =
   | 'appointments'
   | 'inspections'
   | 'estimates'
+  | 'parts'
   | 'work_orders'
   | 'invoices'
   | 'communications'
@@ -63,6 +64,7 @@ const ALL_MODULES: AppModule[] = [
   'appointments',
   'inspections',
   'estimates',
+  'parts',
   'work_orders',
   'invoices',
   'communications',
@@ -106,6 +108,7 @@ const ROLE_MODULE_ACCESS: Record<AppRole, Record<AppModule, ModuleAccessLevel>> 
     appointments: 'edit',
     inspections: 'edit',
     estimates: 'edit',
+    parts: 'edit',
     work_orders: 'edit',
     invoices: 'edit',
     communications: 'none',
@@ -145,6 +148,8 @@ const DASHBOARD_NAV_HREF_TO_MODULE: Record<string, AppModule> = {
   '/dashboard/vehicles': 'vehicles',
   '/dashboard/inspections': 'inspections',
   '/dashboard/estimates': 'estimates',
+  '/dashboard/services': 'estimates',
+  '/dashboard/parts': 'parts',
   '/dashboard/work-orders': 'work_orders',
   '/dashboard/invoices': 'invoices',
   '/dashboard/communications': 'communications',

@@ -1135,3 +1135,175 @@ export async function saveEstimateItemParts(
 
   return null
 }
+
+/**
+ * Appends one manual labor line from the tenant service catalog, with nested parts
+ * and optional line notes. Does not replace existing items.
+ */
+export async function addServiceCatalogToEstimate(
+  estimateId: string,
+  catalogServiceId: string,
+): Promise<{ error: string } | null> {
+  const ctx = await getDashboardTenant()
+  if (!ctx) return { error: 'Not authorized' }
+
+  const estDenied = await denyUnlessCanEditDashboardModule('estimates')
+  if (estDenied) return estDenied
+
+  const admin = await createAdminClient()
+  const tenantId = ctx.tenant.id
+  const now = new Date().toISOString()
+
+  const { data: catalog, error: catErr } = await admin
+    .from('service_catalog')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('id', catalogServiceId)
+    .eq('is_active', true)
+    .maybeSingle()
+
+  if (catErr || !catalog) {
+    console.error('[addServiceCatalogToEstimate] catalog', catErr?.message)
+    return { error: catErr?.message ?? 'Service not found' }
+  }
+
+  const { data: est, error: estErr } = await admin
+    .from('estimates')
+    .select('id, parts_markup_percent')
+    .eq('tenant_id', tenantId)
+    .eq('id', estimateId)
+    .maybeSingle()
+
+  if (estErr || !est) return { error: 'Estimate not found' }
+
+  const pricingConfig = await getTenantPricingConfig(tenantId)
+  const defaultLaborRate = Number(pricingConfig?.default_labor_rate ?? 0)
+
+  const laborHours =
+    catalog.default_labor_hours != null && !Number.isNaN(Number(catalog.default_labor_hours))
+      ? Number(catalog.default_labor_hours)
+      : 1
+  const laborRate =
+    catalog.default_labor_rate != null && !Number.isNaN(Number(catalog.default_labor_rate))
+      ? Number(catalog.default_labor_rate)
+      : defaultLaborRate
+
+  const laborTotal = round2(laborHours * laborRate)
+  const markupPct = Number(est.parts_markup_percent ?? 0)
+
+  const { data: orderRow } = await admin
+    .from('estimate_items')
+    .select('display_order')
+    .eq('tenant_id', tenantId)
+    .eq('estimate_id', estimateId)
+    .order('display_order', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  const nextOrder = (typeof orderRow?.display_order === 'number' ? orderRow.display_order : -1) + 1
+
+  let partsRaw: unknown = catalog.default_parts
+  if (typeof partsRaw === 'string') {
+    try {
+      partsRaw = JSON.parse(partsRaw) as unknown
+    } catch {
+      partsRaw = []
+    }
+  }
+  if (!Array.isArray(partsRaw)) partsRaw = []
+
+  const { data: newItem, error: insErr } = await admin
+    .from('estimate_items')
+    .insert({
+      tenant_id:       tenantId,
+      estimate_id:     estimateId,
+      source_type:     'manual',
+      category:        'labor',
+      title:           catalog.name,
+      description:     catalog.description ?? null,
+      service_job_id:  null,
+      quantity:        1,
+      unit_price:      0,
+      labor_hours:     laborHours,
+      labor_rate:      laborRate,
+      labor_total:     laborTotal,
+      parts_total:     0,
+      line_total:      laborTotal,
+      display_order:   nextOrder,
+      needs_review:    false,
+      notes:           catalog.default_notes ?? null,
+      updated_at:      now,
+    })
+    .select('id')
+    .single()
+
+  if (insErr || !newItem) {
+    console.error('[addServiceCatalogToEstimate] insert item', insErr?.message)
+    return { error: insErr?.message ?? 'Failed to add line item' }
+  }
+
+  const itemId = newItem.id as string
+
+  const partRows: {
+    tenant_id: string
+    estimate_id: string
+    estimate_item_id: string
+    name: string
+    quantity: number
+    unit_cost: number
+    profit_amount: number
+    unit_sell_price: number
+    line_total: number
+    display_order: number
+    updated_at: string
+  }[] = []
+
+  ;(partsRaw as unknown[]).forEach((p, idx) => {
+    if (!p || typeof p !== 'object') return
+    const o = p as Record<string, unknown>
+    const qty = Number(o.quantity ?? 1)
+    const unitCost = round2(Number(o.unit_cost ?? 0))
+    const unitSell = round2(unitCost * (1 + markupPct / 100))
+    const profit = round2(unitSell - unitCost)
+    const lineTotalPart = round2(qty * unitSell)
+    partRows.push({
+      tenant_id:        tenantId,
+      estimate_id:      estimateId,
+      estimate_item_id: itemId,
+      name:             String(o.name ?? 'Part'),
+      quantity:         qty,
+      unit_cost:        unitCost,
+      profit_amount:    profit,
+      unit_sell_price:  unitSell,
+      line_total:       lineTotalPart,
+      display_order:    idx,
+      updated_at:       now,
+    })
+  })
+
+  if (partRows.length > 0) {
+    const { error: pErr } = await admin.from('estimate_item_parts').insert(partRows)
+    if (pErr) {
+      console.error('[addServiceCatalogToEstimate] parts', pErr.message)
+      await admin.from('estimate_items').delete().eq('id', itemId).eq('tenant_id', tenantId)
+      return { error: pErr.message }
+    }
+  }
+
+  const partsSum = round2(partRows.reduce((s, r) => s + r.line_total, 0))
+  const lineTotalFull = round2(laborTotal + partsSum)
+
+  const { error: upErr } = await admin
+    .from('estimate_items')
+    .update({
+      parts_total: partsSum,
+      line_total:  lineTotalFull,
+      updated_at:  now,
+    })
+    .eq('id', itemId)
+    .eq('tenant_id', tenantId)
+
+  if (upErr) return { error: upErr.message }
+
+  return recalculateEstimateTotals(estimateId)
+}
