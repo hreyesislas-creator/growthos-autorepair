@@ -3,8 +3,8 @@ import { getDashboardTenant } from '@/lib/tenant'
 import {
   getWorkOrderById,
   getTeamUsers,
-  getCurrentTenantUser,
   getTenantUserById,
+  getInspectionsForWorkOrder,
 } from '@/lib/queries'
 import { createClient }       from '@/lib/supabase/server'
 import {
@@ -12,7 +12,10 @@ import {
   getCurrentAppRoleForTenant,
   isAdmin,
 } from '@/lib/auth/roles'
-import { technicianMayMutateAssignedRecord } from '@/lib/auth/operational-assignment'
+import {
+  getCurrentDashboardTenantUser,
+  technicianMayMutateAssignedRecord,
+} from '@/lib/auth/operational-assignment'
 import Topbar                 from '@/components/dashboard/Topbar'
 import WorkOrderDetail        from './WorkOrderDetail'
 
@@ -67,12 +70,15 @@ export default async function WorkOrderDetailPage({
 
   const subtitle = [customerName, vehicleLabel].filter(Boolean).join(' · ') || undefined
 
-  const [canEditWoModule, canEditInvoices, role, currentTu, teamUsers] = await Promise.all([
+  const [canEditWoModule, canEditInvoices, canEditInspections, role, dashboardDu, teamUsers, linkedInspections] =
+    await Promise.all([
     canEditDashboardModule('work_orders'),
     canEditDashboardModule('invoices'),
+    canEditDashboardModule('inspections'),
     getCurrentAppRoleForTenant(),
-    getCurrentTenantUser(tenantId),
+    getCurrentDashboardTenantUser(),
     getTeamUsers(tenantId),
+    getInspectionsForWorkOrder(tenantId, params.id),
   ])
 
   const assignableTeamUsers = teamUsers.filter(u => {
@@ -84,7 +90,9 @@ export default async function WorkOrderDetailPage({
   const canAssignWorkOrderTechnician =
     canEditWoModule && (isAdmin(role) || role === 'service_advisor')
 
-  const currentTenantUserId = currentTu?.id ?? ''
+  // Use same tenant_users.id source as server actions (admin-backed), not RLS-scoped getCurrentTenantUser,
+  // so assignment checks match denyUnlessMayMutateWorkOrder for technicians.
+  const currentTenantUserId = dashboardDu?.tenantUserId ?? ''
   const canMutateWorkOrder =
     canEditWoModule &&
     technicianMayMutateAssignedRecord(
@@ -109,7 +117,7 @@ export default async function WorkOrderDetailPage({
       <Topbar
         title={workOrder.work_order_number ?? 'Work Order'}
         subtitle={subtitle}
-        action={{ label: '← Work Orders', href: '/dashboard/work-orders' }}
+        action={{ label: '← Active Jobs', href: '/dashboard/work-orders' }}
       />
       <WorkOrderDetail
         workOrder={workOrder}
@@ -117,6 +125,8 @@ export default async function WorkOrderDetailPage({
         vehicleLabel={vehicleLabel}
         canEditWorkOrders={canMutateWorkOrder}
         canEditInvoices={canEditInvoices}
+        canEditInspections={canEditInspections}
+        linkedInspections={linkedInspections}
         canAssignWorkOrderTechnician={canAssignWorkOrderTechnician}
         teamUsersForAssignment={assignableTeamUsers}
         assignedTechnician={assignedTechnician}

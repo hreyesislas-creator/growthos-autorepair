@@ -8,7 +8,6 @@ import {
   getInspectionRecommendations,
   getTenantUserById,
   getTeamUsers,
-  getCurrentTenantUser,
 } from '@/lib/queries'
 import { createClient } from '@/lib/supabase/server'
 import {
@@ -16,7 +15,10 @@ import {
   getCurrentAppRoleForTenant,
   isAdmin,
 } from '@/lib/auth/roles'
-import { technicianMayMutateAssignedRecord } from '@/lib/auth/operational-assignment'
+import {
+  getCurrentDashboardTenantUser,
+  technicianMayMutateAssignedRecord,
+} from '@/lib/auth/operational-assignment'
 import Topbar from '@/components/dashboard/Topbar'
 import InspectionChecklist from './InspectionChecklist'
 import type { InspectionTemplateItem } from '@/lib/types'
@@ -145,11 +147,11 @@ export default async function InspectionDetailPage({
 
   const sections = groupBySection(templateItems)
 
-  const [canEditInspectionsModule, canEditEstimates, role, currentTu, teamUsers] = await Promise.all([
+  const [canEditInspectionsModule, canEditEstimates, role, dashboardDu, teamUsers] = await Promise.all([
     canEditDashboardModule('inspections'),
     canEditDashboardModule('estimates'),
     getCurrentAppRoleForTenant(),
-    getCurrentTenantUser(tenantId),
+    getCurrentDashboardTenantUser(),
     getTeamUsers(tenantId),
   ])
 
@@ -162,7 +164,7 @@ export default async function InspectionDetailPage({
   const canAssignTechnician =
     canEditInspectionsModule && (isAdmin(role) || role === 'service_advisor')
 
-  const currentTenantUserId = currentTu?.id ?? ''
+  const currentTenantUserId = dashboardDu?.tenantUserId ?? ''
   const canEditInspections =
     canEditInspectionsModule &&
     technicianMayMutateAssignedRecord(
