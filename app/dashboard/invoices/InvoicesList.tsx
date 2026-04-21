@@ -11,14 +11,14 @@ import type { InvoiceListRow } from './page'
 const STATUS_STYLES: Record<string, { bg: string; color: string; label: string }> = {
   draft: { bg: '#e2e8f0', color: '#1e293b', label: 'Draft' },
   sent:  { bg: '#dbeafe', color: '#1e40af', label: 'Sent' },
-  paid:  { bg: '#dcfce7', color: '#14532d', label: 'Paid' },
+  paid:  { bg: '#dcfce7', color: '#14532d', label: 'Paid in Full' },
   void:  { bg: '#fee2e2', color: '#7f1d1d', label: 'Void' },
 }
 
 const PAYMENT_STATUS_STYLES: Record<string, { bg: string; color: string; label: string }> = {
-  unpaid:          { bg: '#fee2e2', color: '#991b1b', label: 'Unpaid' },
+  unpaid:          { bg: '#fee2e2', color: '#991b1b', label: 'Payment Due' },
   partially_paid:  { bg: '#fef3c7', color: '#92400e', label: 'Partial' },
-  paid:            { bg: '#dcfce7', color: '#14532d', label: 'Paid' },
+  paid:            { bg: '#dcfce7', color: '#14532d', label: 'Paid in Full' },
 }
 
 function statusStyle(status: string) {

@@ -3,6 +3,7 @@
 import {
   getCurrentDashboardTenantUser,
   denyUnlessMayMutateInspection,
+  denyUnlessMayMutateWorkOrder,
   canAssignOperationalTechnician,
 } from '@/lib/auth/operational-assignment'
 import { denyUnlessCanEditDashboardModule } from '@/lib/auth/roles'
@@ -61,6 +62,69 @@ export async function createInspection(
     technician_id: technicianId,
     status:        'draft',
     notes,
+  }).select('id')
+
+  if (error) return { error: error.message }
+  if (!data || data.length === 0) return { error: 'Failed to create inspection' }
+
+  return { inspectionId: data[0].id }
+}
+
+/**
+ * Creates a draft inspection from a work order: copies tenant, vehicle, customer,
+ * optional default template, and sets work_order_id. Does not alter the work order row.
+ */
+export async function createInspectionFromWorkOrder(
+  workOrderId: string,
+): Promise<{ error: string } | { inspectionId: string }> {
+  const ctx = await getDashboardTenant()
+  if (!ctx) return { error: 'Not authorized' }
+
+  const inspDenied = await denyUnlessCanEditDashboardModule('inspections')
+  if (inspDenied) return inspDenied
+
+  const tenantId = ctx.tenant.id
+
+  const woDenied = await denyUnlessMayMutateWorkOrder(workOrderId, tenantId)
+  if (woDenied) return woDenied
+
+  const supabase = await createClient()
+
+  const { data: wo, error: woErr } = await supabase
+    .from('work_orders')
+    .select('id, vehicle_id, customer_id, technician_id')
+    .eq('tenant_id', tenantId)
+    .eq('id', workOrderId)
+    .maybeSingle()
+
+  if (woErr) return { error: woErr.message }
+  if (!wo) return { error: 'Work order not found.' }
+
+  let templateId: string | null = null
+  const { data: defaultTemplate } = await supabase
+    .from('inspection_templates')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .eq('name', 'Standard Vehicle Inspection')
+    .single()
+
+  if (defaultTemplate) templateId = defaultTemplate.id
+
+  const du = await getCurrentDashboardTenantUser()
+  let technicianId: string | null = (wo.technician_id as string | null) ?? null
+  if (du?.role === 'technician') {
+    technicianId = du.tenantUserId
+  }
+
+  const { data, error } = await supabase.from('inspections').insert({
+    tenant_id:      tenantId,
+    work_order_id:  workOrderId,
+    vehicle_id:     wo.vehicle_id as string | null,
+    customer_id:    wo.customer_id as string | null,
+    template_id:    templateId,
+    technician_id:  technicianId,
+    status:         'draft',
+    notes:          null,
   }).select('id')
 
   if (error) return { error: error.message }

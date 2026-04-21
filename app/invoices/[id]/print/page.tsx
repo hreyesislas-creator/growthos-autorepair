@@ -185,10 +185,10 @@ export default async function InvoicePrintPage({
 
   const paymentStatusLabel =
     paymentStatus === 'paid'
-      ? 'Paid in full'
+      ? 'Paid in Full'
       : paymentStatus === 'partially_paid'
         ? 'Partially paid'
-        : 'Unpaid'
+        : 'Payment Due'
 
   return (
     <div className="page">
@@ -342,7 +342,7 @@ export default async function InvoicePrintPage({
         )}
         {!isVoid && balanceDue <= 0 && paymentStatus === 'paid' && (
           <div className="total-row paid-in-full">
-            <span>Paid in full</span>
+            <span>Paid in Full</span>
           </div>
         )}
       </div>

@@ -13,13 +13,13 @@ import { recordInvoicePayment } from '../actions'
 const STATUS_STYLES: Record<string, { bg: string; color: string; label: string }> = {
   draft: { bg: '#e2e8f0', color: '#1e293b', label: 'Draft' },
   sent:  { bg: '#dbeafe', color: '#1e40af', label: 'Sent' },
-  paid:  { bg: '#dcfce7', color: '#14532d', label: 'Paid' },
+  paid:  { bg: '#dcfce7', color: '#14532d', label: 'Paid in Full' },
   void:  { bg: '#fee2e2', color: '#7f1d1d', label: 'Void' },
 }
 const PAYMENT_STATUS_STYLES: Record<string, { bg: string; color: string; label: string; border: string }> = {
-  unpaid:         { bg: '#fff1f2', color: '#991b1b', label: 'Unpaid',         border: '#fecaca' },
+  unpaid:         { bg: '#fff1f2', color: '#991b1b', label: 'Payment Due', border: '#fecaca' },
   partially_paid: { bg: '#fffbeb', color: '#92400e', label: 'Partially Paid', border: '#fde68a' },
-  paid:           { bg: '#f0fdf4', color: '#14532d', label: '✓ Paid in Full', border: '#bbf7d0' },
+  paid:           { bg: '#f0fdf4', color: '#14532d', label: 'Paid in Full', border: '#bbf7d0' },
 }
 const METHOD_LABELS: Record<string, string> = {
   card:      '💳 Card',
@@ -303,17 +303,17 @@ export default function InvoiceDetail({
                 background: 'white', color: paymentStatus.color, cursor: 'pointer',
               }}
             >
-              {showForm ? 'Cancel' : 'Record Payment'}
+              {showForm ? 'Cancel' : 'Add Payment'}
             </button>
           )}
         </div>
       )}
 
-      {/* ── Record Payment form ────────────────────────────────────────────── */}
+      {/* ── Add Payment form ────────────────────────────────────────────── */}
       {showForm && !isFullyPaid && !isVoid && canRecordPayment && outstandingBalance > 0 && (
         <div className="card" style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 14 }}>
-            Record Payment
+            Add Payment
           </div>
           <form onSubmit={handleSubmitPayment}>
 

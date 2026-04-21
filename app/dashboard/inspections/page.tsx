@@ -1,6 +1,8 @@
+import { notFound } from 'next/navigation'
 import { getDashboardTenant } from '@/lib/tenant'
-import { getInspections, getInspectionTemplates, getCurrentTenantUser, getTeamUsers } from '@/lib/queries'
+import { getInspections, getInspectionTemplates, getTeamUsers } from '@/lib/queries'
 import { canEditDashboardModule, getCurrentAppRoleForTenant } from '@/lib/auth/roles'
+import { getCurrentDashboardTenantUser } from '@/lib/auth/operational-assignment'
 import {
   sortForTechnicianListPriority,
   assignmentLabelForRow,
@@ -60,22 +62,34 @@ export default async function InspectionsPage({
 }: {
   searchParams: { scope?: string; tech?: string }
 }) {
-  const ctx        = await getDashboardTenant()
-  const tenantId   = ctx?.tenant.id ?? ''
-  const [inspectionsRaw, templates, canEdit, appRole, currentTu, teamUsers] = await Promise.all([
-    getInspections(tenantId),
+  const ctx = await getDashboardTenant()
+  if (!ctx) return notFound()
+
+  const tenantId = ctx.tenant.id
+
+  const [appRole, dashboardDu] = await Promise.all([
+    getCurrentAppRoleForTenant(),
+    getCurrentDashboardTenantUser(),
+  ])
+
+  const tenantUserId = dashboardDu?.tenantUserId ?? ''
+
+  const [inspectionsRaw, templates, canEdit, teamUsers] = await Promise.all([
+    appRole === 'technician'
+      ? tenantUserId
+        ? getInspections(tenantId, { technicianIdEq: tenantUserId })
+        : Promise.resolve([] as InspectionRow[])
+      : getInspections(tenantId),
     getInspectionTemplates(tenantId),
     canEditDashboardModule('inspections'),
-    getCurrentAppRoleForTenant(),
-    getCurrentTenantUser(tenantId),
     getTeamUsers(tenantId),
   ])
 
   let assignmentScope = parseAssignmentListScope(searchParams?.scope)
-  if (appRole === 'technician' && searchParams?.scope === undefined) {
+  // Data is already technician-scoped; force mine-only semantics regardless of ?scope=.
+  if (appRole === 'technician') {
     assignmentScope = 'mine'
   }
-  const tenantUserId    = currentTu?.id ?? ''
   const advisorTechParsed = parseAdvisorTechnicianFilterParam(searchParams?.tech, appRole)
   const advisorTechnicianId = validatedAdvisorTechnicianId(advisorTechParsed, teamUsers)
 
@@ -128,13 +142,15 @@ export default async function InspectionsPage({
           >
             Assigned to me
           </Link>
-          <Link
-            href={`${basePath}?scope=unassigned`}
-            className={unassignedPillActive ? 'btn-primary' : 'btn-ghost'}
-            style={{ fontSize: 12, padding: '6px 12px', textDecoration: 'none' }}
-          >
-            Unassigned
-          </Link>
+          {appRole !== 'technician' && (
+            <Link
+              href={`${basePath}?scope=unassigned`}
+              className={unassignedPillActive ? 'btn-primary' : 'btn-ghost'}
+              style={{ fontSize: 12, padding: '6px 12px', textDecoration: 'none' }}
+            >
+              Unassigned
+            </Link>
+          )}
           {showAdvisorTechFilter && advisorTechnicianOptions.length > 0 && (
             <AdvisorTechnicianFilterSelect
               basePath={basePath}
@@ -143,24 +159,7 @@ export default async function InspectionsPage({
               currentTechId={advisorTechnicianId}
             />
           )}
-          {appRole === 'technician' && assignmentScope !== 'all' && (
-            <Link
-              href={`${basePath}?scope=all`}
-              className="btn-ghost"
-              style={{ fontSize: 12, padding: '6px 12px', textDecoration: 'none' }}
-            >
-              Full shop list
-            </Link>
-          )}
         </div>
-
-        {appRole === 'technician' && assignmentScope === 'all' && (
-          <div style={{
-            fontSize: 12, color: 'var(--text-3)', marginBottom: 16, marginTop: -8,
-          }}>
-            Your assigned and unassigned inspections are listed first.
-          </div>
-        )}
 
         {templates.length > 0 && (
           <div style={{ marginBottom: '16px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -183,7 +182,9 @@ export default async function InspectionsPage({
               <div className="empty-state-icon">{'\u{1F50D}'}</div>
               <div className="empty-state-title">No inspections in this view</div>
               <div className="empty-state-body">
-                Try another assignee filter or open the full shop list.
+                {appRole === 'technician'
+                  ? 'No inspections assigned to you match this view.'
+                  : 'Try another assignee filter or switch assignee scope.'}
               </div>
             </div>
           ) : (

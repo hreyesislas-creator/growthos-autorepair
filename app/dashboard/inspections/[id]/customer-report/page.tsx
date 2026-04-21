@@ -6,6 +6,8 @@ import {
   getCustomerById,
   getVehicleById,
 } from '@/lib/queries'
+import { getCurrentAppRoleForTenant } from '@/lib/auth/roles'
+import { getCurrentDashboardTenantUser } from '@/lib/auth/operational-assignment'
 import CustomerReport from './CustomerReport'
 
 export const metadata = { title: 'Vehicle Inspection Report' }
@@ -20,13 +22,21 @@ export default async function CustomerReportPage({
 
   const tenantId = ctx.tenant.id
 
-  // ── Step 1: fetch inspection header + recommendations in parallel
-  const [{ inspection }, recommendations] = await Promise.all([
-    getInspectionById(tenantId, params.id),
-    getInspectionRecommendations(tenantId, params.id),
+  const [role, dashboardDu] = await Promise.all([
+    getCurrentAppRoleForTenant(),
+    getCurrentDashboardTenantUser(),
   ])
+  if (role === 'technician' && !dashboardDu?.tenantUserId) return notFound()
 
+  const inspectionByIdOpts =
+    role === 'technician' && dashboardDu?.tenantUserId
+      ? { technicianIdEq: dashboardDu.tenantUserId }
+      : undefined
+
+  const { inspection } = await getInspectionById(tenantId, params.id, inspectionByIdOpts)
   if (!inspection) return notFound()
+
+  const recommendations = await getInspectionRecommendations(tenantId, params.id)
 
   // ── Step 2: fetch customer + vehicle in parallel (both may be null)
   const [customer, vehicle] = await Promise.all([

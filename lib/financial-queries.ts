@@ -76,10 +76,21 @@ const PAYMENT_FETCH_LIMIT = 15_000
 
 const PENDING_ESTIMATE_STATUSES = ['draft', 'presented', 'reopened'] as const
 
+export type GetFinancialDashboardDataOptions = {
+  /**
+   * When set, work order counts and inspection activity are limited to this tenant_users.id.
+   * Pass `''` when the viewer is a technician without a membership id (yields no WO/inspection rows).
+   */
+  technicianIdEq?: string
+}
+
 /**
  * Single tenant-scoped load for the financial dashboard.
  */
-export async function getFinancialDashboardData(tenantId: string): Promise<FinancialDashboardData> {
+export async function getFinancialDashboardData(
+  tenantId: string,
+  options?: GetFinancialDashboardDataOptions,
+): Promise<FinancialDashboardData> {
   const empty: FinancialDashboardData = {
     revenueTotal: 0,
     revenueToday: 0,
@@ -103,6 +114,10 @@ export async function getFinancialDashboardData(tenantId: string): Promise<Finan
 
   if (!hasValue(tenantId)) return empty
 
+  const technicianEq = options?.technicianIdEq
+  const technicianScoped = technicianEq !== undefined
+  const technicianHasId = technicianScoped && hasValue(technicianEq)
+
   const supabase = createAdminClient()
   const now = new Date()
   const dayStart = startOfDay(now)
@@ -112,6 +127,17 @@ export async function getFinancialDashboardData(tenantId: string): Promise<Finan
   const last30 = subDays(now, 30)
   const weekBucketsStart = subDays(weekStart, 7 * 7)
   const monthBucketsStart = subMonths(monthStart, 11)
+
+  let woQuery = supabase.from('work_orders').select('id, status').eq('tenant_id', tenantId)
+  if (technicianHasId) woQuery = woQuery.eq('technician_id', technicianEq)
+
+  let inspRecentQuery = supabase
+    .from('inspections')
+    .select('id, status, created_at, updated_at')
+    .eq('tenant_id', tenantId)
+    .order('updated_at', { ascending: false })
+    .limit(8)
+  if (technicianHasId) inspRecentQuery = inspRecentQuery.eq('technician_id', technicianEq)
 
   const [
     payRes,
@@ -140,19 +166,18 @@ export async function getFinancialDashboardData(tenantId: string): Promise<Finan
       .select('id, status, total')
       .eq('tenant_id', tenantId)
       .in('status', [...PENDING_ESTIMATE_STATUSES]),
-    supabase.from('work_orders').select('id, status').eq('tenant_id', tenantId),
+    technicianScoped && !technicianHasId
+      ? Promise.resolve({ data: [] as { id: string; status: string }[], error: null })
+      : woQuery,
     supabase
       .from('invoices')
       .select('id, invoice_number, total, payment_status, updated_at, created_at')
       .eq('tenant_id', tenantId)
       .order('updated_at', { ascending: false })
       .limit(8),
-    supabase
-      .from('inspections')
-      .select('id, status, created_at, updated_at')
-      .eq('tenant_id', tenantId)
-      .order('updated_at', { ascending: false })
-      .limit(8),
+    technicianScoped && !technicianHasId
+      ? Promise.resolve({ data: [] as { id: string; status: string; created_at: string; updated_at: string }[], error: null })
+      : inspRecentQuery,
     supabase
       .from('message_logs')
       .select('id, created_at, message_body, to_phone, delivery_status, channel')

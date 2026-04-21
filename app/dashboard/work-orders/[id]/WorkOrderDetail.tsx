@@ -17,6 +17,9 @@ import {
 } from './actions'
 import ArchiveConfirmModal from '@/components/dashboard/ArchiveConfirmModal'
 import type { ReasonOption } from '@/components/dashboard/ArchiveConfirmModal'
+import StatusBadge from '@/components/dashboard/StatusBadge'
+import { createInspectionFromWorkOrder } from '@/app/dashboard/inspections/actions'
+import type { InspectionWorkOrderLinkRow } from '@/lib/queries'
 
 // ── Status badge styles ───────────────────────────────────────────────────────
 
@@ -116,6 +119,8 @@ interface Props {
   vehicleLabel:        string | null
   canEditWorkOrders?:  boolean
   canEditInvoices?:    boolean
+  canEditInspections?: boolean
+  linkedInspections?:  InspectionWorkOrderLinkRow[]
   canAssignWorkOrderTechnician?: boolean
   teamUsersForAssignment?: TenantUser[]
   assignedTechnician?: TenantUser | null
@@ -131,6 +136,8 @@ export default function WorkOrderDetail({
   vehicleLabel,
   canEditWorkOrders = true,
   canEditInvoices = true,
+  canEditInspections = false,
+  linkedInspections = [],
   canAssignWorkOrderTechnician = false,
   teamUsersForAssignment = [],
   assignedTechnician = null,
@@ -170,6 +177,9 @@ export default function WorkOrderDetail({
   const [invoiceResult,   setInvoiceResult]   = useState<{ id: string; invoice_number: string | null } | null>(
     workOrder.invoice_id ? { id: workOrder.invoice_id, invoice_number: null } : null
   )
+
+  const [startInspSaving, setStartInspSaving] = useState(false)
+  const [startInspErr,    setStartInspErr]    = useState<string | null>(null)
 
   const s = statusStyle(status)
 
@@ -296,6 +306,19 @@ export default function WorkOrderDetail({
       return
     }
     router.refresh()
+  }
+
+  async function handleStartInspection() {
+    if (!canEditInspections || !canEditWorkOrders) return
+    setStartInspSaving(true)
+    setStartInspErr(null)
+    const result = await createInspectionFromWorkOrder(workOrder.id)
+    setStartInspSaving(false)
+    if ('error' in result) {
+      setStartInspErr(result.error)
+      return
+    }
+    router.push(`/dashboard/inspections/${result.inspectionId}`)
   }
 
   const handleCreateInvoice = async () => {
@@ -604,6 +627,26 @@ export default function WorkOrderDetail({
               </span>
             )}
 
+            {canEditInspections && canEditWorkOrders && (
+              <div style={{
+                marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border-2)',
+                width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6,
+              }}>
+                <ActionButton
+                  label={startInspSaving ? 'Starting…' : 'Start Inspection'}
+                  color="#6366f1"
+                  shadow="0 2px 8px rgba(99,102,241,0.35)"
+                  disabled={startInspSaving}
+                  onClick={handleStartInspection}
+                />
+                {startInspErr && (
+                  <span style={{ fontSize: 12, color: '#b91c1c', textAlign: 'right', maxWidth: 220 }}>
+                    {startInspErr}
+                  </span>
+                )}
+              </div>
+            )}
+
             {/* ── Create/View Invoice — shown when work order is completed ────── */}
             {canEditWorkOrders && canEditInvoices && status === 'completed' && (
               <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border-2)' }}>
@@ -723,6 +766,53 @@ export default function WorkOrderDetail({
         </div>
       )}
 
+      {/* ── Inspections started from this work order ───────────────────────── */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div style={{
+          fontSize: 12, fontWeight: 700, textTransform: 'uppercase',
+          letterSpacing: '0.06em', color: 'var(--text-3)',
+          paddingBottom: 10, borderBottom: '1px solid var(--border-2)',
+          marginBottom: 12,
+        }}>
+          Inspections
+        </div>
+        {linkedInspections.length === 0 ? (
+          <div style={{ fontSize: 13, color: 'var(--text-3)' }}>
+            No inspections linked to this work order yet.
+          </div>
+        ) : (
+          <ul style={{
+            listStyle: 'none', margin: 0, padding: 0,
+            display: 'flex', flexDirection: 'column', gap: 12,
+          }}>
+            {linkedInspections.map(insp => (
+              <li
+                key={insp.id}
+                style={{
+                  display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10,
+                }}
+              >
+                <span style={{ fontSize: 13, color: 'var(--text-2)', minWidth: 100 }}>
+                  {new Date(insp.created_at).toLocaleDateString('en-US', {
+                    month: 'short', day: 'numeric', year: 'numeric',
+                  })}
+                </span>
+                <StatusBadge status={insp.status} />
+                <Link
+                  href={`/dashboard/inspections/${insp.id}`}
+                  style={{
+                    fontSize: 13, fontWeight: 600,
+                    color: 'var(--primary,#2563eb)', textDecoration: 'none',
+                  }}
+                >
+                  View inspection →
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
       {/* ── Line items (operational view) ────────────────────────────── */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{
@@ -834,7 +924,7 @@ export default function WorkOrderDetail({
       {/* ── Footer nav ───────────────────────────────────────────────────── */}
       <div style={{ marginBottom: 32 }}>
         <Link href="/dashboard/work-orders" className="btn-ghost" style={{ fontSize: 12 }}>
-          ← Back to Work Orders
+          ← Back to Active Jobs
         </Link>
       </div>
 

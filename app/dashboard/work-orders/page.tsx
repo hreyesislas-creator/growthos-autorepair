@@ -2,7 +2,8 @@ import { notFound }           from 'next/navigation'
 import { getDashboardTenant } from '@/lib/tenant'
 import { createAdminClient }  from '@/lib/supabase/server'
 import { getCurrentAppRoleForTenant } from '@/lib/auth/roles'
-import { getCurrentTenantUser, getTeamUsers } from '@/lib/queries'
+import { getCurrentDashboardTenantUser } from '@/lib/auth/operational-assignment'
+import { getTeamUsers } from '@/lib/queries'
 import {
   parseAssignmentListScope,
   parseAdvisorTechnicianFilterParam,
@@ -14,7 +15,7 @@ import {
 import Topbar                 from '@/components/dashboard/Topbar'
 import WorkOrdersList         from './WorkOrdersList'
 
-export const metadata = { title: 'Work Orders' }
+export const metadata = { title: 'Active Jobs' }
 
 // ── Resolved row shape passed to the client component ────────────────────────
 export type WorkOrderListRow = {
@@ -43,20 +44,60 @@ export default async function WorkOrdersPage({
   const tenantId = ctx.tenant.id
   const supabase = await createAdminClient()
 
-  // ── Step 1: Fetch work orders ─────────────────────────────────────────────
-  const { data: rawRows, error } = await supabase
-    .from('work_orders')
-    .select('id, work_order_number, status, total, created_at, estimate_id, estimate_number, customer_id, vehicle_id, technician_id')
-    .eq('tenant_id', tenantId)
-    .eq('is_archived', false)          // Phase A: hide archived records from list
-    .order('created_at', { ascending: false })
-    .limit(200)
+  const [appRole, dashboardDu, teamUsers] = await Promise.all([
+    getCurrentAppRoleForTenant(),
+    getCurrentDashboardTenantUser(),
+    getTeamUsers(tenantId),
+  ])
 
-  if (error) {
-    console.error('[WorkOrdersPage] work_orders query failed:', error.message)
+  const technicianTenantUserId =
+    appRole === 'technician' ? dashboardDu?.tenantUserId ?? null : null
+
+  // ── Step 1: Fetch work orders ─────────────────────────────────────────────
+  // Technicians: DB filter only — never load full shop lists (admin client bypasses RLS).
+  type WoListDbRow = {
+    id:                string
+    work_order_number: string | null
+    status:            string
+    total:             unknown
+    created_at:        string
+    estimate_id:       string
+    estimate_number:   string | null
+    customer_id:       string | null
+    vehicle_id:        string | null
+    technician_id:     string | null
   }
 
-  const rows = rawRows ?? []
+  let rows: WoListDbRow[] = []
+
+  if (appRole === 'technician') {
+    if (technicianTenantUserId) {
+      const res = await supabase
+        .from('work_orders')
+        .select('id, work_order_number, status, total, created_at, estimate_id, estimate_number, customer_id, vehicle_id, technician_id')
+        .eq('tenant_id', tenantId)
+        .eq('is_archived', false)
+        .eq('technician_id', technicianTenantUserId)
+        .order('created_at', { ascending: false })
+        .limit(200)
+      if (res.error) {
+        console.error('[WorkOrdersPage] work_orders query failed:', res.error.message)
+      }
+      rows = (res.data ?? []) as WoListDbRow[]
+    }
+  } else {
+    const res = await supabase
+      .from('work_orders')
+      .select('id, work_order_number, status, total, created_at, estimate_id, estimate_number, customer_id, vehicle_id, technician_id')
+      .eq('tenant_id', tenantId)
+      .eq('is_archived', false)          // Phase A: hide archived records from list
+      .order('created_at', { ascending: false })
+      .limit(200)
+    if (res.error) {
+      console.error('[WorkOrdersPage] work_orders query failed:', res.error.message)
+    }
+    rows = (res.data ?? []) as WoListDbRow[]
+  }
 
   // ── Step 2: Collect unique FK ids ─────────────────────────────────────────
   const customerIds = [...new Set(
@@ -110,13 +151,9 @@ export default async function WorkOrdersPage({
     }
   })
 
-  const [appRole, currentTu, teamUsers] = await Promise.all([
-    getCurrentAppRoleForTenant(),
-    getCurrentTenantUser(tenantId),
-    getTeamUsers(tenantId),
-  ])
   let assignmentScope = parseAssignmentListScope(searchParams?.scope)
-  if (appRole === 'technician' && searchParams?.scope === undefined) {
+  // Technicians always see only their assigned rows from the DB; ignore scope/tech URL tricks.
+  if (appRole === 'technician') {
     assignmentScope = 'mine'
   }
   const advisorTechParsed = parseAdvisorTechnicianFilterParam(searchParams?.tech, appRole)
@@ -124,15 +161,16 @@ export default async function WorkOrdersPage({
   const technicianNameById = technicianNameMapFromTeamUsers(teamUsers)
   const advisorTechnicianOptions = advisorTechnicianFilterOptionsFromTeamUsers(teamUsers)
   const showAdvisorTechFilter = canUseAdvisorTechnicianFilter(appRole)
+  const currentTenantUserId = dashboardDu?.tenantUserId ?? ''
 
   return (
     <>
-      <Topbar title="Work Orders" />
+      <Topbar title="Active Jobs" />
       <WorkOrdersList
         workOrders={workOrders}
         assignmentScope={assignmentScope}
         appRole={appRole}
-        currentTenantUserId={currentTu?.id ?? ''}
+        currentTenantUserId={currentTenantUserId}
         advisorTechnicianId={advisorTechnicianId}
         technicianNameById={technicianNameById}
         advisorTechnicianOptions={advisorTechnicianOptions}

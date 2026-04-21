@@ -59,23 +59,26 @@ export default async function InspectionDetailPage({
 
   const tenantId = ctx.tenant.id
 
-  // ── DEBUG: confirm which inspection is being loaded ───────────────────────
-  console.log('[PAGE] inspectionId:', params.id)
-  // ─────────────────────────────────────────────────────────────────────────
+  const [role, dashboardDu] = await Promise.all([
+    getCurrentAppRoleForTenant(),
+    getCurrentDashboardTenantUser(),
+  ])
+  if (role === 'technician' && !dashboardDu?.tenantUserId) return notFound()
+
+  const inspectionByIdOpts =
+    role === 'technician' && dashboardDu?.tenantUserId
+      ? { technicianIdEq: dashboardDu.tenantUserId }
+      : undefined
+
+  const { inspection } = await getInspectionById(tenantId, params.id, inspectionByIdOpts)
+  if (!inspection) return notFound()
 
   const supabase = await createClient()
 
-  // ── Step 1: Fetch inspection header, saved items, recommendations, and the
-  //            linked estimate (if one was created from this inspection) in
-  //            parallel.  The estimate query drives the "View Estimate" card.
-  const [{ inspection }, existingItemsRaw, recommendations, linkedEstimateRes] = await Promise.all([
-    getInspectionById(tenantId, params.id),
+  // Header must authorize before items, recommendations, or linked estimate (query-level isolation).
+  const [existingItemsRaw, recommendations, linkedEstimateRes] = await Promise.all([
     getInspectionItemsByInspectionId(params.id),
     getInspectionRecommendations(tenantId, params.id),
-    // Find the most-recent estimate linked to this inspection.
-    // createEstimateFromInspection() stores inspection_id on the estimate row
-    // and returns an existing draft on repeat calls — so at most one row exists
-    // per inspection at any given time.
     supabase
       .from('estimates')
       .select('id, estimate_number, status, updated_at')
@@ -93,12 +96,6 @@ export default async function InspectionDetailPage({
     updated_at:      string | null
   } | null
 
-  if (!inspection) return notFound()
-
-  // ── DEBUG ─────────────────────────────────────────────────────────────────
-  console.log('[PAGE] existingItemsRaw:', existingItemsRaw)
-  // ─────────────────────────────────────────────────────────────────────────
-
   // Map raw DB rows → ExistingItem shape expected by InspectionChecklist.
   //   template_item_id  → template_item_id  (unchanged)
   //   result            → status            (DB col "result" maps to local prop "status")
@@ -111,10 +108,6 @@ export default async function InspectionDetailPage({
     status:           row.result,
     notes:            row.note,
   }))
-
-  // ── DEBUG ─────────────────────────────────────────────────────────────────
-  console.log('[PAGE] existingItemsMapped:', existingItems)
-  // ─────────────────────────────────────────────────────────────────────────
 
   // ── Load existing photos for saved inspection item rows ──────────────────
   const existingItemIds = existingItemsRaw.map(row => row.id).filter(Boolean)
@@ -147,11 +140,9 @@ export default async function InspectionDetailPage({
 
   const sections = groupBySection(templateItems)
 
-  const [canEditInspectionsModule, canEditEstimates, role, dashboardDu, teamUsers] = await Promise.all([
+  const [canEditInspectionsModule, canEditEstimates, teamUsers] = await Promise.all([
     canEditDashboardModule('inspections'),
     canEditDashboardModule('estimates'),
-    getCurrentAppRoleForTenant(),
-    getCurrentDashboardTenantUser(),
     getTeamUsers(tenantId),
   ])
 

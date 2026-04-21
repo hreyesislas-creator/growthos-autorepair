@@ -122,7 +122,6 @@ const ROLE_MODULE_ACCESS: Record<AppRole, Record<AppModule, ModuleAccessLevel>> 
 
   technician: row({
     dashboard: 'read',
-    appointments: 'read',
     inspections: 'edit',
     work_orders: 'edit',
   }),

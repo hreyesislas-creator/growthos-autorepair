@@ -1,6 +1,8 @@
 import { getDashboardTenant } from '@/lib/tenant'
 import { createAdminClient } from '@/lib/supabase/server'
 import { NextRequest, NextResponse } from 'next/server'
+import { getCurrentAppRoleForTenant } from '@/lib/auth/roles'
+import { getCurrentDashboardTenantUser } from '@/lib/auth/operational-assignment'
 
 /**
  * GET /api/estimates/[id]/work-order
@@ -24,15 +26,28 @@ export async function GET(
     const tenantId = ctx.tenant.id
     const estimateId = params.id
 
+    const [role, dashboardDu] = await Promise.all([
+      getCurrentAppRoleForTenant(),
+      getCurrentDashboardTenantUser(),
+    ])
+    if (role === 'technician' && !dashboardDu?.tenantUserId) {
+      return NextResponse.json({ id: null, work_order_number: null })
+    }
+
     // Query for an existing work order for this estimate
-    const adminClient = await createAdminClient()
-    const { data, error } = await adminClient
+    const adminClient = createAdminClient()
+    let woQuery = adminClient
       .from('work_orders')
       .select('id, work_order_number')
       .eq('tenant_id', tenantId)
       .eq('estimate_id', estimateId)
       .limit(1)
-      .single()
+
+    if (role === 'technician' && dashboardDu?.tenantUserId) {
+      woQuery = woQuery.eq('technician_id', dashboardDu.tenantUserId)
+    }
+
+    const { data, error } = await woQuery.single()
 
     if (error) {
       // No work order found (expected case)

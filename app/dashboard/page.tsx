@@ -1,3 +1,4 @@
+import { notFound } from 'next/navigation'
 import { getDashboardTenant } from '@/lib/tenant'
 import {
   getTodayAppointments,
@@ -12,9 +13,15 @@ import {
   getVehicleDisplay,
   getCompletedWorkOrderCounts,
   getRevenueOpportunitiesSummary,
+  getInspections,
+  getTechnicianWeekWorkOrderMetrics,
+  type ShopMessageFeedEntry,
 } from '@/lib/queries'
 import { getFinancialDashboardData } from '@/lib/financial-queries'
+import { getCurrentAppRoleForTenant } from '@/lib/auth/roles'
+import { getCurrentDashboardTenantUser } from '@/lib/auth/operational-assignment'
 import Topbar from '@/components/dashboard/Topbar'
+import TechnicianOverview from '@/components/dashboard/TechnicianOverview'
 import StatusBadge from '@/components/dashboard/StatusBadge'
 import Link from 'next/link'
 import { differenceInCalendarDays, format, parseISO, startOfDay } from 'date-fns'
@@ -192,9 +199,52 @@ function completedWorkOrderPipelineAging(
 }
 
 export default async function DashboardPage() {
-  const ctx      = await getDashboardTenant()
-  const tenantId = ctx?.tenant.id ?? ''
+  const ctx = await getDashboardTenant()
+  if (!ctx) return notFound()
+
+  const tenantId = ctx.tenant.id
   const today    = format(new Date(), 'EEEE, MMM d')
+
+  const [role, dashboardDu] = await Promise.all([
+    getCurrentAppRoleForTenant(),
+    getCurrentDashboardTenantUser(),
+  ])
+
+  if (role === 'technician') {
+    const technicianId = dashboardDu?.tenantUserId ?? null
+    // No tenant-wide message_logs here: that feed includes other customers' SMS/email bodies.
+    const [workOrders, inspections, metrics] = technicianId
+      ? await Promise.all([
+          getWorkOrdersForTenant(tenantId, 200, { technicianIdEq: technicianId }),
+          getInspections(tenantId, { technicianIdEq: technicianId }),
+          getTechnicianWeekWorkOrderMetrics(tenantId, technicianId),
+        ])
+      : await Promise.all([
+          Promise.resolve([]),
+          Promise.resolve([]),
+          Promise.resolve({
+            weekRevenue: 0,
+            completedThisWeek: 0,
+            averageTicket: 0,
+          }),
+        ])
+    const shopMessages: ShopMessageFeedEntry[] = []
+
+    return (
+      <>
+        <Topbar title="My work" subtitle={today} />
+        <div className="dash-content">
+          <TechnicianOverview
+            workOrders={workOrders}
+            inspections={inspections}
+            performance={metrics}
+            shopMessages={shopMessages}
+            missingTechnicianProfile={!technicianId}
+          />
+        </div>
+      </>
+    )
+  }
 
   const [
     todayAppts,

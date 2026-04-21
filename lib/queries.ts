@@ -331,16 +331,31 @@ export async function getRecommendations(tenantId: string, vehicleId: string): P
 
 // ── Inspections ───────────────────────────────────────────────
 
-export async function getInspections(tenantId: string): Promise<InspectionRow[]> {
+/** Optional scoping for inspection list (e.g. technicians: assigned rows only). */
+export type GetInspectionsOptions = {
+  /** When set, only rows with `technician_id` equal to this tenant_users.id (excludes unassigned). */
+  technicianIdEq?: string
+}
+
+export async function getInspections(
+  tenantId: string,
+  options?: GetInspectionsOptions,
+): Promise<InspectionRow[]> {
   if (!hasValue(tenantId)) return []
 
   const supabase = await createClient()
 
-  const { data, error } = await supabase
+  let q = supabase
     .from('inspections')
     .select('*, customer:customers(first_name, last_name), vehicle:vehicles(year, make, model)')
     .eq('tenant_id', tenantId)
     .eq('is_archived', false)          // Phase A: hide archived records from list
+
+  if (options?.technicianIdEq) {
+    q = q.eq('technician_id', options.technicianIdEq)
+  }
+
+  const { data, error } = await q
     .order('created_at', { ascending: false })
     .limit(100)
 
@@ -352,41 +367,43 @@ export async function getInspections(tenantId: string): Promise<InspectionRow[]>
   return (data ?? []) as InspectionRow[]
 }
 
-export async function getInspectionById(tenantId: string, id: string) {
+export type GetInspectionByIdOptions = {
+  /** When set, row must match this tenant_users.id (technician isolation). */
+  technicianIdEq?: string
+}
+
+export async function getInspectionById(
+  tenantId: string,
+  id: string,
+  options?: GetInspectionByIdOptions,
+) {
   if (!hasValue(tenantId) || !hasValue(id)) {
-    return {
-      inspection: null,
-      items: [],
-    }
+    return { inspection: null }
   }
 
-  const supabase      = await createClient()
-  // Use the service-role client for inspection_items so that RLS on that table
-  // never silently filters the rows to [].  Security is already enforced by the
-  // inspections query above — if the inspection doesn't belong to tenantId that
-  // query returns null and the page returns notFound().
-  const adminSupabase = createAdminClient()
+  const supabase = await createClient()
 
-  const [inspRes, itemsRes] = await Promise.all([
-    supabase.from('inspections').select('*').eq('tenant_id', tenantId).eq('id', id).single(),
-    adminSupabase
-      .from('inspection_items')
-      .select('template_item_id, result, note')
-      .eq('inspection_id', id),
-  ])
+  let inspQuery = supabase
+    .from('inspections')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('id', id)
+
+  if (options?.technicianIdEq) {
+    inspQuery = inspQuery.eq('technician_id', options.technicianIdEq)
+  }
+
+  const inspRes = await inspQuery.maybeSingle()
 
   if (inspRes.error) {
     console.error('[getInspectionById inspection]', inspRes.error.message)
   }
 
-  if (itemsRes.error) {
-    console.error('[getInspectionById items]', itemsRes.error.message)
+  if (!inspRes.data) {
+    return { inspection: null }
   }
 
-  return {
-    inspection: (inspRes.data as Inspection | null) ?? null,
-    items: itemsRes.data ?? [],
-  }
+  return { inspection: inspRes.data as Inspection }
 }
 
 /**
@@ -444,17 +461,26 @@ export async function getInspectionItemsByInspectionId(
   return data ?? []
 }
 
-export async function getPendingInspectionCount(tenantId: string): Promise<number> {
+export async function getPendingInspectionCount(
+  tenantId: string,
+  options?: { technicianIdEq?: string },
+): Promise<number> {
   if (!hasValue(tenantId)) return 0
 
   const supabase = await createClient()
 
-  const { count, error } = await supabase
+  let q = supabase
     .from('inspections')
     .select('id', { count: 'exact', head: true })
     .eq('tenant_id', tenantId)
     .eq('is_archived', false)          // Phase A: exclude archived from pending count
     .in('status', ['draft', 'in_progress'])
+
+  if (options?.technicianIdEq) {
+    q = q.eq('technician_id', options.technicianIdEq)
+  }
+
+  const { count, error } = await q
 
   if (error) {
     console.error('[getPendingInspectionCount]', error.message)
@@ -538,6 +564,45 @@ export async function getMessageLogs(tenantId: string): Promise<MessageLog[]> {
 
   console.log('[getMessageLogs] rows fetched:', data?.length ?? 0, 'for tenant', tenantId)
   return (data ?? []) as MessageLog[]
+}
+
+export type ShopMessageFeedEntry = {
+  id: string
+  title: string
+  message: string
+  created_at: string
+}
+
+/** Read-only shop message feed (tenant-wide; no customer PII beyond phone in title). */
+export async function getShopMessageFeedEntries(
+  tenantId: string,
+  limit = 30,
+): Promise<ShopMessageFeedEntry[]> {
+  if (!hasValue(tenantId)) return []
+
+  const supabase = createAdminClient()
+  const { data, error } = await supabase
+    .from('message_logs')
+    .select('id, channel, message_body, to_phone, created_at')
+    .eq('tenant_id', tenantId)
+    .order('created_at', { ascending: false })
+    .limit(Math.min(Math.max(limit, 1), 100))
+
+  if (error) {
+    console.error('[getShopMessageFeedEntries]', error.message)
+    return []
+  }
+
+  return (data ?? []).map(row => {
+    const ch = String((row as { channel?: string }).channel || 'message').toUpperCase()
+    const to = (row as { to_phone?: string }).to_phone?.trim() || 'Shop'
+    return {
+      id: (row as { id: string }).id,
+      title: `${ch} · ${to}`,
+      message: String((row as { message_body?: string }).message_body ?? ''),
+      created_at: (row as { created_at: string }).created_at,
+    }
+  })
 }
 
 export async function getMessageTemplates(tenantId: string): Promise<MessageTemplate[]> {
@@ -1230,16 +1295,26 @@ export async function getSupportTickets(tenantId?: string): Promise<SupportTicke
  * Fetch all work orders for a tenant, ordered by creation date descending.
  * Does NOT include line items — use getWorkOrderById for that.
  */
-export async function getWorkOrdersForTenant(tenantId: string, limit = 200): Promise<WorkOrder[]> {
+export async function getWorkOrdersForTenant(
+  tenantId: string,
+  limit = 200,
+  options?: { technicianIdEq?: string },
+): Promise<WorkOrder[]> {
   if (!hasValue(tenantId)) return []
 
   const supabase = await createAdminClient()
 
-  const { data, error } = await supabase
+  let q = supabase
     .from('work_orders')
     .select('*')
     .eq('tenant_id', tenantId)
     .eq('is_archived', false)          // Phase A: hide archived records from list
+
+  if (options?.technicianIdEq) {
+    q = q.eq('technician_id', options.technicianIdEq)
+  }
+
+  const { data, error } = await q
     .order('created_at', { ascending: false })
     .limit(limit)
 
@@ -1255,7 +1330,10 @@ export async function getWorkOrdersForTenant(tenantId: string, limit = 200): Pro
  * Accurate counts of completed work orders (not limited by list pagination).
  * Uses completed_at; excludes rows with null completed_at.
  */
-export async function getCompletedWorkOrderCounts(tenantId: string): Promise<{
+export async function getCompletedWorkOrderCounts(
+  tenantId: string,
+  options?: { technicianIdEq?: string },
+): Promise<{
   completedToday: number
   completedThisWeek: number
 }> {
@@ -1268,26 +1346,32 @@ export async function getCompletedWorkOrderCounts(tenantId: string): Promise<{
   const weekStart = startOfWeek(now, { weekStartsOn: 1 }).toISOString()
   const nowIso = now.toISOString()
 
-  const [todayRes, weekRes] = await Promise.all([
-    supabase
-      .from('work_orders')
-      .select('id', { count: 'exact', head: true })
-      .eq('tenant_id', tenantId)
-      .eq('is_archived', false)
-      .eq('status', 'completed')
-      .not('completed_at', 'is', null)
-      .gte('completed_at', dayStart)
-      .lte('completed_at', dayEnd),
-    supabase
-      .from('work_orders')
-      .select('id', { count: 'exact', head: true })
-      .eq('tenant_id', tenantId)
-      .eq('is_archived', false)
-      .eq('status', 'completed')
-      .not('completed_at', 'is', null)
-      .gte('completed_at', weekStart)
-      .lte('completed_at', nowIso),
-  ])
+  let todayQ = supabase
+    .from('work_orders')
+    .select('id', { count: 'exact', head: true })
+    .eq('tenant_id', tenantId)
+    .eq('is_archived', false)
+    .eq('status', 'completed')
+    .not('completed_at', 'is', null)
+    .gte('completed_at', dayStart)
+    .lte('completed_at', dayEnd)
+
+  let weekQ = supabase
+    .from('work_orders')
+    .select('id', { count: 'exact', head: true })
+    .eq('tenant_id', tenantId)
+    .eq('is_archived', false)
+    .eq('status', 'completed')
+    .not('completed_at', 'is', null)
+    .gte('completed_at', weekStart)
+    .lte('completed_at', nowIso)
+
+  if (options?.technicianIdEq) {
+    todayQ = todayQ.eq('technician_id', options.technicianIdEq)
+    weekQ = weekQ.eq('technician_id', options.technicianIdEq)
+  }
+
+  const [todayRes, weekRes] = await Promise.all([todayQ, weekQ])
 
   if (todayRes.error) {
     console.error('[getCompletedWorkOrderCounts] today:', todayRes.error.message)
@@ -1302,6 +1386,55 @@ export async function getCompletedWorkOrderCounts(tenantId: string): Promise<{
   }
 }
 
+/**
+ * Technician overview: revenue and counts from work orders completed this week
+ * (calendar week, Mon start) for the assigned technician only.
+ */
+export async function getTechnicianWeekWorkOrderMetrics(
+  tenantId: string,
+  technicianTenantUserId: string,
+): Promise<{
+  weekRevenue: number
+  completedThisWeek: number
+  averageTicket: number
+}> {
+  const empty = { weekRevenue: 0, completedThisWeek: 0, averageTicket: 0 }
+  if (!hasValue(tenantId) || !hasValue(technicianTenantUserId)) return empty
+
+  const supabase = createAdminClient()
+  const now = new Date()
+  const weekStart = startOfWeek(now, { weekStartsOn: 1 }).toISOString()
+  const nowIso = now.toISOString()
+
+  const { data, error } = await supabase
+    .from('work_orders')
+    .select('total')
+    .eq('tenant_id', tenantId)
+    .eq('technician_id', technicianTenantUserId)
+    .eq('is_archived', false)
+    .eq('status', 'completed')
+    .not('completed_at', 'is', null)
+    .gte('completed_at', weekStart)
+    .lte('completed_at', nowIso)
+
+  if (error) {
+    console.error('[getTechnicianWeekWorkOrderMetrics]', error.message)
+    return empty
+  }
+
+  const rows = (data ?? []) as { total: number | string | null }[]
+  const completedThisWeek = rows.length
+  const weekRevenue = rows.reduce((s, r) => s + revOppNum(r.total), 0)
+  const averageTicket =
+    completedThisWeek > 0 ? Math.round((weekRevenue / completedThisWeek) * 100) / 100 : 0
+
+  return {
+    weekRevenue: Math.round(weekRevenue * 100) / 100,
+    completedThisWeek,
+    averageTicket,
+  }
+}
+
 function revOppNum(v: number | string | null | undefined): number {
   const n = Number(v)
   return Number.isFinite(n) ? n : 0
@@ -1310,7 +1443,10 @@ function revOppNum(v: number | string | null | undefined): number {
 /**
  * Dashboard "Revenue opportunities" — aggregates from estimates, work_orders, invoices only.
  */
-export async function getRevenueOpportunitiesSummary(tenantId: string): Promise<{
+export async function getRevenueOpportunitiesSummary(
+  tenantId: string,
+  options?: { technicianIdEq?: string },
+): Promise<{
   pendingEstimatesCount: number
   pendingEstimatesPotential: number
   readyPickupCount: number
@@ -1330,6 +1466,16 @@ export async function getRevenueOpportunitiesSummary(tenantId: string): Promise<
 
   const supabase = createAdminClient()
 
+  let readyQ = supabase
+    .from('work_orders')
+    .select('invoice_id')
+    .eq('tenant_id', tenantId)
+    .eq('is_archived', false)
+    .eq('status', 'ready')
+  if (options?.technicianIdEq) {
+    readyQ = readyQ.eq('technician_id', options.technicianIdEq)
+  }
+
   const [estRes, readyRes, unpaidRes] = await Promise.all([
     supabase
       .from('estimates')
@@ -1337,12 +1483,7 @@ export async function getRevenueOpportunitiesSummary(tenantId: string): Promise<
       .eq('tenant_id', tenantId)
       .eq('is_archived', false)
       .in('status', ['draft', 'presented']),
-    supabase
-      .from('work_orders')
-      .select('invoice_id')
-      .eq('tenant_id', tenantId)
-      .eq('is_archived', false)
-      .eq('status', 'ready'),
+    readyQ,
     supabase
       .from('invoices')
       .select('balance_due')
@@ -1401,21 +1542,31 @@ export async function getRevenueOpportunitiesSummary(tenantId: string): Promise<
  * Fetch a single work order by ID, including all its line items.
  * Returns null if not found or auth check fails.
  */
+export type GetWorkOrderByIdOptions = {
+  /** When set, row must match this tenant_users.id (technician isolation). */
+  technicianIdEq?: string
+}
+
 export async function getWorkOrderById(
   tenantId: string,
   workOrderId: string,
+  options?: GetWorkOrderByIdOptions,
 ): Promise<WorkOrderWithItems | null> {
   if (!hasValue(tenantId) || !hasValue(workOrderId)) return null
 
   const supabase = await createAdminClient()
 
-  // Fetch work order header
-  const { data: woData, error: woError } = await supabase
+  let woQuery = supabase
     .from('work_orders')
     .select('*')
     .eq('tenant_id', tenantId)
     .eq('id', workOrderId)
-    .single()
+
+  if (options?.technicianIdEq) {
+    woQuery = woQuery.eq('technician_id', options.technicianIdEq)
+  }
+
+  const { data: woData, error: woError } = await woQuery.maybeSingle()
 
   if (woError) {
     console.error('[getWorkOrderById] work_orders query:', woError.message)
@@ -1718,6 +1869,39 @@ export async function getInspectionsForVehicle(
   }
 
   return (data ?? []) as Inspection[]
+}
+
+/** Inspection rows linked to a work order (for WO detail sidebar/list). */
+export type InspectionWorkOrderLinkRow = Pick<Inspection, 'id' | 'status' | 'created_at'>
+
+export async function getInspectionsForWorkOrder(
+  tenantId: string,
+  workOrderId: string,
+  options?: { technicianIdEq?: string },
+): Promise<InspectionWorkOrderLinkRow[]> {
+  if (!hasValue(tenantId) || !hasValue(workOrderId)) return []
+
+  const supabase = await createClient()
+
+  let q = supabase
+    .from('inspections')
+    .select('id, status, created_at')
+    .eq('tenant_id', tenantId)
+    .eq('work_order_id', workOrderId)
+    .eq('is_archived', false)
+
+  if (options?.technicianIdEq) {
+    q = q.eq('technician_id', options.technicianIdEq)
+  }
+
+  const { data, error } = await q.order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('[getInspectionsForWorkOrder]', error.message)
+    return []
+  }
+
+  return (data ?? []) as InspectionWorkOrderLinkRow[]
 }
 
 /**

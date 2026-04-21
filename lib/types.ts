@@ -372,6 +372,8 @@ export interface InspectionTemplateItem {
 export interface Inspection {
   id: string
   tenant_id: string
+  /** Set when the inspection is started from a work order; otherwise null. */
+  work_order_id: string | null
   appointment_id: string | null
   vehicle_id: string | null
   customer_id: string | null

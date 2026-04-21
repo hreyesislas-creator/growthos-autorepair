@@ -161,13 +161,15 @@ export default function WorkOrdersList({
         >
           Assigned to me
         </Link>
-        <Link
-          href={`${basePath}?scope=unassigned`}
-          className={unassignedPillActive ? 'btn-primary' : 'btn-ghost'}
-          style={{ fontSize: 12, padding: '6px 12px', textDecoration: 'none' }}
-        >
-          Unassigned
-        </Link>
+        {appRole !== 'technician' && (
+          <Link
+            href={`${basePath}?scope=unassigned`}
+            className={unassignedPillActive ? 'btn-primary' : 'btn-ghost'}
+            style={{ fontSize: 12, padding: '6px 12px', textDecoration: 'none' }}
+          >
+            Unassigned
+          </Link>
+        )}
         {showAdvisorTechFilter && advisorTechnicianOptions.length > 0 && (
           <AdvisorTechnicianFilterSelect
             basePath={basePath}
@@ -176,23 +178,7 @@ export default function WorkOrdersList({
             currentTechId={advisorTechnicianId}
           />
         )}
-        {appRole === 'technician' && assignmentScope !== 'all' && (
-          <Link
-            href={`${basePath}?scope=all`}
-            className="btn-ghost"
-            style={{ fontSize: 12, padding: '6px 12px', textDecoration: 'none' }}
-          >
-            Full shop list
-          </Link>
-        )}
       </div>
-      {appRole === 'technician' && assignmentScope === 'all' && (
-        <div style={{
-          fontSize: 12, color: 'var(--text-3)', marginBottom: 12, marginTop: -4,
-        }}>
-          Your assigned and unassigned jobs are listed first.
-        </div>
-      )}
 
       {/* ── Toolbar ────────────────────────────────────────────────────────── */}
       <div style={{

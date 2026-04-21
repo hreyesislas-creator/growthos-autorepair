@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useMemo, useId, useEffect } from 'react'
+import { useState, useCallback, useMemo, useId, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import type { EstimateWithItems, EstimateItem, EstimateItemPart, EstimateItemDecision, ServiceJobWithCategory, ServiceCatalog } from '@/lib/types'
 import {
@@ -173,6 +173,28 @@ function dbItemToLocal(item: EstimateItem, idx: number): LocalItem {
   }
 }
 
+/** Mirrors the EstimateEditor items initializer — used when server props change after `router.refresh()`. */
+function buildLocalItemsFromEstimate(
+  estimate: EstimateWithItems,
+  defaultLaborRate: number,
+): LocalItem[] {
+  const initMarkup = Number(estimate.parts_markup_percent ?? 0)
+  return estimate.items.map((item, idx) => {
+    const local = dbItemToLocal(item, idx)
+    const isServiceItem =
+      local.category === 'labor' ||
+      local.source_type !== 'manual'
+
+    if (isServiceItem) {
+      local.category = 'labor'
+      if (!local.labor_rate && defaultLaborRate > 0) local.labor_rate = defaultLaborRate
+      if (!local.labor_hours) local.labor_hours = 1
+    }
+
+    return { ...local, parts: local.parts.map(p => computePart(p, initMarkup)) }
+  })
+}
+
 function statusStyle(status: string) {
   return STATUSES.find(s => s.value === status)?.style
     ?? { background: '#f1f5f9', color: '#475569' }
@@ -210,6 +232,16 @@ export default function EstimateEditor({
   const inputId = useId()
   const ro      = readOnly
 
+  const decisionsSig = useMemo(
+    () =>
+      initialDecisions
+        .map(d => `${d.estimate_item_id}:${d.decision}:${d.updated_at}`)
+        .sort()
+        .join(','),
+    [initialDecisions],
+  )
+  const lastServerSyncKey = useRef<string | null>(null)
+
   // ── Header state ───────────────────────────────────────────────────────────
   const [status,        setStatus]        = useState<Status>(estimate.status as Status)
   const [notes,         setNotes]         = useState(estimate.notes          ?? '')
@@ -240,30 +272,9 @@ export default function EstimateEditor({
   // as manually-added labor rows.  We detect them by source_type !== 'manual'
   // and normalise their category to 'labor' here so isLaborMode fires correctly
   // in ItemRow.  Items explicitly marked 'fee' or 'misc' are left untouched.
-  const [items, setItems] = useState<LocalItem[]>(() => {
-    const initMarkup = Number(estimate.parts_markup_percent ?? 0)
-    return estimate.items.map((item, idx) => {
-      const local = dbItemToLocal(item, idx)
-
-      // An item should use the labor/job layout if it is explicitly 'labor'
-      // OR if it was imported from an inspection / recommendation pipeline
-      // (source_type !== 'manual').  The category stored by the import pipeline
-      // (often 'misc') is NOT a reliable signal — it just reflects the pipeline
-      // default, not the advisor's intent.  source_type is the authoritative
-      // discriminator: anything the advisor did not type themselves is service work.
-      const isServiceItem =
-        local.category === 'labor' ||
-        local.source_type !== 'manual'
-
-      if (isServiceItem) {
-        local.category = 'labor'   // ensures isLaborMode = true in ItemRow
-        if (!local.labor_rate  && defaultLaborRate > 0) local.labor_rate  = defaultLaborRate
-        if (!local.labor_hours)                         local.labor_hours = 1
-      }
-
-      return { ...local, parts: local.parts.map(p => computePart(p, initMarkup)) }
-    })
-  })
+  const [items, setItems] = useState<LocalItem[]>(() =>
+    buildLocalItemsFromEstimate(estimate, defaultLaborRate),
+  )
 
   // ── Recompute ALL part rows whenever Parts Markup % changes ───────────────
   // This fires when the advisor edits the markup field so every part's
@@ -343,6 +354,45 @@ export default function EstimateEditor({
   const [voidError,   setVoidError]   = useState<string | null>(null)
   const [voidTier,    setVoidTier]    = useState<'standard' | 'strong_warning' | 'hard_block'>('standard')
   const [voidWarning, setVoidWarning] = useState('')
+
+  // ── Re-fetch when returning from public approval tab (no polling / websockets) ──
+  useEffect(() => {
+    let debounce: ReturnType<typeof setTimeout> | undefined
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return
+      if (debounce) clearTimeout(debounce)
+      debounce = setTimeout(() => {
+        debounce = undefined
+        router.refresh()
+      }, 250)
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      if (debounce) clearTimeout(debounce)
+    }
+  }, [router])
+
+  // ── When server data changes after refresh, sync local editor state (props alone do not reset useState) ──
+  useEffect(() => {
+    const key = `${estimate.updated_at}|${decisionsSig}`
+    const prev = lastServerSyncKey.current
+    if (prev !== key) {
+      if (prev !== null) {
+        setStatus(estimate.status as Status)
+        setNotes(estimate.notes ?? '')
+        setInternalNotes(estimate.internal_notes ?? '')
+        setTaxRate(
+          estimate.tax_rate != null ? String(round2(Number(estimate.tax_rate) * 100)) : '',
+        )
+        setTaxAmountRaw(String(estimate.tax_amount ?? 0))
+        setPartsMarkupPercent(Number(estimate.parts_markup_percent ?? 0))
+        setItems(buildLocalItemsFromEstimate(estimate, defaultLaborRate))
+        setShareVisible(['presented', 'approved', 'declined'].includes(estimate.status))
+      }
+      lastServerSyncKey.current = key
+    }
+  }, [estimate, decisionsSig, defaultLaborRate])
 
   // ── Job groups for <optgroup> ─────────────────────────────────────────────
   // serviceJobs comes pre-sorted by category.sort_order then name from getServiceJobs()

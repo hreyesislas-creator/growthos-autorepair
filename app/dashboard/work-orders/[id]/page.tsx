@@ -31,8 +31,20 @@ export default async function WorkOrderDetailPage({
 
   const tenantId = ctx.tenant.id
 
-  // ── Load work order with items ─────────────────────────────────────────────
-  const workOrder = await getWorkOrderById(tenantId, params.id)
+  const [role, dashboardDu] = await Promise.all([
+    getCurrentAppRoleForTenant(),
+    getCurrentDashboardTenantUser(),
+  ])
+
+  if (role === 'technician' && !dashboardDu?.tenantUserId) return notFound()
+
+  const woTechnicianScope =
+    role === 'technician' && dashboardDu?.tenantUserId
+      ? { technicianIdEq: dashboardDu.tenantUserId }
+      : undefined
+
+  // ── Load work order with items (technicians: query enforces technician_id match) ──
+  const workOrder = await getWorkOrderById(tenantId, params.id, woTechnicianScope)
   if (!workOrder) return notFound()
 
   // ── Resolve customer and vehicle display labels ────────────────────────────
@@ -70,15 +82,18 @@ export default async function WorkOrderDetailPage({
 
   const subtitle = [customerName, vehicleLabel].filter(Boolean).join(' · ') || undefined
 
-  const [canEditWoModule, canEditInvoices, canEditInspections, role, dashboardDu, teamUsers, linkedInspections] =
+  const linkedInspOpts =
+    role === 'technician' && dashboardDu?.tenantUserId
+      ? { technicianIdEq: dashboardDu.tenantUserId }
+      : undefined
+
+  const [canEditWoModule, canEditInvoices, canEditInspections, teamUsers, linkedInspections] =
     await Promise.all([
     canEditDashboardModule('work_orders'),
     canEditDashboardModule('invoices'),
     canEditDashboardModule('inspections'),
-    getCurrentAppRoleForTenant(),
-    getCurrentDashboardTenantUser(),
     getTeamUsers(tenantId),
-    getInspectionsForWorkOrder(tenantId, params.id),
+    getInspectionsForWorkOrder(tenantId, params.id, linkedInspOpts),
   ])
 
   const assignableTeamUsers = teamUsers.filter(u => {
