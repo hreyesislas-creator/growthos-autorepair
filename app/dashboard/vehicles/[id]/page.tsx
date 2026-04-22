@@ -9,6 +9,7 @@ import {
   getInvoicesForVehicle,
   getWorkOrderLinePreviews,
 } from '@/lib/queries'
+import type { Estimate, Inspection, Invoice, WorkOrder } from '@/lib/types'
 import Topbar from '@/components/dashboard/Topbar'
 import VehicleServiceHistory from './VehicleServiceHistory'
 
@@ -21,17 +22,186 @@ type VehicleIntelligenceSummary = {
   totalVisits: number
   invoiceCount: number
   averageTicket: number | null
-  /** How average ticket was computed (for UI caption). */
-  averageTicketBasis: 'invoice' | 'work_order' | null
   lastVisit: string | null
   /** Most recent work order line preview or latest invoice line. */
   recentWorkPerformed: string | null
+}
+
+/** Serializable snapshot for Current Job card (work order is anchor when present). */
+type CurrentJobSnapshot = {
+  stageLabel: string
+  vehicleLabel: string
+  lastActivityAt: string | null
+  links: {
+    inspection: { href: string; label: string } | null
+    estimate: { href: string; label: string } | null
+    workOrder: { href: string; label: string } | null
+    invoice: { href: string; label: string } | null
+  }
 }
 
 function timestamp(iso: string | null | undefined): number {
   if (!iso) return 0
   const t = new Date(iso).getTime()
   return Number.isFinite(t) ? t : 0
+}
+
+function openWorkOrderRank(status: WorkOrder['status']): number {
+  if (status === 'in_progress') return 0
+  if (status === 'ready') return 1
+  if (status === 'draft') return 2
+  return 99
+}
+
+function pickCurrentWorkOrder(workOrders: WorkOrder[]): WorkOrder | null {
+  const open = workOrders.filter(w =>
+    w.status === 'in_progress' || w.status === 'ready' || w.status === 'draft',
+  )
+  if (open.length > 0) {
+    return [...open].sort((a, b) => {
+      const ra = openWorkOrderRank(a.status)
+      const rb = openWorkOrderRank(b.status)
+      if (ra !== rb) return ra - rb
+      return timestamp(b.updated_at) - timestamp(a.updated_at)
+    })[0]
+  }
+  const closed = workOrders.filter(w => w.status === 'completed' || w.status === 'invoiced')
+  if (closed.length === 0) return null
+  return [...closed].sort((a, b) => timestamp(b.updated_at) - timestamp(a.updated_at))[0]
+}
+
+function invoiceForWorkOrder(wo: WorkOrder, invoices: Invoice[]): Invoice | null {
+  if (wo.invoice_id) {
+    const byId = invoices.find(i => i.id === wo.invoice_id)
+    if (byId) return byId
+  }
+  return invoices.find(i => i.work_order_id === wo.id) ?? null
+}
+
+function isInvoicePaid(inv: Invoice): boolean {
+  return inv.payment_status === 'paid' || inv.status === 'paid'
+}
+
+function buildCurrentJobSnapshot(
+  vehicleLabel: string,
+  workOrders: WorkOrder[],
+  estimates: Estimate[],
+  inspections: Inspection[],
+  invoices: Invoice[],
+): CurrentJobSnapshot {
+  const emptyLinks: CurrentJobSnapshot['links'] = {
+    inspection: null,
+    estimate: null,
+    workOrder: null,
+    invoice: null,
+  }
+
+  const wo = pickCurrentWorkOrder(workOrders)
+
+  const maxIsoFromRows = (rows: ({ updated_at?: string; created_at?: string } | null | undefined)[]) => {
+    let m = 0
+    for (const r of rows) {
+      if (!r) continue
+      m = Math.max(m, timestamp(r.updated_at), timestamp(r.created_at))
+    }
+    return m > 0 ? new Date(m).toISOString() : null
+  }
+
+  if (wo) {
+    const linkedEstimate = estimates.find(e => e.id === wo.estimate_id) ?? null
+    const linkedInspection = wo.inspection_id
+      ? inspections.find(i => i.id === wo.inspection_id) ?? null
+      : null
+    const linkedInvoice = invoiceForWorkOrder(wo, invoices)
+
+    let stageLabel = 'No active job'
+    if (wo.status === 'in_progress') stageLabel = 'Work in progress'
+    else if (wo.status === 'ready') stageLabel = 'Ready for work'
+    else if (wo.status === 'draft') stageLabel = 'Work order draft'
+    else if (wo.status === 'completed' || wo.status === 'invoiced') {
+      const inv = linkedInvoice && linkedInvoice.status !== 'void' ? linkedInvoice : null
+      if (!inv) {
+        stageLabel =
+          wo.status === 'completed' ? 'Work complete — not invoiced' : 'Payment due'
+      } else if (isInvoicePaid(inv)) {
+        stageLabel = 'Job closed'
+      } else {
+        stageLabel = 'Payment due'
+      }
+    }
+
+    const lastActivityAt = maxIsoFromRows([wo, linkedEstimate, linkedInspection, linkedInvoice])
+
+    return {
+      stageLabel,
+      vehicleLabel,
+      lastActivityAt,
+      links: {
+        inspection: linkedInspection
+          ? {
+              href: `/dashboard/inspections/${linkedInspection.id}`,
+              label: 'Inspection',
+            }
+          : null,
+        estimate: linkedEstimate
+          ? {
+              href: `/dashboard/estimates/${linkedEstimate.id}`,
+              label: linkedEstimate.estimate_number
+                ? `Estimate #${linkedEstimate.estimate_number}`
+                : 'Estimate',
+            }
+          : null,
+        workOrder: {
+          href: `/dashboard/work-orders/${wo.id}`,
+          label: wo.work_order_number ? `Work order #${wo.work_order_number}` : 'Work order',
+        },
+        invoice:
+          linkedInvoice && linkedInvoice.status !== 'void'
+            ? {
+                href: `/dashboard/invoices/${linkedInvoice.id}`,
+                label: linkedInvoice.invoice_number
+                  ? `Invoice #${linkedInvoice.invoice_number}`
+                  : 'Invoice',
+              }
+            : null,
+      },
+    }
+  }
+
+  const openInspections = inspections.filter(
+    i => i.status === 'in_progress' || i.status === 'draft',
+  )
+  const pendingEstimates = estimates.filter(e => e.status !== 'declined')
+  const topInsp =
+    openInspections.length > 0
+      ? [...openInspections].sort((a, b) => timestamp(b.updated_at) - timestamp(a.updated_at))[0]
+      : null
+  const topEst =
+    pendingEstimates.length > 0
+      ? [...pendingEstimates].sort((a, b) => timestamp(b.updated_at) - timestamp(a.updated_at))[0]
+      : null
+
+  let stageLabel = 'No active job'
+  let lastActivityAt: string | null = null
+  const links = { ...emptyLinks }
+
+  if (topInsp && (!topEst || timestamp(topInsp.updated_at) >= timestamp(topEst.updated_at))) {
+    stageLabel = 'Inspection in progress'
+    lastActivityAt = maxIsoFromRows([topInsp])
+    links.inspection = {
+      href: `/dashboard/inspections/${topInsp.id}`,
+      label: 'Inspection',
+    }
+  } else if (topEst) {
+    stageLabel = 'Estimate pending'
+    lastActivityAt = maxIsoFromRows([topEst])
+    links.estimate = {
+      href: `/dashboard/estimates/${topEst.id}`,
+      label: topEst.estimate_number ? `Estimate #${topEst.estimate_number}` : 'Estimate',
+    }
+  }
+
+  return { stageLabel, vehicleLabel, lastActivityAt, links }
 }
 
 export default async function VehicleDetailPage({ params }: { params: { id: string } }) {
@@ -63,32 +233,20 @@ export default async function VehicleDetailPage({ params }: { params: { id: stri
   const billableInvoices = invoices.filter(i => i.status !== 'void')
   const totalRevenue = billableInvoices.reduce((sum, i) => sum + Number(i.total), 0)
   const invoiceCount = billableInvoices.length
-  const totalVisits = workOrders.length
 
-  const averageTicketBasis: VehicleIntelligenceSummary['averageTicketBasis'] =
-    invoiceCount > 0 ? 'invoice' : totalVisits > 0 ? 'work_order' : null
-  const averageTicket =
-    averageTicketBasis === 'invoice'
-      ? totalRevenue / invoiceCount
-      : averageTicketBasis === 'work_order'
-        ? totalRevenue / totalVisits
-        : null
+  const visitWorkOrders = workOrders.filter(
+    w => w.status === 'completed' || w.status === 'invoiced',
+  )
+  const totalVisits = visitWorkOrders.length
+
+  const averageTicket = invoiceCount > 0 ? totalRevenue / invoiceCount : null
 
   let lastVisitTs = 0
+  for (const w of visitWorkOrders) {
+    lastVisitTs = Math.max(lastVisitTs, timestamp(w.completed_at))
+  }
   for (const i of billableInvoices) {
     lastVisitTs = Math.max(lastVisitTs, timestamp(i.created_at))
-  }
-  for (const w of workOrders) {
-    lastVisitTs = Math.max(lastVisitTs, timestamp(w.completed_at ?? w.created_at))
-  }
-  for (const i of inspections) {
-    lastVisitTs = Math.max(lastVisitTs, timestamp(i.completed_at ?? i.created_at))
-  }
-  for (const a of appointments) {
-    const d = a.appointment_date
-      ? `${a.appointment_date}T${a.appointment_time || '12:00'}`
-      : a.created_at
-    lastVisitTs = Math.max(lastVisitTs, timestamp(d))
   }
   const lastVisit = lastVisitTs > 0 ? new Date(lastVisitTs).toISOString() : null
 
@@ -115,7 +273,6 @@ export default async function VehicleDetailPage({ params }: { params: { id: stri
     totalVisits,
     invoiceCount,
     averageTicket,
-    averageTicketBasis,
     lastVisit,
     recentWorkPerformed,
   }
@@ -135,6 +292,26 @@ export default async function VehicleDetailPage({ params }: { params: { id: stri
     detailUrl: string
     recordNumber?: string
     relatedLinks?: RelatedLink[]
+    /**
+     * Explicit job thread only: same prefix + work order id when FK chain exists.
+     * Not inferred from dates.
+     */
+    visitGroupId?: string
+  }
+
+  const jobVisitGroupId = (workOrderId: string) => `job:${workOrderId}`
+
+  const workOrderIdForInspection = (inspectionId: string) => {
+    const row = inspections.find(ins => ins.id === inspectionId)
+    if (!row) return undefined
+    if (row.work_order_id) return row.work_order_id
+    return workOrders.find(w => w.inspection_id === row.id)?.id
+  }
+
+  const visitGroupIdForInvoiceRow = (inv: (typeof invoices)[number]) => {
+    if (inv.work_order_id) return jobVisitGroupId(inv.work_order_id)
+    const wo = workOrders.find(w => w.invoice_id === inv.id)
+    return wo ? jobVisitGroupId(wo.id) : undefined
   }
 
   const entries: TimelineEntry[] = []
@@ -144,8 +321,11 @@ export default async function VehicleDetailPage({ params }: { params: { id: stri
     const dateStr = a.appointment_date || a.created_at
     const relatedLinks: RelatedLink[] = []
     const linkedInsp = inspections.find(ins => ins.appointment_id === a.id)
+    let visitGroupId: string | undefined
     if (linkedInsp) {
       relatedLinks.push({ label: 'Inspection', href: `/dashboard/inspections/${linkedInsp.id}` })
+      const woId = workOrderIdForInspection(linkedInsp.id)
+      if (woId) visitGroupId = jobVisitGroupId(woId)
     }
     entries.push({
       id: a.id,
@@ -156,6 +336,7 @@ export default async function VehicleDetailPage({ params }: { params: { id: stri
       title: 'Appointment',
       detailUrl: `/dashboard/appointments/${a.id}/edit`,
       relatedLinks: relatedLinks.length ? relatedLinks : undefined,
+      visitGroupId,
     })
   })
 
@@ -182,6 +363,8 @@ export default async function VehicleDetailPage({ params }: { params: { id: stri
       })
     }
 
+    const woIdForGroup = workOrderIdForInspection(i.id)
+
     entries.push({
       id: i.id,
       recordType: 'inspection',
@@ -192,13 +375,17 @@ export default async function VehicleDetailPage({ params }: { params: { id: stri
       summary: summaryParts.length ? summaryParts.join(' · ') : undefined,
       detailUrl: `/dashboard/inspections/${i.id}`,
       relatedLinks: relatedLinks.length ? relatedLinks : undefined,
+      visitGroupId: woIdForGroup ? jobVisitGroupId(woIdForGroup) : undefined,
     })
   })
 
   // Add estimates
   estimates.forEach(e => {
-    const relatedLinks: RelatedLink[] = []
     const linkedWo = workOrders.find(w => w.estimate_id === e.id)
+    // Hide draft estimates once a work order is linked (same FK as related links); keeps timeline scannable.
+    if (e.status === 'draft' && linkedWo) return
+
+    const relatedLinks: RelatedLink[] = []
     if (linkedWo) {
       relatedLinks.push({
         label: linkedWo.work_order_number ? `Work order #${linkedWo.work_order_number}` : 'Work order',
@@ -216,6 +403,7 @@ export default async function VehicleDetailPage({ params }: { params: { id: stri
       recordNumber: e.estimate_number ?? undefined,
       detailUrl: `/dashboard/estimates/${e.id}`,
       relatedLinks: relatedLinks.length ? relatedLinks : undefined,
+      visitGroupId: linkedWo ? jobVisitGroupId(linkedWo.id) : undefined,
     })
   })
 
@@ -249,6 +437,7 @@ export default async function VehicleDetailPage({ params }: { params: { id: stri
       recordNumber: w.work_order_number ?? undefined,
       detailUrl: `/dashboard/work-orders/${w.id}`,
       relatedLinks: relatedLinks.length ? relatedLinks : undefined,
+      visitGroupId: jobVisitGroupId(w.id),
     })
   })
 
@@ -276,6 +465,7 @@ export default async function VehicleDetailPage({ params }: { params: { id: stri
       recordNumber: i.invoice_number ?? undefined,
       detailUrl: `/dashboard/invoices/${i.id}`,
       relatedLinks: relatedLinks.length ? relatedLinks : undefined,
+      visitGroupId: visitGroupIdForInvoiceRow(i),
     })
   })
 
@@ -286,10 +476,23 @@ export default async function VehicleDetailPage({ params }: { params: { id: stri
     .filter(Boolean)
     .join(' ') || 'Vehicle'
 
+  const currentJobSnapshot = buildCurrentJobSnapshot(
+    vehicleLabel,
+    workOrders,
+    estimates,
+    inspections,
+    invoices,
+  )
+
   return (
     <>
       <Topbar title={vehicleLabel} />
-      <VehicleServiceHistory vehicle={vehicle} entries={entries} summary={summary} />
+      <VehicleServiceHistory
+        vehicle={vehicle}
+        entries={entries}
+        summary={summary}
+        currentJobSnapshot={currentJobSnapshot}
+      />
     </>
   )
 }

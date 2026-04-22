@@ -245,6 +245,184 @@ export async function getVehicleById(tenantId: string, id: string): Promise<Vehi
   return data as Vehicle | null
 }
 
+/** Minimal row for vehicle typeahead search (API + dashboard). */
+export type VehicleSearchHit = {
+  id: string
+  vin: string | null
+  license_plate: string | null
+  year: number | null
+  make: string | null
+  model: string | null
+  customer_name: string | null
+  customer_phone: string | null
+}
+
+type VehicleSearchCustomer = {
+  first_name: string
+  last_name: string
+  phone: string | null
+}
+
+type VehicleSearchRow = {
+  id: string
+  vin: string | null
+  license_plate: string | null
+  year: number | null
+  make: string | null
+  model: string | null
+  updated_at: string
+  customer_id: string | null
+  customer: VehicleSearchCustomer | VehicleSearchCustomer[] | null
+}
+
+function normalizeVehicleCustomer(
+  c: VehicleSearchCustomer | VehicleSearchCustomer[] | null,
+): VehicleSearchCustomer | null {
+  if (!c) return null
+  return Array.isArray(c) ? c[0] ?? null : c
+}
+
+function vehicleSearchHitFromRow(row: VehicleSearchRow): VehicleSearchHit {
+  const c = normalizeVehicleCustomer(row.customer)
+  const name = c ? [c.first_name, c.last_name].filter(Boolean).join(' ').trim() : ''
+  return {
+    id: row.id,
+    vin: row.vin,
+    license_plate: row.license_plate,
+    year: row.year,
+    make: row.make,
+    model: row.model,
+    customer_name: name || null,
+    customer_phone: c?.phone ?? null,
+  }
+}
+
+/** Normalize search term; avoid `%`/`,` in `.or()` filter strings (breaks PostgREST parsing). */
+function sanitizeVehicleSearchTerm(raw: string): string {
+  return raw.trim().replace(/[%_,]/g, '').replace(/\s+/g, ' ').slice(0, 80)
+}
+
+function vehicleSearchSelect(): string {
+  return `
+    id,
+    vin,
+    license_plate,
+    year,
+    make,
+    model,
+    updated_at,
+    customer_id,
+    customer:customers(first_name, last_name, phone)
+  `
+}
+
+/**
+ * Case-insensitive partial match on VIN, plate, make, model, year (exact when numeric),
+ * plus customer name/phone via linked customers.
+ *
+ * Vehicle-side matching uses `.ilike()` per column (reliable encoding) instead of a raw
+ * `.or('vin.ilike.%x%,…')` string, which PostgREST often misparses when `%` is unquoted.
+ */
+export async function searchVehiclesForTenant(
+  tenantId: string,
+  query: string,
+  limit = 8,
+): Promise<VehicleSearchHit[]> {
+  if (!hasValue(tenantId)) return []
+
+  const term = sanitizeVehicleSearchTerm(query)
+  if (!term) return []
+
+  const supabase = await createClient()
+  const pat = `%${term}%`
+  const selectVehicles = vehicleSearchSelect()
+
+  const vehBase = () =>
+    supabase.from('vehicles').select(selectVehicles).eq('tenant_id', tenantId)
+
+  const vehOrdered = (q: ReturnType<typeof vehBase>) =>
+    q.order('updated_at', { ascending: false }).limit(limit)
+
+  const vehicleFieldQueries = [
+    vehOrdered(vehBase().ilike('vin', pat)),
+    vehOrdered(vehBase().ilike('license_plate', pat)),
+    vehOrdered(vehBase().ilike('make', pat)),
+    vehOrdered(vehBase().ilike('model', pat)),
+  ] as const
+
+  const yearNum = /^\d+$/.test(term) ? parseInt(term, 10) : NaN
+  const yearQuery =
+    Number.isFinite(yearNum) && yearNum >= 1900 && yearNum <= 2100
+      ? vehOrdered(vehBase().eq('year', yearNum))
+      : null
+
+  const customersQuery = supabase
+    .from('customers')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .or(`first_name.ilike.${pat},last_name.ilike.${pat},phone.ilike.${pat}`)
+    .limit(80)
+
+  // Order: vin, plate, make, model, [year], customers — keeps slice indices stable.
+  const allQueries = [
+    ...vehicleFieldQueries,
+    ...(yearQuery ? [yearQuery] : []),
+    customersQuery,
+  ]
+
+  const results = await Promise.all(allQueries)
+
+  const sliceEnd = 4 + (yearQuery ? 1 : 0)
+  const vehicleResSlice = results.slice(0, sliceEnd)
+  const customersResFixed = results[sliceEnd] as {
+    data: { id: string }[] | null
+    error: { message: string } | null
+  }
+
+  for (let i = 0; i < vehicleResSlice.length; i++) {
+    const res = vehicleResSlice[i] as { error?: { message: string } | null }
+    if (res.error) {
+      console.error(`[searchVehiclesForTenant] vehicle query ${i}:`, res.error.message)
+    }
+  }
+  if (customersResFixed.error) {
+    console.error('[searchVehiclesForTenant] customers:', customersResFixed.error.message)
+  }
+
+  const byId = new Map<string, VehicleSearchRow>()
+
+  for (const res of vehicleResSlice) {
+    for (const row of (res as { data: unknown[] | null }).data ?? []) {
+      byId.set((row as VehicleSearchRow).id, row as VehicleSearchRow)
+    }
+  }
+
+  const customerIds = (customersResFixed.data ?? []).map(r => r.id).filter(Boolean)
+  if (customerIds.length > 0) {
+    const { data: byCustomer, error: vErr } = await supabase
+      .from('vehicles')
+      .select(selectVehicles)
+      .eq('tenant_id', tenantId)
+      .in('customer_id', customerIds)
+      .order('updated_at', { ascending: false })
+      .limit(limit * 2)
+
+    if (vErr) {
+      console.error('[searchVehiclesForTenant] byCustomer:', vErr.message)
+    } else {
+      for (const row of (byCustomer ?? []) as unknown as VehicleSearchRow[]) {
+        if (!byId.has(row.id)) byId.set(row.id, row)
+      }
+    }
+  }
+
+  const merged = [...byId.values()].sort(
+    (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+  )
+
+  return merged.slice(0, limit).map(vehicleSearchHitFromRow)
+}
+
 export async function getVehicleCount(tenantId: string): Promise<number> {
   if (!hasValue(tenantId)) return 0
 

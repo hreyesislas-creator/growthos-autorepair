@@ -1,4 +1,7 @@
+'use client'
+
 import Link from 'next/link'
+import VehicleSearchInput from '@/components/vehicles/VehicleSearchInput'
 
 interface TopbarProps {
   title: string
@@ -11,9 +14,14 @@ interface TopbarProps {
 export default function Topbar({ title, subtitle, action, quickLinks }: TopbarProps) {
   return (
     <header className="dash-topbar">
-      <div className="topbar-heading">
-        <span className="topbar-title">{title}</span>
-        {subtitle && <span className="topbar-sub">&nbsp;· {subtitle}</span>}
+      <div className="topbar-left">
+        <div className="topbar-heading">
+          <span className="topbar-title">{title}</span>
+          {subtitle && <span className="topbar-sub">&nbsp;· {subtitle}</span>}
+        </div>
+      </div>
+      <div className="topbar-search" aria-label="Vehicle quick search">
+        <VehicleSearchInput />
       </div>
       <div className="topbar-right">
         {quickLinks && quickLinks.length > 0 && (
