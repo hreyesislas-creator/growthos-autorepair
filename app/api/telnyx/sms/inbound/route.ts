@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, received: false, error: 'read_failed' }, { status: 200 })
   }
 
-  let parsed: unknown = null
+  let payload: unknown = null
   let parseError: string | null = null
 
   const trimmed = rawText.trim()
@@ -104,7 +104,7 @@ export async function POST(request: NextRequest) {
     })
   } else {
     try {
-      parsed = JSON.parse(trimmed) as unknown
+      payload = JSON.parse(trimmed) as unknown
     } catch (err) {
       parseError = err instanceof Error ? err.message : 'invalid_json'
       console.warn('[Telnyx SMS Inbound] Invalid JSON', {
@@ -116,7 +116,22 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const extracted = parseError ? extractTelnyxMessagingFields(null) : extractTelnyxMessagingFields(parsed)
+  if (!parseError) {
+    try {
+      console.log('[TELNYX FULL PAYLOAD]', JSON.stringify(payload, null, 2))
+    } catch (stringifyErr) {
+      console.warn('[Telnyx SMS Inbound] Full payload JSON.stringify failed', {
+        error: stringifyErr instanceof Error ? stringifyErr.message : String(stringifyErr),
+      })
+    }
+  }
+
+  console.log('[TELNYX HEADERS]', {
+    signature: request.headers.get('telnyx-signature-ed25519'),
+    timestamp: request.headers.get('telnyx-timestamp'),
+  })
+
+  const extracted = parseError ? extractTelnyxMessagingFields(null) : extractTelnyxMessagingFields(payload)
 
   console.log('[Telnyx SMS Inbound] Webhook received', {
     eventType: extracted.eventType,
