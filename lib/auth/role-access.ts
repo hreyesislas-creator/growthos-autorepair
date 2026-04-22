@@ -180,3 +180,8 @@ export function canReadModule(role: AppRole, module: AppModule): boolean {
   const a = getModuleAccessLevel(role, module)
   return a === 'read' || a === 'edit'
 }
+
+/** Post internal shop announcements (technicians are read-only consumers). */
+export function canManageShopAnnouncements(role: AppRole): boolean {
+  return isAdmin(role) || role === 'service_advisor'
+}

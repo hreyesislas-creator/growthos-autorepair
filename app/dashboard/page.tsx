@@ -15,7 +15,7 @@ import {
   getRevenueOpportunitiesSummary,
   getInspections,
   getTechnicianWeekWorkOrderMetrics,
-  type ShopMessageFeedEntry,
+  getShopAnnouncementsForTenant,
 } from '@/lib/queries'
 import { getFinancialDashboardData } from '@/lib/financial-queries'
 import { getCurrentAppRoleForTenant } from '@/lib/auth/roles'
@@ -212,12 +212,12 @@ export default async function DashboardPage() {
 
   if (role === 'technician') {
     const technicianId = dashboardDu?.tenantUserId ?? null
-    // No tenant-wide message_logs here: that feed includes other customers' SMS/email bodies.
-    const [workOrders, inspections, metrics] = technicianId
+    const [workOrders, inspections, metrics, shopAnnouncements] = technicianId
       ? await Promise.all([
           getWorkOrdersForTenant(tenantId, 200, { technicianIdEq: technicianId }),
           getInspections(tenantId, { technicianIdEq: technicianId }),
           getTechnicianWeekWorkOrderMetrics(tenantId, technicianId),
+          getShopAnnouncementsForTenant(tenantId, 20),
         ])
       : await Promise.all([
           Promise.resolve([]),
@@ -227,8 +227,8 @@ export default async function DashboardPage() {
             completedThisWeek: 0,
             averageTicket: 0,
           }),
+          getShopAnnouncementsForTenant(tenantId, 20),
         ])
-    const shopMessages: ShopMessageFeedEntry[] = []
 
     return (
       <>
@@ -238,7 +238,7 @@ export default async function DashboardPage() {
             workOrders={workOrders}
             inspections={inspections}
             performance={metrics}
-            shopMessages={shopMessages}
+            shopAnnouncements={shopAnnouncements}
             missingTechnicianProfile={!technicianId}
           />
         </div>

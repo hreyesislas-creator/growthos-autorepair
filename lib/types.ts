@@ -421,6 +421,18 @@ export interface InspectionItemPhoto {
   uploaded_at: string
 }
 
+// ── Internal shop announcements (not customer message_logs) ───
+
+export interface ShopAnnouncement {
+  id: string
+  tenant_id: string
+  title: string
+  message: string
+  created_at: string
+  /** tenant_users.id of author, if recorded */
+  created_by: string | null
+}
+
 // ── Communications types ──────────────────────────────────────
 
 export interface MessageTemplate {

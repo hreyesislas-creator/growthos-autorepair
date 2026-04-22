@@ -1,7 +1,6 @@
 import Link from 'next/link'
 import { differenceInCalendarDays, format, parseISO, startOfDay } from 'date-fns'
-import type { InspectionRow, WorkOrder } from '@/lib/types'
-import type { ShopMessageFeedEntry } from '@/lib/queries'
+import type { InspectionRow, ShopAnnouncement, WorkOrder } from '@/lib/types'
 import { getCustomerName, getVehicleDisplay } from '@/lib/queries'
 import StatusBadge from '@/components/dashboard/StatusBadge'
 
@@ -10,6 +9,12 @@ export type TechnicianPerformanceSnapshot = {
   completedThisWeek: number
   averageTicket: number
 }
+
+/** Actionable work orders only (operator queue). */
+const ACTIONABLE_WORK_ORDER_STATUSES = new Set<string>(['ready', 'in_progress'])
+
+/** Actionable inspections only (operator queue). */
+const ACTIONABLE_INSPECTION_STATUSES = new Set<string>(['draft', 'in_progress'])
 
 type AgingBucket = 'fresh' | 'recent' | 'stale' | 'urgent'
 
@@ -27,17 +32,24 @@ function agingBucket(days: number): AgingBucket {
   return 'urgent'
 }
 
-type MyWorkRow = {
+type QueueRow = {
   key: string
   href: string
-  kind: 'Work order' | 'Inspection'
   primary: string
   secondary: string
+  meta?: string | null
   status: string
   agingLine: string
   agingBucket: AgingBucket
   sortA: number
   sortB: string
+}
+
+function sortOldestFirst(rows: QueueRow[]) {
+  rows.sort((a, b) => {
+    if (b.sortA !== a.sortA) return b.sortA - a.sortA
+    return a.sortB.localeCompare(b.sortB)
+  })
 }
 
 const sectionLabel: React.CSSProperties = {
@@ -49,30 +61,126 @@ const sectionLabel: React.CSSProperties = {
   marginBottom: 12,
 }
 
+function QueueSection({
+  title,
+  subtitle,
+  rows,
+  emptyText,
+  accentColor,
+}: {
+  title: string
+  subtitle: string
+  rows: QueueRow[]
+  emptyText: string
+  accentColor: string
+}) {
+  return (
+    <section style={{ marginBottom: 28 }}>
+      <div style={sectionLabel}>{title}</div>
+      <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 12 }}>{subtitle}</div>
+      {rows.length === 0 ? (
+        <div
+          className="card"
+          style={{ padding: 20, textAlign: 'center', color: 'var(--text-3)', fontSize: 14 }}
+        >
+          {emptyText}
+        </div>
+      ) : (
+        <ul
+          style={{
+            listStyle: 'none',
+            padding: 0,
+            margin: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+          }}
+        >
+          {rows.map(r => (
+            <li key={r.key}>
+              <Link
+                href={r.href}
+                style={{
+                  display: 'block',
+                  textDecoration: 'none',
+                  color: 'inherit',
+                  padding: 14,
+                  borderRadius: 10,
+                  border: '1px solid var(--border-2)',
+                  borderLeft: `4px solid ${accentColor}`,
+                  background: 'var(--surface-2)',
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'flex-start',
+                    gap: 12,
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>
+                      {r.primary}
+                    </div>
+                    <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 4 }}>
+                      {r.secondary}
+                    </div>
+                    {r.meta ? (
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: 'var(--text-3)',
+                          marginTop: 6,
+                          fontFamily: 'var(--font-mono)',
+                        }}
+                      >
+                        {r.meta}
+                      </div>
+                    ) : null}
+                  </div>
+                  <StatusBadge status={r.status} />
+                </div>
+                <div
+                  className={`pipeline-aging pipeline-aging--${r.agingBucket}`}
+                  style={{
+                    marginTop: 10,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 8,
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <span>{r.agingLine}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)' }}>
+                    Open →
+                  </span>
+                </div>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
 export default async function TechnicianOverview({
   workOrders,
   inspections,
   performance,
-  shopMessages,
+  shopAnnouncements,
   missingTechnicianProfile,
 }: {
   workOrders: WorkOrder[]
   inspections: InspectionRow[]
   performance: TechnicianPerformanceSnapshot
-  shopMessages: ShopMessageFeedEntry[]
+  shopAnnouncements: ShopAnnouncement[]
   missingTechnicianProfile: boolean
 }) {
-  /**
-   * My work — v1 status rules (operator queue, not full history):
-   * - Work orders: `draft`, `ready`, `in_progress` only (excludes `completed`, `invoiced`).
-   * - Inspections: `draft`, `in_progress` only (excludes `completed`, `sent` — done / customer-facing).
-   */
-  const activeWo = workOrders.filter(
-    w => w.status !== 'completed' && w.status !== 'invoiced',
-  )
-  const activeInsp = inspections.filter(
-    i => i.status === 'draft' || i.status === 'in_progress',
-  )
+  const activeWo = workOrders.filter(w => ACTIONABLE_WORK_ORDER_STATUSES.has(w.status))
+  const activeInsp = inspections.filter(i => ACTIONABLE_INSPECTION_STATUSES.has(i.status))
 
   const custIds = new Set<string>()
   const vehIds = new Set<string>()
@@ -92,22 +200,21 @@ export default async function TechnicianOverview({
   const customerNames = new Map(custPairs)
   const vehicleLabels = new Map(vehPairs)
 
-  const rows: MyWorkRow[] = []
-
+  const jobRows: QueueRow[] = []
   for (const w of activeWo) {
     const cust = w.customer_id ? customerNames.get(w.customer_id) ?? '—' : '—'
     const veh = w.vehicle_id ? vehicleLabels.get(w.vehicle_id) ?? '—' : '—'
     const days = calendarAgeDays(w.updated_at)
     const bucket = agingBucket(days)
     const suf = days <= 0 ? 'today' : days === 1 ? '1 day' : days < 5 ? `${days} days` : '5+ days'
-    const agingLine = days <= 0 ? 'Updated today' : `Open · ${suf}`
+    const agingLine = days <= 0 ? 'Updated today' : `Waiting · ${suf}`
 
-    rows.push({
+    jobRows.push({
       key: `wo-${w.id}`,
       href: `/dashboard/work-orders/${w.id}`,
-      kind: 'Work order',
       primary: cust,
       secondary: veh,
+      meta: w.work_order_number?.trim() ? `WO ${w.work_order_number}` : null,
       status: w.status,
       agingLine,
       agingBucket: bucket,
@@ -115,7 +222,9 @@ export default async function TechnicianOverview({
       sortB: w.updated_at,
     })
   }
+  sortOldestFirst(jobRows)
 
+  const inspectionRows: QueueRow[] = []
   for (const i of activeInsp) {
     const cust = i.customer
       ? `${i.customer.first_name} ${i.customer.last_name ?? ''}`.trim()
@@ -130,14 +239,14 @@ export default async function TechnicianOverview({
     const days = calendarAgeDays(i.updated_at)
     const bucket = agingBucket(days)
     const suf = days <= 0 ? 'today' : days === 1 ? '1 day' : days < 5 ? `${days} days` : '5+ days'
-    const agingLine = days <= 0 ? 'Updated today' : `Inspect · ${suf}`
+    const agingLine = days <= 0 ? 'Updated today' : `Pending · ${suf}`
 
-    rows.push({
+    inspectionRows.push({
       key: `insp-${i.id}`,
       href: `/dashboard/inspections/${i.id}`,
-      kind: 'Inspection',
       primary: cust || '—',
       secondary: veh || '—',
+      meta: null,
       status: i.status,
       agingLine,
       agingBucket: bucket,
@@ -145,11 +254,7 @@ export default async function TechnicianOverview({
       sortB: i.updated_at,
     })
   }
-
-  rows.sort((a, b) => {
-    if (b.sortA !== a.sortA) return b.sortA - a.sortA
-    return a.sortB.localeCompare(b.sortB)
-  })
+  sortOldestFirst(inspectionRows)
 
   const fmtMoney = (n: number) =>
     `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -169,78 +274,21 @@ export default async function TechnicianOverview({
         </div>
       )}
 
-      <section style={{ marginBottom: 24 }}>
-        <div style={sectionLabel}>My work</div>
-        <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 12 }}>
-          Assigned jobs and inspections — oldest activity first.
-        </div>
-        {rows.length === 0 ? (
-          <div
-            className="card"
-            style={{ padding: 24, textAlign: 'center', color: 'var(--text-3)' }}
-          >
-            Nothing assigned right now. Check back soon.
-          </div>
-        ) : (
-          <ul
-            style={{
-              listStyle: 'none',
-              padding: 0,
-              margin: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 10,
-            }}
-          >
-            {rows.map(r => (
-              <li key={r.key}>
-                <Link
-                  href={r.href}
-                  style={{
-                    display: 'block',
-                    textDecoration: 'none',
-                    color: 'inherit',
-                    padding: 14,
-                    borderRadius: 10,
-                    border: '1px solid var(--border-2)',
-                    background: 'var(--surface-2)',
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'flex-start',
-                      gap: 12,
-                    }}
-                  >
-                    <div>
-                      <div
-                        style={{
-                          fontSize: 10,
-                          fontWeight: 700,
-                          color: 'var(--text-3)',
-                          textTransform: 'uppercase',
-                        }}
-                      >
-                        {r.kind}
-                      </div>
-                      <div style={{ fontSize: 15, fontWeight: 700, marginTop: 4 }}>{r.primary}</div>
-                      <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 4 }}>
-                        {r.secondary}
-                      </div>
-                    </div>
-                    <StatusBadge status={r.status} />
-                  </div>
-                  <div className={`pipeline-aging pipeline-aging--${r.agingBucket}`} style={{ marginTop: 10 }}>
-                    {r.agingLine}
-                  </div>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <QueueSection
+        title="My active jobs"
+        subtitle="Work orders in ready or in progress — oldest first. Tap a row to open the job."
+        rows={jobRows}
+        emptyText="No active jobs assigned. When a job is ready or in progress under your name, it will show here."
+        accentColor="#2563eb"
+      />
+
+      <QueueSection
+        title="My pending inspections"
+        subtitle="Inspections to finish — draft or in progress, oldest first."
+        rows={inspectionRows}
+        emptyText="No pending inspections assigned."
+        accentColor="#ca8a04"
+      />
 
       <section style={{ marginBottom: 24 }}>
         <div style={sectionLabel}>My performance</div>
@@ -291,36 +339,37 @@ export default async function TechnicianOverview({
       </section>
 
       <section style={{ marginBottom: 24 }}>
-        <div style={sectionLabel}>Shop messages</div>
+        <div style={sectionLabel}>Shop announcements</div>
         <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 12 }}>
-          Shop-wide customer messaging is limited to service staff. Ask your advisor for customer
-          updates or shop announcements.
+          Internal updates from your service team — not customer texts.
         </div>
-        {shopMessages.length === 0 ? (
+        {shopAnnouncements.length === 0 ? (
           <div className="card" style={{ padding: 20, color: 'var(--text-3)' }}>
-            No messages in your view.
+            No announcements yet. Your advisor will post shop updates here.
           </div>
         ) : (
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-              {shopMessages.map(m => (
+              {shopAnnouncements.map(a => (
                 <li
-                  key={m.id}
+                  key={a.id}
                   style={{
                     padding: '12px 16px',
                     borderBottom: '1px solid var(--border-2)',
+                    borderLeft: '3px solid #6366f1',
                   }}
                 >
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{m.title}</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>{a.title}</div>
                   <div
                     style={{
                       fontSize: 13,
                       color: 'var(--text-2)',
                       marginTop: 6,
                       whiteSpace: 'pre-wrap',
+                      lineHeight: 1.45,
                     }}
                   >
-                    {m.message}
+                    {a.message}
                   </div>
                   <div
                     style={{
@@ -330,7 +379,7 @@ export default async function TechnicianOverview({
                       fontFamily: 'var(--font-mono)',
                     }}
                   >
-                    {format(parseISO(m.created_at), 'MMM d, h:mm a')}
+                    {format(parseISO(a.created_at), 'MMM d, yyyy · h:mm a')}
                   </div>
                 </li>
               ))}

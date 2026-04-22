@@ -7,7 +7,11 @@ import { useState } from 'react'
 import type { Lang } from '@/lib/i18n'
 import { t } from '@/lib/i18n'
 import type { AppRole } from '@/lib/auth/role-access'
-import { appModuleForDashboardNavHref, canAccessModule } from '@/lib/auth/role-access'
+import {
+  appModuleForDashboardNavHref,
+  canAccessModule,
+  canManageShopAnnouncements,
+} from '@/lib/auth/role-access'
 
 const NAV = [
   { href: '/dashboard',               icon: '▦',  key: 'nav_overview'       },
@@ -65,6 +69,7 @@ export default function Sidebar({ tenantName, tenantPlan, initialLang, appRole }
   }
 
   const navAllowed = (href: string) => {
+    if (href === '/dashboard/announcements') return canManageShopAnnouncements(appRole)
     const m = appModuleForDashboardNavHref(href)
     return m != null && canAccessModule(appRole, m)
   }

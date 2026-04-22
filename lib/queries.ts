@@ -46,6 +46,7 @@ import type {
   InvoiceItem,
   InvoiceWithItems,
   CallLog,
+  ShopAnnouncement,
 } from '@/lib/types'
 
 const APPOINTMENT_DATE_COLUMN = 'appointment_date'
@@ -603,6 +604,32 @@ export async function getShopMessageFeedEntries(
       created_at: (row as { created_at: string }).created_at,
     }
   })
+}
+
+/**
+ * Latest internal shop announcements for the tenant (session RLS).
+ * Technicians and shop staff may read; viewers excluded by RLS.
+ */
+export async function getShopAnnouncementsForTenant(
+  tenantId: string,
+  limit = 25,
+): Promise<ShopAnnouncement[]> {
+  if (!hasValue(tenantId)) return []
+
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from('shop_announcements')
+    .select('id, tenant_id, title, message, created_at, created_by')
+    .eq('tenant_id', tenantId)
+    .order('created_at', { ascending: false })
+    .limit(Math.min(Math.max(limit, 1), 100))
+
+  if (error) {
+    console.error('[getShopAnnouncementsForTenant]', error.message)
+    return []
+  }
+
+  return (data ?? []) as ShopAnnouncement[]
 }
 
 export async function getMessageTemplates(tenantId: string): Promise<MessageTemplate[]> {

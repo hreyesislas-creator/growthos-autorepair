@@ -11,6 +11,7 @@ import {
   normalizeAppRole,
   canAccessModule,
   canEditModule,
+  canManageShopAnnouncements,
   type AppRole,
   type AppModule,
 } from './role-access'
@@ -75,6 +76,12 @@ export async function getAppRoleForUserInTenant(
 export async function assertCanAccessDashboardModule(module: AppModule): Promise<void> {
   const role = await getCurrentAppRoleForTenant()
   if (!canAccessModule(role, module)) redirect('/dashboard')
+}
+
+/** Shop announcements management (admin / service advisor only). */
+export async function assertCanManageShopAnnouncements(): Promise<void> {
+  const role = await getCurrentAppRoleForTenant()
+  if (!canManageShopAnnouncements(role)) redirect('/dashboard')
 }
 
 /** Server action helper: returns `{ error }` if the role cannot edit the module. */
