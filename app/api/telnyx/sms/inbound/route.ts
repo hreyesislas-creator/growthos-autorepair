@@ -83,9 +83,9 @@ export async function POST(request: NextRequest) {
   const signaturePresent = Boolean(request.headers.get('telnyx-signature-ed25519'))
   const timestampHeader = request.headers.get('telnyx-timestamp')
 
-  let rawText = ''
+  let rawBody = ''
   try {
-    rawText = await request.text()
+    rawBody = await request.text()
   } catch (err) {
     console.error('[Telnyx SMS Inbound] Failed to read request body', {
       error: err instanceof Error ? err.message : String(err),
@@ -96,7 +96,7 @@ export async function POST(request: NextRequest) {
   let payload: unknown = null
   let parseError: string | null = null
 
-  const trimmed = rawText.trim()
+  const trimmed = rawBody.trim()
   if (trimmed.length === 0) {
     console.warn('[Telnyx SMS Inbound] Empty body', {
       signaturePresent,
@@ -144,12 +144,26 @@ export async function POST(request: NextRequest) {
     telnyxTimestamp: timestampHeader,
   })
 
-  return NextResponse.json(
+  return new Response(
+    JSON.stringify(
+      {
+        ok: true,
+        payload,
+        rawBody,
+        headers: {
+          signature: request.headers.get('telnyx-signature-ed25519'),
+          timestamp: request.headers.get('telnyx-timestamp'),
+          contentType: request.headers.get('content-type'),
+        },
+      },
+      null,
+      2
+    ),
     {
-      ok: true,
-      received: true,
-      ...(parseError ? { parseError: true } : {}),
-    },
-    { status: 200 }
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+      },
+    }
   )
 }
