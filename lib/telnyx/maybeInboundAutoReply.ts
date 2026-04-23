@@ -81,6 +81,12 @@ export async function maybeSendInboundAutoReply(
     return
   }
 
+  console.log('[AUTO REPLY] Attempting send', {
+    from: toPhone,
+    to: fromPhone,
+    text: replyText,
+  })
+
   const sendResult = await sendTelnyxMessage({
     from: toPhone,
     to: fromPhone,
@@ -88,6 +94,10 @@ export async function maybeSendInboundAutoReply(
   })
 
   if (!sendResult.ok) {
+    console.error(
+      '[AUTO REPLY] Send failed',
+      sendResult.json ?? sendResult.error
+    )
     console.error('[Telnyx SMS Inbound] Auto-reply send failed', {
       error: sendResult.error,
       status: sendResult.status,
@@ -97,6 +107,8 @@ export async function maybeSendInboundAutoReply(
     })
     return
   }
+
+  console.log('[AUTO REPLY] Send success', sendResult.json)
 
   const providerMessageId = telnyxProviderMessageIdFromSendResponse(sendResult.json)
 
