@@ -162,32 +162,6 @@ export async function POST(request: NextRequest) {
       } else {
         console.log('[TELNYX INSERT SUCCEEDED]')
       }
-
-      const smokeEventId = `${extracted.eventId}__smoke_${Date.now()}`
-      const smokeProcessedAt = new Date().toISOString()
-      console.log('[TELNYX ABOUT TO INSERT EVENT]')
-      const { error: smokeInsertError } = await supabase.from('telnyx_inbound_events').insert({
-        ...insertRow,
-        event_id: smokeEventId,
-        processed_at: smokeProcessedAt,
-      })
-
-      if (smokeInsertError) {
-        console.log('[TELNYX INSERT ERROR]', smokeInsertError)
-        if (smokeInsertError.code === PG_UNIQUE_VIOLATION) {
-          console.log('[Telnyx SMS Inbound] Duplicate event_id (already stored)', {
-            eventId: smokeEventId,
-          })
-        } else {
-          console.error('[Telnyx SMS Inbound] Failed to insert telnyx_inbound_events', {
-            error: smokeInsertError.message,
-            code: smokeInsertError.code,
-            eventId: smokeEventId,
-          })
-        }
-      } else {
-        console.log('[TELNYX INSERT SUCCEEDED]')
-      }
     } catch (persistErr) {
       console.error('[TELNYX PERSISTENCE BLOCK FAILED]', {
         error: persistErr instanceof Error ? persistErr.message : String(persistErr),
