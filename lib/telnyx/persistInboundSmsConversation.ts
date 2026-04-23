@@ -9,6 +9,11 @@ import type { ExtractedTelnyxInboundMessage } from '@/lib/telnyx/extractInboundM
 
 const PG_UNIQUE_VIOLATION = '23505'
 
+export type PersistInboundSmsConversationResult = {
+  conversationId: string | null
+  inboundMessageInserted: boolean
+}
+
 async function ensureConversationId(
   supabase: SupabaseClient,
   tenantId: string,
@@ -61,16 +66,16 @@ export async function persistInboundSmsConversation(
     extracted: ExtractedTelnyxInboundMessage
     payload: Record<string, unknown>
   }
-): Promise<void> {
+): Promise<PersistInboundSmsConversationResult> {
   const { tenantId, extracted, payload } = params
   const fromPhone = extracted.fromPhone
   if (!fromPhone) {
-    return
+    return { conversationId: null, inboundMessageInserted: false }
   }
 
   const conversationId = await ensureConversationId(supabase, tenantId, fromPhone)
   if (!conversationId) {
-    return
+    return { conversationId: null, inboundMessageInserted: false }
   }
 
   const nowIso = new Date().toISOString()
@@ -101,7 +106,7 @@ export async function persistInboundSmsConversation(
         conversationId,
       })
     }
-    return
+    return { conversationId, inboundMessageInserted: false }
   }
 
   const { error: convUpdateError } = await supabase
@@ -116,4 +121,6 @@ export async function persistInboundSmsConversation(
       conversationId,
     })
   }
+
+  return { conversationId, inboundMessageInserted: true }
 }

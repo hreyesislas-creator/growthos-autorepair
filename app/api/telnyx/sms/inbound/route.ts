@@ -1,12 +1,13 @@
 /**
  * Telnyx inbound SMS webhook.
- * Acknowledges with 200; persists events (deduped by event_id); no auto-reply.
+ * Acknowledges with 200; persists events (deduped by event_id); optional fixed auto-reply.
  */
 
 import {
   emptyExtractedTelnyxInboundMessage,
   extractTelnyxInboundMessage,
 } from '@/lib/telnyx/extractInboundMessage'
+import { maybeSendInboundAutoReply } from '@/lib/telnyx/maybeInboundAutoReply'
 import { persistInboundSmsConversation } from '@/lib/telnyx/persistInboundSmsConversation'
 import { verifyTelnyxWebhookSignature } from '@/lib/telnyx/verifyWebhookSignature'
 import { createAdminClient } from '@/lib/supabase/server'
@@ -188,11 +189,34 @@ export async function POST(request: NextRequest) {
         !insertError || insertError.code === PG_UNIQUE_VIOLATION
 
       if (telnyxInboundPersisted && tenantId && extracted.fromPhone) {
-        await persistInboundSmsConversation(supabase, {
+        const persistSms = await persistInboundSmsConversation(supabase, {
           tenantId,
           extracted,
           payload: payload as Record<string, unknown>,
         })
+
+        if (
+          tenantId &&
+          persistSms.conversationId &&
+          persistSms.inboundMessageInserted
+        ) {
+          try {
+            await maybeSendInboundAutoReply(supabase, {
+              tenantId,
+              conversationId: persistSms.conversationId,
+              extracted,
+            })
+          } catch (autoReplyErr) {
+            console.error('[Telnyx SMS Inbound] Auto-reply unexpected error', {
+              error:
+                autoReplyErr instanceof Error
+                  ? autoReplyErr.message
+                  : String(autoReplyErr),
+              tenantId,
+              conversationId: persistSms.conversationId,
+            })
+          }
+        }
       } else if (!tenantId || !extracted.fromPhone) {
         console.warn('[Telnyx SMS Inbound] Skipping sms conversation layer: missing tenant_id or fromPhone', {
           hasTenantId: Boolean(tenantId),
