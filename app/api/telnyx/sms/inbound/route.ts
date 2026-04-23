@@ -7,6 +7,8 @@ import {
   emptyExtractedTelnyxInboundMessage,
   extractTelnyxInboundMessage,
 } from '@/lib/telnyx/extractInboundMessage'
+import { persistInboundSmsConversation } from '@/lib/telnyx/persistInboundSmsConversation'
+import { verifyTelnyxWebhookSignature } from '@/lib/telnyx/verifyWebhookSignature'
 import { createAdminClient } from '@/lib/supabase/server'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -15,9 +17,6 @@ export const dynamic = 'force-dynamic'
 const PG_UNIQUE_VIOLATION = '23505'
 
 export async function POST(request: NextRequest) {
-  const signaturePresent = Boolean(request.headers.get('telnyx-signature-ed25519'))
-  const timestampHeader = request.headers.get('telnyx-timestamp')
-
   let rawBody = ''
   try {
     rawBody = await request.text()
@@ -27,6 +26,28 @@ export async function POST(request: NextRequest) {
     })
     return NextResponse.json({ ok: true }, { status: 200 })
   }
+
+  const signatureHeader = request.headers.get('telnyx-signature-ed25519')
+  const timestampHeader = request.headers.get('telnyx-timestamp')
+  const signaturePresent = Boolean(signatureHeader)
+
+  const verifyResult = verifyTelnyxWebhookSignature(
+    rawBody,
+    signatureHeader,
+    timestampHeader,
+    process.env.TELNYX_PUBLIC_KEY
+  )
+
+  if (!verifyResult.ok) {
+    if (verifyResult.error === 'missing_signature') {
+      console.log('[TELNYX SIGNATURE MISSING]')
+      return NextResponse.json({ ok: false, error: 'missing_signature' }, { status: 401 })
+    }
+    console.log('[TELNYX SIGNATURE INVALID]')
+    return NextResponse.json({ ok: false, error: 'invalid_signature' }, { status: 401 })
+  }
+
+  console.log('[TELNYX SIGNATURE VERIFIED]')
 
   let payload: unknown = null
   let parseError: string | null = null
@@ -161,6 +182,27 @@ export async function POST(request: NextRequest) {
         }
       } else {
         console.log('[TELNYX INSERT SUCCEEDED]')
+      }
+
+      const telnyxInboundPersisted =
+        !insertError || insertError.code === PG_UNIQUE_VIOLATION
+
+      if (telnyxInboundPersisted && tenantId && extracted.fromPhone) {
+        await persistInboundSmsConversation(supabase, {
+          tenantId,
+          extracted,
+          payload: payload as Record<string, unknown>,
+        })
+      } else if (!tenantId || !extracted.fromPhone) {
+        console.warn('[Telnyx SMS Inbound] Skipping sms conversation layer: missing tenant_id or fromPhone', {
+          hasTenantId: Boolean(tenantId),
+          hasFromPhone: Boolean(extracted.fromPhone),
+        })
+      } else {
+        console.warn('[Telnyx SMS Inbound] Skipping sms conversation layer: telnyx_inbound_events insert failed', {
+          code: insertError?.code,
+          message: insertError?.message,
+        })
       }
     } catch (persistErr) {
       console.error('[TELNYX PERSISTENCE BLOCK FAILED]', {
