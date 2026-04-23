@@ -1,83 +1,18 @@
 /**
- * Telnyx inbound SMS webhook (v1).
- * Acknowledges message.received (and other) events with 200; logs payload for inspection.
- * No persistence or auto-replies yet.
+ * Telnyx inbound SMS webhook.
+ * Acknowledges with 200; persists events (deduped by event_id); no auto-reply.
  */
 
+import {
+  emptyExtractedTelnyxInboundMessage,
+  extractTelnyxInboundMessage,
+} from '@/lib/telnyx/extractInboundMessage'
+import { createAdminClient } from '@/lib/supabase/server'
 import { NextRequest, NextResponse } from 'next/server'
 
 export const dynamic = 'force-dynamic'
 
-type ExtractedInbound = {
-  eventType: string | null
-  eventId: string | null
-  messageId: string | null
-  from: string | null
-  to: string | null
-  text: string | null
-}
-
-function extractTelnyxMessagingFields(body: unknown): ExtractedInbound {
-  const empty: ExtractedInbound = {
-    eventType: null,
-    eventId: null,
-    messageId: null,
-    from: null,
-    to: null,
-    text: null,
-  }
-
-  if (!body || typeof body !== 'object') return empty
-
-  const root = body as Record<string, unknown>
-  const data = root.data
-  if (!data || typeof data !== 'object') return empty
-
-  const d = data as Record<string, unknown>
-  const eventType = typeof d.event_type === 'string' ? d.event_type : null
-  const eventId = typeof d.id === 'string' ? d.id : null
-
-  const payload = d.payload
-  if (!payload || typeof payload !== 'object') {
-    return { ...empty, eventType, eventId }
-  }
-
-  const p = payload as Record<string, unknown>
-  const messageId = typeof p.id === 'string' ? p.id : null
-
-  let from: string | null = null
-  const fromVal = p.from
-  if (typeof fromVal === 'string') {
-    from = fromVal
-  } else if (fromVal && typeof fromVal === 'object') {
-    const pn = (fromVal as { phone_number?: unknown }).phone_number
-    if (typeof pn === 'string') from = pn
-  }
-
-  let to: string | null = null
-  const toVal = p.to
-  if (Array.isArray(toVal) && toVal.length > 0) {
-    const first = toVal[0]
-    if (first && typeof first === 'object') {
-      const pn = (first as { phone_number?: unknown }).phone_number
-      if (typeof pn === 'string') to = pn
-    } else if (typeof first === 'string') {
-      to = first
-    }
-  } else if (typeof toVal === 'string') {
-    to = toVal
-  }
-
-  let text: string | null = null
-  if (typeof p.text === 'string') {
-    text = p.text
-  } else if (p.body && typeof p.body === 'object' && p.body !== null) {
-    const inner = (p.body as { text?: unknown }).text
-    if (typeof inner === 'string') text = inner
-  }
-
-  return { eventType, eventId, messageId, from, to, text }
-}
+const PG_UNIQUE_VIOLATION = '23505'
 
 export async function POST(request: NextRequest) {
   const signaturePresent = Boolean(request.headers.get('telnyx-signature-ed25519'))
@@ -90,7 +25,7 @@ export async function POST(request: NextRequest) {
     console.error('[Telnyx SMS Inbound] Failed to read request body', {
       error: err instanceof Error ? err.message : String(err),
     })
-    return NextResponse.json({ ok: true, received: false, error: 'read_failed' }, { status: 200 })
+    return NextResponse.json({ ok: true }, { status: 200 })
   }
 
   let payload: unknown = null
@@ -131,39 +66,138 @@ export async function POST(request: NextRequest) {
     timestamp: request.headers.get('telnyx-timestamp'),
   })
 
-  const extracted = parseError ? extractTelnyxMessagingFields(null) : extractTelnyxMessagingFields(payload)
+  const extracted =
+    !parseError && payload !== null && typeof payload === 'object'
+      ? extractTelnyxInboundMessage(payload)
+      : emptyExtractedTelnyxInboundMessage()
 
   console.log('[Telnyx SMS Inbound] Webhook received', {
     eventType: extracted.eventType,
     eventId: extracted.eventId,
     messageId: extracted.messageId,
-    from: extracted.from,
-    to: extracted.to,
+    fromPhone: extracted.fromPhone,
+    toPhone: extracted.toPhone,
     text: extracted.text,
+    direction: extracted.direction,
+    receivedAt: extracted.receivedAt,
+    occurredAt: extracted.occurredAt,
+    messagingProfileId: extracted.messagingProfileId,
     signaturePresent,
     telnyxTimestamp: timestampHeader,
   })
 
-  return new Response(
-    JSON.stringify(
-      {
-        ok: true,
-        payload,
-        rawBody,
-        headers: {
-          signature: request.headers.get('telnyx-signature-ed25519'),
-          timestamp: request.headers.get('telnyx-timestamp'),
-          contentType: request.headers.get('content-type'),
-        },
-      },
-      null,
-      2
-    ),
-    {
-      status: 200,
-      headers: {
-        'content-type': 'application/json',
-      },
+  if (!parseError && payload !== null && typeof payload === 'object' && extracted.eventId) {
+    try {
+      const supabase = createAdminClient()
+
+      let tenantId: string | null = null
+      if (extracted.toPhone) {
+        const { data: phoneRow, error: phoneError } = await supabase
+          .from('tenant_phone_numbers')
+          .select('tenant_id')
+          .eq('phone_number', extracted.toPhone)
+          .eq('is_active', true)
+          .eq('provider', 'telnyx')
+          .maybeSingle()
+
+        if (phoneError) {
+          console.error('[Telnyx SMS Inbound] tenant_phone_numbers lookup failed', {
+            error: phoneError.message,
+            code: phoneError.code,
+            toPhone: extracted.toPhone,
+          })
+        } else if (phoneRow?.tenant_id) {
+          tenantId = phoneRow.tenant_id as string
+        } else {
+          console.warn('[Telnyx SMS Inbound] No tenant match for inbound number', {
+            toPhone: extracted.toPhone,
+          })
+        }
+      } else {
+        console.warn('[Telnyx SMS Inbound] No to_phone in payload; tenant_id will be null')
+      }
+
+      const processedAt = new Date().toISOString()
+
+      console.log('[TELNYX PERSISTENCE BLOCK ENTERED]', {
+        eventId: extracted.eventId,
+        eventType: extracted.eventType,
+        fromPhone: extracted.fromPhone,
+        toPhone: extracted.toPhone,
+        hasPayloadObject: payload !== null && typeof payload === 'object',
+        parseError,
+      })
+
+      const insertRow = {
+        tenant_id: tenantId,
+        provider: 'telnyx',
+        event_id: extracted.eventId,
+        message_id: extracted.messageId,
+        event_type: extracted.eventType,
+        from_phone: extracted.fromPhone,
+        to_phone: extracted.toPhone,
+        message_text: extracted.text,
+        raw_payload: payload as Record<string, unknown>,
+        occurred_at: extracted.occurredAt,
+        received_at: extracted.receivedAt,
+        processed_at: processedAt,
+      }
+
+      console.log('[TELNYX ABOUT TO INSERT EVENT]')
+      const { error: insertError } = await supabase.from('telnyx_inbound_events').insert(insertRow)
+
+      if (insertError) {
+        console.log('[TELNYX INSERT ERROR]', insertError)
+        if (insertError.code === PG_UNIQUE_VIOLATION) {
+          console.log('[Telnyx SMS Inbound] Duplicate event_id (already stored)', {
+            eventId: extracted.eventId,
+          })
+        } else {
+          console.error('[Telnyx SMS Inbound] Failed to insert telnyx_inbound_events', {
+            error: insertError.message,
+            code: insertError.code,
+            eventId: extracted.eventId,
+          })
+        }
+      } else {
+        console.log('[TELNYX INSERT SUCCEEDED]')
+      }
+
+      const smokeEventId = `${extracted.eventId}__smoke_${Date.now()}`
+      const smokeProcessedAt = new Date().toISOString()
+      console.log('[TELNYX ABOUT TO INSERT EVENT]')
+      const { error: smokeInsertError } = await supabase.from('telnyx_inbound_events').insert({
+        ...insertRow,
+        event_id: smokeEventId,
+        processed_at: smokeProcessedAt,
+      })
+
+      if (smokeInsertError) {
+        console.log('[TELNYX INSERT ERROR]', smokeInsertError)
+        if (smokeInsertError.code === PG_UNIQUE_VIOLATION) {
+          console.log('[Telnyx SMS Inbound] Duplicate event_id (already stored)', {
+            eventId: smokeEventId,
+          })
+        } else {
+          console.error('[Telnyx SMS Inbound] Failed to insert telnyx_inbound_events', {
+            error: smokeInsertError.message,
+            code: smokeInsertError.code,
+            eventId: smokeEventId,
+          })
+        }
+      } else {
+        console.log('[TELNYX INSERT SUCCEEDED]')
+      }
+    } catch (persistErr) {
+      console.error('[TELNYX PERSISTENCE BLOCK FAILED]', {
+        error: persistErr instanceof Error ? persistErr.message : String(persistErr),
+        stack: persistErr instanceof Error ? persistErr.stack : undefined,
+        eventId: extracted.eventId,
+      })
     }
-  )
+  } else if (!parseError && payload !== null && typeof payload === 'object' && !extracted.eventId) {
+    console.warn('[Telnyx SMS Inbound] Skipping persistence: missing event_id on payload')
+  }
+
+  return NextResponse.json({ ok: true }, { status: 200 })
 }
