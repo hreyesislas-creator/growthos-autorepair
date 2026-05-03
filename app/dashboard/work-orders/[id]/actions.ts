@@ -11,7 +11,7 @@ import {
 } from '@/lib/auth/roles'
 import { getDashboardTenant } from '@/lib/tenant'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
-import type { WorkOrderStatus } from '@/lib/types'
+import type { WorkOrderOperationalStatus, WorkOrderStatus } from '@/lib/types'
 import type { ArchiveResult } from '@/app/dashboard/inspections/actions'
 
 // ── Shared shape returned by time-tracking actions ────────────────────────────
@@ -64,6 +64,55 @@ export async function updateWorkOrderStatus(
   if (error) {
     console.error('[updateWorkOrderStatus]', error.message)
     throw new Error(`Failed to update work order status: ${error.message}`)
+  }
+}
+
+const OPERATIONAL_STATUS_VALUES = new Set<WorkOrderOperationalStatus>([
+  'waiting_on_parts',
+  'waiting_on_customer',
+  'waiting_on_insurance',
+  'waiting_on_sublet',
+  'on_hold',
+  'need_to_order_parts',
+])
+
+/**
+ * Updates only operational_status (job board sub-tag). Does not touch lifecycle status
+ * or time-tracking fields. Pass null to clear.
+ */
+export async function updateWorkOrderOperationalStatus(
+  workOrderId: string,
+  operationalStatus: WorkOrderOperationalStatus | null,
+): Promise<void> {
+  if (operationalStatus != null && !OPERATIONAL_STATUS_VALUES.has(operationalStatus)) {
+    throw new Error('Invalid operational status')
+  }
+
+  const ctx = await getDashboardTenant()
+  if (!ctx) throw new Error('Not authenticated')
+
+  const editDenied = await denyUnlessCanEditDashboardModule('work_orders')
+  if (editDenied) throw new Error(editDenied.error)
+
+  const tenantId = ctx.tenant.id
+  const assignDenied = await denyUnlessMayMutateWorkOrder(workOrderId, tenantId)
+  if (assignDenied) throw new Error(assignDenied.error)
+
+  const adminClient = await createAdminClient()
+  const now = new Date().toISOString()
+
+  const { error } = await adminClient
+    .from('work_orders')
+    .update({
+      operational_status: operationalStatus,
+      updated_at:         now,
+    })
+    .eq('id', workOrderId)
+    .eq('tenant_id', tenantId)
+
+  if (error) {
+    console.error('[updateWorkOrderOperationalStatus]', error.message)
+    throw new Error(`Failed to update operational status: ${error.message}`)
   }
 }
 

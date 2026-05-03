@@ -836,6 +836,15 @@ export type WorkOrderStatus =
   | 'completed'
   | 'invoiced'
 
+/** Operational sub-status for job board; independent of {@link WorkOrderStatus}. */
+export type WorkOrderOperationalStatus =
+  | 'waiting_on_parts'
+  | 'waiting_on_customer'
+  | 'waiting_on_insurance'
+  | 'waiting_on_sublet'
+  | 'on_hold'
+  | 'need_to_order_parts'
+
 export interface WorkOrder {
   id:                   string
   tenant_id:            string
@@ -849,6 +858,9 @@ export interface WorkOrder {
   work_order_number:    string | null
   creation_mode:        WorkOrderCreationMode
   status:               WorkOrderStatus
+
+  /** Shop-floor operational tag; nullable. Does not drive lifecycle transitions. */
+  operational_status:   WorkOrderOperationalStatus | null
 
   /** Pricing snapshot from the source estimate. */
   subtotal:             number

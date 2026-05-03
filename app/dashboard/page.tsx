@@ -22,12 +22,13 @@ import {
   getShopAnnouncementsForTenant,
 } from '@/lib/queries'
 import { getFinancialDashboardData } from '@/lib/financial-queries'
-import { getCurrentAppRoleForTenant } from '@/lib/auth/roles'
-import { getCurrentDashboardTenantUser } from '@/lib/auth/operational-assignment'
+import { canEditDashboardModule, getCurrentAppRoleForTenant } from '@/lib/auth/roles'
+import { getCurrentDashboardTenantUser, technicianMayMutateAssignedRecord } from '@/lib/auth/operational-assignment'
 import Topbar from '@/components/dashboard/Topbar'
 import TechnicianOverview from '@/components/dashboard/TechnicianOverview'
 import StatusBadge from '@/components/dashboard/StatusBadge'
 import PipelineJobBoardCard from '@/components/dashboard/PipelineJobBoardCard'
+import WorkOrderOperationalStatusPicker from '@/components/dashboard/WorkOrderOperationalStatusPicker'
 import Link from 'next/link'
 import { differenceInCalendarDays, differenceInMinutes, format, parseISO, startOfDay } from 'date-fns'
 import type { Estimate, WorkOrder } from '@/lib/types'
@@ -54,44 +55,41 @@ function kpiTileStyles(accent: KpiAccent): React.CSSProperties {
     height: '100%',
     minHeight: 108,
     padding: '16px 14px',
-    borderRadius: 10,
-    border: '1px solid var(--border-2)',
+    borderRadius: 12,
+    border: '1px solid var(--border)',
     display: 'flex',
     flexDirection: 'column',
     justifyContent: 'space-between',
-    transition: 'border-color 0.15s ease, box-shadow 0.15s ease',
+    transition: 'transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease',
+    boxShadow: 'var(--shadow-card)',
   }
   switch (accent) {
     case 'revenue':
       return {
         ...base,
-        background: 'linear-gradient(145deg, #f0fdf4 0%, var(--bg-2) 55%)',
-        boxShadow: '0 1px 0 rgba(22, 163, 74, 0.12)',
+        background: 'linear-gradient(145deg, #f0fdf4 0%, #ffffff 55%)',
         borderLeft: '4px solid #16a34a',
       }
     case 'yellow':
       return {
         ...base,
-        background: 'linear-gradient(145deg, #fefce8 0%, var(--bg-2) 55%)',
-        boxShadow: '0 1px 0 rgba(234, 179, 8, 0.14)',
-        borderLeft: '4px solid #ca8a04',
+        background: 'linear-gradient(145deg, #fffbeb 0%, #ffffff 55%)',
+        borderLeft: '4px solid #f59e0b',
       }
     case 'blue':
       return {
         ...base,
-        background: 'linear-gradient(145deg, #eff6ff 0%, var(--bg-2) 55%)',
-        boxShadow: '0 1px 0 rgba(37, 99, 235, 0.08)',
+        background: 'linear-gradient(145deg, #eff6ff 0%, #ffffff 55%)',
         borderLeft: '4px solid #2563eb',
       }
     case 'green':
       return {
         ...base,
-        background: 'linear-gradient(145deg, #f0fdf4 0%, var(--bg-2) 55%)',
-        boxShadow: '0 1px 0 rgba(22, 163, 74, 0.12)',
+        background: 'linear-gradient(145deg, #f0fdf4 0%, #ffffff 55%)',
         borderLeft: '4px solid #16a34a',
       }
     default:
-      return { ...base, background: 'var(--bg-2)' }
+      return { ...base, background: 'var(--surface)' }
   }
 }
 
@@ -145,11 +143,11 @@ function OverviewKpi({ label, value, hint, href, accent, monoValue }: OverviewKp
   )
 }
 
-/** Subtle tinted borders for pipeline item cards */
+/** Subtle left accent for pipeline lanes (optional; shell uses standard border). */
 const pipelineCardBorder = {
-  estimates: '1px solid rgba(234, 179, 8, 0.35)',
-  workOrders: '1px solid rgba(59, 130, 246, 0.4)',
-  completed: '1px solid rgba(34, 197, 94, 0.4)',
+  estimates: '1px solid var(--border)',
+  workOrders: '1px solid var(--border)',
+  completed: '1px solid var(--border)',
 } as const
 
 /** Shared shell for pipeline job links (typography / spacing handled in children). */
@@ -158,8 +156,7 @@ const pipelineJobCardShell: React.CSSProperties = {
   textDecoration: 'none',
   color: 'inherit',
   padding: '14px 16px',
-  borderRadius: 10,
-  boxShadow: 'var(--shadow-sm)',
+  borderRadius: 12,
   background: 'var(--surface)',
 }
 
@@ -169,23 +166,8 @@ const advisorQueueCardShell: React.CSSProperties = {
   padding: '12px 14px',
 }
 
-const advisorQueueInspectionBorder = '1px solid rgba(124, 58, 237, 0.42)' as const
-const advisorQueueMessagesBorder = '1px solid rgba(59, 130, 246, 0.4)' as const
-
-const pipelineTechDotStyle: React.CSSProperties = {
-  width: 26,
-  height: 26,
-  borderRadius: '50%',
-  background: 'var(--blue-soft)',
-  border: '1px solid var(--blue-border)',
-  color: 'var(--blue)',
-  fontSize: 11,
-  fontWeight: 700,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  flexShrink: 0,
-}
+const advisorQueueInspectionBorder = '1px solid var(--border)' as const
+const advisorQueueMessagesBorder = '1px solid var(--border)' as const
 
 function pipelineEstimateDoc(e: Estimate): string {
   return e.estimate_number?.trim() || 'EST'
@@ -273,7 +255,7 @@ function PipelineJobCardHeader(props: {
       }}
     >
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.3, color: 'var(--text)' }}>{customerLabel}</div>
+        <div style={{ fontSize: 18, fontWeight: 600, lineHeight: 1.3, color: 'var(--text)' }}>{customerLabel}</div>
         {customerPhone ? (
           <div
             style={{
@@ -291,9 +273,10 @@ function PipelineJobCardHeader(props: {
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, flexShrink: 0 }}>
         {techInitials ? (
           <span
+            className="pipeline-tech-avatar"
             title={techTooltip ?? undefined}
             aria-label={techTooltip ?? techInitials}
-            style={{ ...pipelineTechDotStyle, fontSize: techInitials.length > 1 ? 10 : 11 }}
+            style={{ fontSize: techInitials.length > 1 ? 10 : 11 }}
           >
             {techInitials}
           </span>
@@ -442,6 +425,7 @@ export default async function DashboardPage() {
     workOrders,
     woCompleted,
     revenueOpportunities,
+    canEditWoModule,
   ] = await Promise.all([
     getTodayAppointments(tenantId),
     getCustomerCount(tenantId),
@@ -454,6 +438,7 @@ export default async function DashboardPage() {
     getWorkOrdersForTenant(tenantId),
     getCompletedWorkOrderCounts(tenantId),
     getRevenueOpportunitiesSummary(tenantId),
+    canEditDashboardModule('work_orders'),
   ])
 
   const pipelineEstimates = estimates
@@ -500,6 +485,16 @@ export default async function DashboardPage() {
   for (const r of tenantUserRows) {
     const t = pipelineTechnicianInitials(r)
     if (t) technicianPipelineMap.set(r.id, t)
+  }
+
+  const currentTenantUserIdForWo = dashboardDu?.tenantUserId ?? ''
+  function pipelineWorkOrderCanMutate(w: WorkOrder): boolean {
+    if (!canEditWoModule) return false
+    return technicianMayMutateAssignedRecord(
+      role,
+      w.technician_id ?? null,
+      currentTenantUserIdForWo || '__no_user__',
+    )
   }
 
   const fmtMoney = (n: number) =>
@@ -625,12 +620,6 @@ export default async function DashboardPage() {
   const plDoneTitle = isServiceAdvisor ? 'Ready for pickup' : 'Completed / ready'
   const plDoneSub = 'Completed — notify customer'
 
-  const pipelineColTitleStyle: React.CSSProperties = {
-    fontSize: 16,
-    fontWeight: 700,
-    letterSpacing: '-0.02em',
-    color: 'var(--navy)',
-  }
   const pipelineColDescStyle: React.CSSProperties = {
     fontSize: 13,
     color: 'var(--text-2)',
@@ -731,19 +720,12 @@ export default async function DashboardPage() {
         }}
       >
         {/* Column 1 — Estimates / waiting on approval */}
-        <div
-          style={{
-            borderRadius: 12,
-            border: '1px solid rgba(234, 179, 8, 0.35)',
-            background: 'linear-gradient(180deg, rgba(254, 252, 232, 0.35) 0%, var(--bg-2) 48%)',
-            borderTop: '3px solid #ca8a04',
-            padding: '14px 14px 12px',
-            minWidth: 0,
-            boxShadow: '0 1px 0 rgba(15, 23, 42, 0.04)',
-          }}
-        >
+        <div className="pipeline-column pipeline-column--estimates">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-            <div style={pipelineColTitleStyle}>{plEstTitle}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
+              <div className="pipeline-col-title">{plEstTitle}</div>
+              <span className="pipeline-count-badge">{pipelineEstimates.length}</span>
+            </div>
             <Link href="/dashboard/estimates" className="btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }}>
               All
             </Link>
@@ -780,7 +762,7 @@ export default async function DashboardPage() {
                       <div
                         style={{
                           fontSize: 14,
-                          fontWeight: 600,
+                          fontWeight: 500,
                           color: 'var(--text-2)',
                           lineHeight: 1.45,
                           marginBottom: 2,
@@ -836,19 +818,12 @@ export default async function DashboardPage() {
         </div>
 
         {/* Column 2 — Work orders (active) */}
-        <div
-          style={{
-            borderRadius: 12,
-            border: '1px solid rgba(59, 130, 246, 0.35)',
-            background: 'linear-gradient(180deg, rgba(239, 246, 255, 0.25) 0%, var(--bg-2) 48%)',
-            borderTop: '3px solid #2563eb',
-            padding: '14px 14px 12px',
-            minWidth: 0,
-            boxShadow: '0 1px 0 rgba(15, 23, 42, 0.04)',
-          }}
-        >
+        <div className="pipeline-column pipeline-column--workorders">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-            <div style={pipelineColTitleStyle}>{plWoTitle}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
+              <div className="pipeline-col-title">{plWoTitle}</div>
+              <span className="pipeline-count-badge">{inProgressWO.length}</span>
+            </div>
             <Link href="/dashboard/work-orders" className="btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }}>
               All
             </Link>
@@ -888,7 +863,7 @@ export default async function DashboardPage() {
                       <div
                         style={{
                           fontSize: 14,
-                          fontWeight: 600,
+                          fontWeight: 500,
                           color: 'var(--text-2)',
                           lineHeight: 1.45,
                           marginBottom: 2,
@@ -946,7 +921,12 @@ export default async function DashboardPage() {
                             {fmtMoney(w.total)}
                           </span>
                         )}
-                        <StatusBadge status={w.status} />
+                        <WorkOrderOperationalStatusPicker
+                          workOrderId={w.id}
+                          operationalStatus={w.operational_status ?? null}
+                          lifecycleStatus={w.status}
+                          canMutate={pipelineWorkOrderCanMutate(w)}
+                        />
                       </div>
                     </PipelineJobBoardCard>
                   </li>
@@ -957,19 +937,12 @@ export default async function DashboardPage() {
         </div>
 
         {/* Column 3 — Completed / ready for pickup */}
-        <div
-          style={{
-            borderRadius: 12,
-            border: '1px solid rgba(34, 197, 94, 0.35)',
-            background: 'linear-gradient(180deg, rgba(240, 253, 244, 0.22) 0%, var(--bg-2) 48%)',
-            borderTop: '3px solid #16a34a',
-            padding: '14px 14px 12px',
-            minWidth: 0,
-            boxShadow: '0 1px 0 rgba(15, 23, 42, 0.04)',
-          }}
-        >
+        <div className="pipeline-column pipeline-column--completed">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-            <div style={pipelineColTitleStyle}>{plDoneTitle}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
+              <div className="pipeline-col-title">{plDoneTitle}</div>
+              <span className="pipeline-count-badge">{completedWO.length}</span>
+            </div>
             <Link href="/dashboard/work-orders" className="btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }}>
               All
             </Link>
@@ -1010,7 +983,7 @@ export default async function DashboardPage() {
                       <div
                         style={{
                           fontSize: 14,
-                          fontWeight: 600,
+                          fontWeight: 500,
                           color: 'var(--text-2)',
                           lineHeight: 1.45,
                           marginBottom: 2,
@@ -1068,7 +1041,13 @@ export default async function DashboardPage() {
                             {fmtMoney(w.total)}
                           </span>
                         )}
-                        <StatusBadge status="completed" label="Ready for Pickup" />
+                        <WorkOrderOperationalStatusPicker
+                          workOrderId={w.id}
+                          operationalStatus={w.operational_status ?? null}
+                          lifecycleStatus="completed"
+                          lifecycleBadgeLabel="Ready for Pickup"
+                          canMutate={pipelineWorkOrderCanMutate(w)}
+                        />
                       </div>
                     </PipelineJobBoardCard>
                   </li>
@@ -1303,10 +1282,15 @@ export default async function DashboardPage() {
               {pendingInsp > 0 && (
                 <Link
                   href="/dashboard/inspections"
-                  style={{ ...advisorQueueCardShell, border: advisorQueueInspectionBorder }}
+                  className="pipeline-job-card"
+                  style={{
+                    ...advisorQueueCardShell,
+                    border: advisorQueueInspectionBorder,
+                    borderLeft: '4px solid rgba(124, 58, 237, 0.5)',
+                  }}
                 >
                   <AdvisorQueueStageLabel text="Inspection awaiting review" />
-                  <div style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.3, color: 'var(--text)', marginBottom: 4 }}>
+                  <div style={{ fontSize: 18, fontWeight: 600, lineHeight: 1.3, color: 'var(--text)', marginBottom: 4 }}>
                     {pendingInsp} {pendingInsp === 1 ? 'inspection' : 'inspections'}
                   </div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)', lineHeight: 1.45, marginBottom: 4 }}>
@@ -1345,7 +1329,7 @@ export default async function DashboardPage() {
                     <div
                       style={{
                         fontSize: 14,
-                        fontWeight: 600,
+                        fontWeight: 500,
                         color: 'var(--text-2)',
                         lineHeight: 1.45,
                         marginBottom: 2,
@@ -1405,7 +1389,7 @@ export default async function DashboardPage() {
                     <div
                       style={{
                         fontSize: 14,
-                        fontWeight: 600,
+                        fontWeight: 500,
                         color: 'var(--text-2)',
                         lineHeight: 1.45,
                         marginBottom: 2,
@@ -1442,7 +1426,12 @@ export default async function DashboardPage() {
                     ) : null}
                     <div className={`pipeline-aging pipeline-aging--${aging.bucket}`}>{aging.line}</div>
                     <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
-                      <StatusBadge status={w.status} />
+                      <WorkOrderOperationalStatusPicker
+                        workOrderId={w.id}
+                        operationalStatus={w.operational_status ?? null}
+                        lifecycleStatus={w.status}
+                        canMutate={pipelineWorkOrderCanMutate(w)}
+                      />
                     </div>
                   </PipelineJobBoardCard>
                 )
@@ -1479,7 +1468,7 @@ export default async function DashboardPage() {
                     <div
                       style={{
                         fontSize: 14,
-                        fontWeight: 600,
+                        fontWeight: 500,
                         color: 'var(--text-2)',
                         lineHeight: 1.45,
                         marginBottom: 2,
@@ -1516,7 +1505,13 @@ export default async function DashboardPage() {
                     ) : null}
                     <div className={`pipeline-aging pipeline-aging--${aging.bucket}`}>{aging.line}</div>
                     <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
-                      <StatusBadge status="completed" label="Ready for Pickup" />
+                      <WorkOrderOperationalStatusPicker
+                        workOrderId={w.id}
+                        operationalStatus={w.operational_status ?? null}
+                        lifecycleStatus="completed"
+                        lifecycleBadgeLabel="Ready for Pickup"
+                        canMutate={pipelineWorkOrderCanMutate(w)}
+                      />
                     </div>
                   </PipelineJobBoardCard>
                 )
@@ -1531,7 +1526,7 @@ export default async function DashboardPage() {
                   }}
                 >
                   <AdvisorQueueStageLabel text="Customer messages" />
-                  <div style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.3, color: 'var(--text)', marginBottom: 4 }}>
+                  <div style={{ fontSize: 18, fontWeight: 600, lineHeight: 1.3, color: 'var(--text)', marginBottom: 4 }}>
                     {msgCount} this week
                   </div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)', lineHeight: 1.45, marginBottom: 4 }}>
