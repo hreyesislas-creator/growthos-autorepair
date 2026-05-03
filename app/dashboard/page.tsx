@@ -9,8 +9,12 @@ import {
   getBillingSnapshot,
   getEstimatesByTenant,
   getWorkOrdersForTenant,
-  getCustomerName,
-  getVehicleDisplay,
+  getCustomerPipelineSummaries,
+  getVehiclePipelineSummaries,
+  getTenantUsersByIds,
+  type CustomerPipelineSummary,
+  type VehiclePipelineSummary,
+  type TenantUserPipelineSummary,
   getCompletedWorkOrderCounts,
   getRevenueOpportunitiesSummary,
   getInspections,
@@ -206,8 +210,57 @@ function pipelineWorkOrderProgressHint(w: WorkOrder, phase: 'active' | 'complete
   return m > 0 ? `In shop · ${h}h ${m}m` : `In shop · ${h}h`
 }
 
-function PipelineJobCardHeader(props: { customerLabel: string; docLabel: string; techAssigned: boolean }) {
-  const { customerLabel, docLabel, techAssigned } = props
+function pipelineCustomerNameFromRow(row: CustomerPipelineSummary | undefined): string {
+  if (!row) return '—'
+  const parts = [row.first_name, row.last_name].filter(Boolean)
+  return parts.length > 0 ? parts.join(' ') : '—'
+}
+
+function pipelineVehicleLabelFromRow(row: VehiclePipelineSummary | undefined): string {
+  if (!row) return '—'
+  const parts = [row.year, row.make, row.model].filter(Boolean)
+  return parts.length > 0 ? parts.join(' ') : '—'
+}
+
+function pipelineTechnicianInitials(
+  row: TenantUserPipelineSummary | undefined,
+): { initials: string; displayName: string } | null {
+  if (!row) return null
+  const name = row.full_name?.trim()
+  if (name) {
+    const parts = name.split(/\s+/).filter(Boolean)
+    let initials: string
+    if (parts.length >= 2) {
+      const a = parts[0]?.[0] ?? ''
+      const b = parts[parts.length - 1]?.[0] ?? ''
+      initials = (a + b).toUpperCase()
+    } else if (parts.length === 1) {
+      const w = parts[0] ?? ''
+      initials = w.length >= 2 ? (w[0]! + w[1]!).toUpperCase() : (w[0] ?? '').toUpperCase()
+    } else {
+      return null
+    }
+    const cleaned = initials.replace(/\s/g, '')
+    if (!cleaned) return null
+    return { initials: cleaned.slice(0, 2), displayName: name }
+  }
+  const em = row.email?.trim()
+  if (em?.includes('@')) {
+    const local = em.split('@')[0] ?? ''
+    if (local.length >= 2) return { initials: (local[0]! + local[1]!).toUpperCase(), displayName: em }
+    if (local.length === 1) return { initials: local[0]!.toUpperCase(), displayName: em }
+  }
+  return null
+}
+
+function PipelineJobCardHeader(props: {
+  customerLabel: string
+  customerPhone?: string | null
+  docLabel: string
+  techInitials?: string | null
+  techTooltip?: string | null
+}) {
+  const { customerLabel, customerPhone, docLabel, techInitials, techTooltip } = props
   return (
     <div
       style={{
@@ -220,11 +273,28 @@ function PipelineJobCardHeader(props: { customerLabel: string; docLabel: string;
     >
       <div style={{ minWidth: 0, flex: 1 }}>
         <div style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.3, color: 'var(--text)' }}>{customerLabel}</div>
+        {customerPhone ? (
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: 'var(--text-2)',
+              marginTop: 2,
+              lineHeight: 1.3,
+            }}
+          >
+            {customerPhone}
+          </div>
+        ) : null}
       </div>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, flexShrink: 0 }}>
-        {techAssigned ? (
-          <span title="Technician assigned" aria-label="Technician assigned" style={pipelineTechDotStyle}>
-            T
+        {techInitials ? (
+          <span
+            title={techTooltip ?? undefined}
+            aria-label={techTooltip ?? techInitials}
+            style={{ ...pipelineTechDotStyle, fontSize: techInitials.length > 1 ? 10 : 11 }}
+          >
+            {techInitials}
           </span>
         ) : null}
         <div
@@ -412,12 +482,24 @@ export default async function DashboardPage() {
     if (w.customer_id) custIds.add(w.customer_id)
     if (w.vehicle_id) vehIds.add(w.vehicle_id)
   }
-  const [custPairs, vehPairs] = await Promise.all([
-    Promise.all([...custIds].map(async id => [id, await getCustomerName(id)] as const)),
-    Promise.all([...vehIds].map(async id => [id, await getVehicleDisplay(id)] as const)),
+  const techIds = new Set<string>()
+  for (const w of [...inProgressWO, ...completedWO]) {
+    if (w.technician_id) techIds.add(w.technician_id)
+  }
+  const [customerRows, vehicleRows, tenantUserRows] = await Promise.all([
+    getCustomerPipelineSummaries([...custIds]),
+    getVehiclePipelineSummaries([...vehIds]),
+    getTenantUsersByIds(tenantId, [...techIds]),
   ])
-  const customerNames = new Map(custPairs)
-  const vehicleLabels = new Map(vehPairs)
+  const customerPipelineMap = new Map<string, CustomerPipelineSummary>()
+  for (const r of customerRows) customerPipelineMap.set(r.id, r)
+  const vehiclePipelineMap = new Map<string, VehiclePipelineSummary>()
+  for (const r of vehicleRows) vehiclePipelineMap.set(r.id, r)
+  const technicianPipelineMap = new Map<string, { initials: string; displayName: string }>()
+  for (const r of tenantUserRows) {
+    const t = pipelineTechnicianInitials(r)
+    if (t) technicianPipelineMap.set(r.id, t)
+  }
 
   const fmtMoney = (n: number) =>
     `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -672,8 +754,12 @@ export default async function DashboardPage() {
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
               {pipelineEstimates.map(e => {
                 const aging = estimatePipelineAging(e.updated_at)
-                const cust = e.customer_id ? (customerNames.get(e.customer_id) ?? '—') : '—'
-                const veh = e.vehicle_id ? (vehicleLabels.get(e.vehicle_id) ?? '—') : '—'
+                const custRow = e.customer_id ? customerPipelineMap.get(e.customer_id) : undefined
+                const vehRow = e.vehicle_id ? vehiclePipelineMap.get(e.vehicle_id) : undefined
+                const cust = e.customer_id ? pipelineCustomerNameFromRow(custRow) : '—'
+                const phone = custRow?.phone?.trim() || null
+                const veh = e.vehicle_id ? pipelineVehicleLabelFromRow(vehRow) : '—'
+                const plate = vehRow?.license_plate?.trim() || null
                 return (
                   <li key={e.id}>
                     <Link
@@ -682,8 +768,8 @@ export default async function DashboardPage() {
                     >
                       <PipelineJobCardHeader
                         customerLabel={cust}
+                        customerPhone={phone}
                         docLabel={pipelineEstimateDoc(e)}
-                        techAssigned={false}
                       />
                       <div
                         style={{
@@ -696,6 +782,20 @@ export default async function DashboardPage() {
                       >
                         {veh}
                       </div>
+                      {plate ? (
+                        <div
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 600,
+                            color: 'var(--text-2)',
+                            lineHeight: 1.35,
+                            marginTop: 2,
+                            fontFamily: 'var(--font-mono)',
+                          }}
+                        >
+                          {plate}
+                        </div>
+                      ) : null}
                       <div className={`pipeline-aging pipeline-aging--${aging.bucket}`}>{aging.line}</div>
                       <div
                         style={{
@@ -755,8 +855,13 @@ export default async function DashboardPage() {
               {inProgressWO.map(w => {
                 const aging = activeWorkOrderPipelineAging(w.updated_at)
                 const prog = pipelineWorkOrderProgressHint(w, 'active')
-                const cust = w.customer_id ? (customerNames.get(w.customer_id) ?? '—') : '—'
-                const veh = w.vehicle_id ? (vehicleLabels.get(w.vehicle_id) ?? '—') : '—'
+                const custRow = w.customer_id ? customerPipelineMap.get(w.customer_id) : undefined
+                const vehRow = w.vehicle_id ? vehiclePipelineMap.get(w.vehicle_id) : undefined
+                const cust = w.customer_id ? pipelineCustomerNameFromRow(custRow) : '—'
+                const phone = custRow?.phone?.trim() || null
+                const veh = w.vehicle_id ? pipelineVehicleLabelFromRow(vehRow) : '—'
+                const plate = vehRow?.license_plate?.trim() || null
+                const tech = w.technician_id ? technicianPipelineMap.get(w.technician_id) : undefined
                 return (
                   <li key={w.id}>
                     <Link
@@ -765,8 +870,10 @@ export default async function DashboardPage() {
                     >
                       <PipelineJobCardHeader
                         customerLabel={cust}
+                        customerPhone={phone}
                         docLabel={pipelineWorkOrderDoc(w)}
-                        techAssigned={Boolean(w.technician_id)}
+                        techInitials={tech?.initials}
+                        techTooltip={tech?.displayName}
                       />
                       <div
                         style={{
@@ -779,6 +886,20 @@ export default async function DashboardPage() {
                       >
                         {veh}
                       </div>
+                      {plate ? (
+                        <div
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 600,
+                            color: 'var(--text-2)',
+                            lineHeight: 1.35,
+                            marginTop: 2,
+                            fontFamily: 'var(--font-mono)',
+                          }}
+                        >
+                          {plate}
+                        </div>
+                      ) : null}
                       {prog ? (
                         <div
                           style={{
@@ -851,8 +972,13 @@ export default async function DashboardPage() {
               {completedWO.map(w => {
                 const aging = completedWorkOrderPipelineAging(w.completed_at, w.updated_at)
                 const prog = pipelineWorkOrderProgressHint(w, 'completed')
-                const cust = w.customer_id ? (customerNames.get(w.customer_id) ?? '—') : '—'
-                const veh = w.vehicle_id ? (vehicleLabels.get(w.vehicle_id) ?? '—') : '—'
+                const custRow = w.customer_id ? customerPipelineMap.get(w.customer_id) : undefined
+                const vehRow = w.vehicle_id ? vehiclePipelineMap.get(w.vehicle_id) : undefined
+                const cust = w.customer_id ? pipelineCustomerNameFromRow(custRow) : '—'
+                const phone = custRow?.phone?.trim() || null
+                const veh = w.vehicle_id ? pipelineVehicleLabelFromRow(vehRow) : '—'
+                const plate = vehRow?.license_plate?.trim() || null
+                const tech = w.technician_id ? technicianPipelineMap.get(w.technician_id) : undefined
                 return (
                   <li key={w.id}>
                     <Link
@@ -861,8 +987,10 @@ export default async function DashboardPage() {
                     >
                       <PipelineJobCardHeader
                         customerLabel={cust}
+                        customerPhone={phone}
                         docLabel={pipelineWorkOrderDoc(w)}
-                        techAssigned={Boolean(w.technician_id)}
+                        techInitials={tech?.initials}
+                        techTooltip={tech?.displayName}
                       />
                       <div
                         style={{
@@ -875,6 +1003,20 @@ export default async function DashboardPage() {
                       >
                         {veh}
                       </div>
+                      {plate ? (
+                        <div
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 600,
+                            color: 'var(--text-2)',
+                            lineHeight: 1.35,
+                            marginTop: 2,
+                            fontFamily: 'var(--font-mono)',
+                          }}
+                        >
+                          {plate}
+                        </div>
+                      ) : null}
                       {prog ? (
                         <div
                           style={{
@@ -1162,8 +1304,12 @@ export default async function DashboardPage() {
               )}
               {pipelineEstimates.slice(0, 3).map(e => {
                 const aging = estimatePipelineAging(e.updated_at)
-                const cust = e.customer_id ? (customerNames.get(e.customer_id) ?? '—') : '—'
-                const veh = e.vehicle_id ? (vehicleLabels.get(e.vehicle_id) ?? '—') : '—'
+                const custRow = e.customer_id ? customerPipelineMap.get(e.customer_id) : undefined
+                const vehRow = e.vehicle_id ? vehiclePipelineMap.get(e.vehicle_id) : undefined
+                const cust = e.customer_id ? pipelineCustomerNameFromRow(custRow) : '—'
+                const phone = custRow?.phone?.trim() || null
+                const veh = e.vehicle_id ? pipelineVehicleLabelFromRow(vehRow) : '—'
+                const plate = vehRow?.license_plate?.trim() || null
                 return (
                   <Link
                     key={`q-est-${e.id}`}
@@ -1173,8 +1319,8 @@ export default async function DashboardPage() {
                     <AdvisorQueueStageLabel text="Needs customer approval" />
                     <PipelineJobCardHeader
                       customerLabel={cust}
+                      customerPhone={phone}
                       docLabel={pipelineEstimateDoc(e)}
-                      techAssigned={false}
                     />
                     <div
                       style={{
@@ -1187,6 +1333,20 @@ export default async function DashboardPage() {
                     >
                       {veh}
                     </div>
+                    {plate ? (
+                      <div
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: 'var(--text-2)',
+                          lineHeight: 1.35,
+                          marginTop: 2,
+                          fontFamily: 'var(--font-mono)',
+                        }}
+                      >
+                        {plate}
+                      </div>
+                    ) : null}
                     <div className={`pipeline-aging pipeline-aging--${aging.bucket}`}>{aging.line}</div>
                     <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
                       <StatusBadge status={e.status} />
@@ -1197,8 +1357,13 @@ export default async function DashboardPage() {
               {inProgressWO.slice(0, 3).map(w => {
                 const aging = activeWorkOrderPipelineAging(w.updated_at)
                 const prog = pipelineWorkOrderProgressHint(w, 'active')
-                const cust = w.customer_id ? (customerNames.get(w.customer_id) ?? '—') : '—'
-                const veh = w.vehicle_id ? (vehicleLabels.get(w.vehicle_id) ?? '—') : '—'
+                const custRow = w.customer_id ? customerPipelineMap.get(w.customer_id) : undefined
+                const vehRow = w.vehicle_id ? vehiclePipelineMap.get(w.vehicle_id) : undefined
+                const cust = w.customer_id ? pipelineCustomerNameFromRow(custRow) : '—'
+                const phone = custRow?.phone?.trim() || null
+                const veh = w.vehicle_id ? pipelineVehicleLabelFromRow(vehRow) : '—'
+                const plate = vehRow?.license_plate?.trim() || null
+                const tech = w.technician_id ? technicianPipelineMap.get(w.technician_id) : undefined
                 return (
                   <Link
                     key={`q-wo-${w.id}`}
@@ -1208,8 +1373,10 @@ export default async function DashboardPage() {
                     <AdvisorQueueStageLabel text="Active job needs attention" />
                     <PipelineJobCardHeader
                       customerLabel={cust}
+                      customerPhone={phone}
                       docLabel={pipelineWorkOrderDoc(w)}
-                      techAssigned={Boolean(w.technician_id)}
+                      techInitials={tech?.initials}
+                      techTooltip={tech?.displayName}
                     />
                     <div
                       style={{
@@ -1222,6 +1389,20 @@ export default async function DashboardPage() {
                     >
                       {veh}
                     </div>
+                    {plate ? (
+                      <div
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: 'var(--text-2)',
+                          lineHeight: 1.35,
+                          marginTop: 2,
+                          fontFamily: 'var(--font-mono)',
+                        }}
+                      >
+                        {plate}
+                      </div>
+                    ) : null}
                     {prog ? (
                       <div
                         style={{
@@ -1245,8 +1426,13 @@ export default async function DashboardPage() {
               {completedWO.slice(0, 3).map(w => {
                 const aging = completedWorkOrderPipelineAging(w.completed_at, w.updated_at)
                 const prog = pipelineWorkOrderProgressHint(w, 'completed')
-                const cust = w.customer_id ? (customerNames.get(w.customer_id) ?? '—') : '—'
-                const veh = w.vehicle_id ? (vehicleLabels.get(w.vehicle_id) ?? '—') : '—'
+                const custRow = w.customer_id ? customerPipelineMap.get(w.customer_id) : undefined
+                const vehRow = w.vehicle_id ? vehiclePipelineMap.get(w.vehicle_id) : undefined
+                const cust = w.customer_id ? pipelineCustomerNameFromRow(custRow) : '—'
+                const phone = custRow?.phone?.trim() || null
+                const veh = w.vehicle_id ? pipelineVehicleLabelFromRow(vehRow) : '—'
+                const plate = vehRow?.license_plate?.trim() || null
+                const tech = w.technician_id ? technicianPipelineMap.get(w.technician_id) : undefined
                 return (
                   <Link
                     key={`q-pu-${w.id}`}
@@ -1256,8 +1442,10 @@ export default async function DashboardPage() {
                     <AdvisorQueueStageLabel text="Ready — notify customer" />
                     <PipelineJobCardHeader
                       customerLabel={cust}
+                      customerPhone={phone}
                       docLabel={pipelineWorkOrderDoc(w)}
-                      techAssigned={Boolean(w.technician_id)}
+                      techInitials={tech?.initials}
+                      techTooltip={tech?.displayName}
                     />
                     <div
                       style={{
@@ -1270,6 +1458,20 @@ export default async function DashboardPage() {
                     >
                       {veh}
                     </div>
+                    {plate ? (
+                      <div
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: 'var(--text-2)',
+                          lineHeight: 1.35,
+                          marginTop: 2,
+                          fontFamily: 'var(--font-mono)',
+                        }}
+                      >
+                        {plate}
+                      </div>
+                    ) : null}
                     {prog ? (
                       <div
                         style={{

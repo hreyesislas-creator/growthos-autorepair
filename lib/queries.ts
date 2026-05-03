@@ -2016,6 +2016,107 @@ export async function getVehicleDisplay(vehicleId: string): Promise<string | nul
   return parts.length > 0 ? parts.join(' ') : null
 }
 
+/** Batched customer fields for dashboard pipeline / advisor queue cards. */
+export type CustomerPipelineSummary = {
+  id: string
+  first_name: string
+  last_name: string
+  phone: string | null
+}
+
+/**
+ * Load customer display fields for many IDs (single round-trip).
+ * Empty or duplicate IDs are ignored.
+ */
+export async function getCustomerPipelineSummaries(
+  customerIds: string[],
+): Promise<CustomerPipelineSummary[]> {
+  const ids = [...new Set(customerIds.filter(id => hasValue(id)))]
+  if (ids.length === 0) return []
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('customers')
+    .select('id, first_name, last_name, phone')
+    .in('id', ids)
+
+  if (error) {
+    console.error('[getCustomerPipelineSummaries]', error.message)
+    return []
+  }
+
+  return (data ?? []) as CustomerPipelineSummary[]
+}
+
+/** Batched vehicle fields for dashboard pipeline / advisor queue cards. */
+export type VehiclePipelineSummary = {
+  id: string
+  year: number | null
+  make: string | null
+  model: string | null
+  license_plate: string | null
+}
+
+/**
+ * Load vehicle display fields for many IDs (single round-trip).
+ */
+export async function getVehiclePipelineSummaries(
+  vehicleIds: string[],
+): Promise<VehiclePipelineSummary[]> {
+  const ids = [...new Set(vehicleIds.filter(id => hasValue(id)))]
+  if (ids.length === 0) return []
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('vehicles')
+    .select('id, year, make, model, license_plate')
+    .in('id', ids)
+
+  if (error) {
+    console.error('[getVehiclePipelineSummaries]', error.message)
+    return []
+  }
+
+  return (data ?? []) as VehiclePipelineSummary[]
+}
+
+/** Minimal tenant_users row for technician initials on job cards. */
+export type TenantUserPipelineSummary = {
+  id: string
+  full_name: string | null
+  email: string | null
+}
+
+/**
+ * Load team member display fields by tenant_users primary key (single round-trip).
+ */
+export async function getTenantUsersByIds(
+  tenantId: string,
+  ids: string[],
+): Promise<TenantUserPipelineSummary[]> {
+  if (!hasValue(tenantId)) return []
+
+  const unique = [...new Set(ids.filter(id => hasValue(id)))]
+  if (unique.length === 0) return []
+
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('tenant_users')
+    .select('id, full_name, email')
+    .eq('tenant_id', tenantId)
+    .in('id', unique)
+
+  if (error) {
+    console.error('[getTenantUsersByIds]', error.message)
+    return []
+  }
+
+  return (data ?? []) as TenantUserPipelineSummary[]
+}
+
 // ── Vehicle service history (for detail page) ──────────────────
 
 /**
