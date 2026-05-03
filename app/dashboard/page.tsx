@@ -27,6 +27,7 @@ import { getCurrentDashboardTenantUser } from '@/lib/auth/operational-assignment
 import Topbar from '@/components/dashboard/Topbar'
 import TechnicianOverview from '@/components/dashboard/TechnicianOverview'
 import StatusBadge from '@/components/dashboard/StatusBadge'
+import PipelineJobBoardCard from '@/components/dashboard/PipelineJobBoardCard'
 import Link from 'next/link'
 import { differenceInCalendarDays, differenceInMinutes, format, parseISO, startOfDay } from 'date-fns'
 import type { Estimate, WorkOrder } from '@/lib/types'
@@ -762,9 +763,11 @@ export default async function DashboardPage() {
                 const plate = vehRow?.license_plate?.trim() || null
                 return (
                   <li key={e.id}>
-                    <Link
-                      href={`/dashboard/estimates/${e.id}`}
-                      style={{ ...pipelineJobCardShell, border: pipelineCardBorder.estimates }}
+                    <PipelineJobBoardCard
+                      detailHref={`/dashboard/estimates/${e.id}`}
+                      shellStyle={{ ...pipelineJobCardShell, border: pipelineCardBorder.estimates }}
+                      customerPhone={phone}
+                      isEstimate
                     >
                       <PipelineJobCardHeader
                         customerLabel={cust}
@@ -821,7 +824,7 @@ export default async function DashboardPage() {
                         )}
                         <StatusBadge status={e.status} />
                       </div>
-                    </Link>
+                    </PipelineJobBoardCard>
                   </li>
                 )
               })}
@@ -864,9 +867,10 @@ export default async function DashboardPage() {
                 const tech = w.technician_id ? technicianPipelineMap.get(w.technician_id) : undefined
                 return (
                   <li key={w.id}>
-                    <Link
-                      href={`/dashboard/work-orders/${w.id}`}
-                      style={{ ...pipelineJobCardShell, border: pipelineCardBorder.workOrders }}
+                    <PipelineJobBoardCard
+                      detailHref={`/dashboard/work-orders/${w.id}`}
+                      shellStyle={{ ...pipelineJobCardShell, border: pipelineCardBorder.workOrders }}
+                      customerPhone={phone}
                     >
                       <PipelineJobCardHeader
                         customerLabel={cust}
@@ -938,7 +942,7 @@ export default async function DashboardPage() {
                         )}
                         <StatusBadge status={w.status} />
                       </div>
-                    </Link>
+                    </PipelineJobBoardCard>
                   </li>
                 )
               })}
@@ -981,9 +985,11 @@ export default async function DashboardPage() {
                 const tech = w.technician_id ? technicianPipelineMap.get(w.technician_id) : undefined
                 return (
                   <li key={w.id}>
-                    <Link
-                      href={`/dashboard/work-orders/${w.id}`}
-                      style={{ ...pipelineJobCardShell, border: pipelineCardBorder.completed }}
+                    <PipelineJobBoardCard
+                      detailHref={`/dashboard/work-orders/${w.id}`}
+                      shellStyle={{ ...pipelineJobCardShell, border: pipelineCardBorder.completed }}
+                      customerPhone={phone}
+                      isReadyPickup
                     >
                       <PipelineJobCardHeader
                         customerLabel={cust}
@@ -1055,7 +1061,7 @@ export default async function DashboardPage() {
                         )}
                         <StatusBadge status="completed" label="Ready for Pickup" />
                       </div>
-                    </Link>
+                    </PipelineJobBoardCard>
                   </li>
                 )
               })}
@@ -1311,10 +1317,12 @@ export default async function DashboardPage() {
                 const veh = e.vehicle_id ? pipelineVehicleLabelFromRow(vehRow) : '—'
                 const plate = vehRow?.license_plate?.trim() || null
                 return (
-                  <Link
+                  <PipelineJobBoardCard
                     key={`q-est-${e.id}`}
-                    href={`/dashboard/estimates/${e.id}`}
-                    style={{ ...advisorQueueCardShell, border: pipelineCardBorder.estimates }}
+                    detailHref={`/dashboard/estimates/${e.id}`}
+                    shellStyle={{ ...advisorQueueCardShell, border: pipelineCardBorder.estimates }}
+                    customerPhone={phone}
+                    isEstimate
                   >
                     <AdvisorQueueStageLabel text="Needs customer approval" />
                     <PipelineJobCardHeader
@@ -1351,7 +1359,7 @@ export default async function DashboardPage() {
                     <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
                       <StatusBadge status={e.status} />
                     </div>
-                  </Link>
+                  </PipelineJobBoardCard>
                 )
               })}
               {inProgressWO.slice(0, 3).map(w => {
@@ -1365,10 +1373,11 @@ export default async function DashboardPage() {
                 const plate = vehRow?.license_plate?.trim() || null
                 const tech = w.technician_id ? technicianPipelineMap.get(w.technician_id) : undefined
                 return (
-                  <Link
+                  <PipelineJobBoardCard
                     key={`q-wo-${w.id}`}
-                    href={`/dashboard/work-orders/${w.id}`}
-                    style={{ ...advisorQueueCardShell, border: pipelineCardBorder.workOrders }}
+                    detailHref={`/dashboard/work-orders/${w.id}`}
+                    shellStyle={{ ...advisorQueueCardShell, border: pipelineCardBorder.workOrders }}
+                    customerPhone={phone}
                   >
                     <AdvisorQueueStageLabel text="Active job needs attention" />
                     <PipelineJobCardHeader
@@ -1420,7 +1429,7 @@ export default async function DashboardPage() {
                     <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
                       <StatusBadge status={w.status} />
                     </div>
-                  </Link>
+                  </PipelineJobBoardCard>
                 )
               })}
               {completedWO.slice(0, 3).map(w => {
@@ -1434,10 +1443,12 @@ export default async function DashboardPage() {
                 const plate = vehRow?.license_plate?.trim() || null
                 const tech = w.technician_id ? technicianPipelineMap.get(w.technician_id) : undefined
                 return (
-                  <Link
+                  <PipelineJobBoardCard
                     key={`q-pu-${w.id}`}
-                    href={`/dashboard/work-orders/${w.id}`}
-                    style={{ ...advisorQueueCardShell, border: pipelineCardBorder.completed }}
+                    detailHref={`/dashboard/work-orders/${w.id}`}
+                    shellStyle={{ ...advisorQueueCardShell, border: pipelineCardBorder.completed }}
+                    customerPhone={phone}
+                    isReadyPickup
                   >
                     <AdvisorQueueStageLabel text="Ready — notify customer" />
                     <PipelineJobCardHeader
@@ -1489,7 +1500,7 @@ export default async function DashboardPage() {
                     <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
                       <StatusBadge status="completed" label="Ready for Pickup" />
                     </div>
-                  </Link>
+                  </PipelineJobBoardCard>
                 )
               })}
               {msgCount > 0 && (
