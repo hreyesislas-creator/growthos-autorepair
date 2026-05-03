@@ -767,6 +767,9 @@ export default async function DashboardPage() {
                       detailHref={`/dashboard/estimates/${e.id}`}
                       shellStyle={{ ...pipelineJobCardShell, border: pipelineCardBorder.estimates }}
                       customerPhone={phone}
+                      smsCustomerName={cust}
+                      smsVehicleLine={veh}
+                      shopName={ctx.tenant.name}
                       isEstimate
                     >
                       <PipelineJobCardHeader
@@ -871,6 +874,9 @@ export default async function DashboardPage() {
                       detailHref={`/dashboard/work-orders/${w.id}`}
                       shellStyle={{ ...pipelineJobCardShell, border: pipelineCardBorder.workOrders }}
                       customerPhone={phone}
+                      smsCustomerName={cust}
+                      smsVehicleLine={veh}
+                      shopName={ctx.tenant.name}
                     >
                       <PipelineJobCardHeader
                         customerLabel={cust}
@@ -989,6 +995,9 @@ export default async function DashboardPage() {
                       detailHref={`/dashboard/work-orders/${w.id}`}
                       shellStyle={{ ...pipelineJobCardShell, border: pipelineCardBorder.completed }}
                       customerPhone={phone}
+                      smsCustomerName={cust}
+                      smsVehicleLine={veh}
+                      shopName={ctx.tenant.name}
                       isReadyPickup
                     >
                       <PipelineJobCardHeader
@@ -1322,6 +1331,9 @@ export default async function DashboardPage() {
                     detailHref={`/dashboard/estimates/${e.id}`}
                     shellStyle={{ ...advisorQueueCardShell, border: pipelineCardBorder.estimates }}
                     customerPhone={phone}
+                    smsCustomerName={cust}
+                    smsVehicleLine={veh}
+                    shopName={ctx.tenant.name}
                     isEstimate
                   >
                     <AdvisorQueueStageLabel text="Needs customer approval" />
@@ -1378,6 +1390,9 @@ export default async function DashboardPage() {
                     detailHref={`/dashboard/work-orders/${w.id}`}
                     shellStyle={{ ...advisorQueueCardShell, border: pipelineCardBorder.workOrders }}
                     customerPhone={phone}
+                    smsCustomerName={cust}
+                    smsVehicleLine={veh}
+                    shopName={ctx.tenant.name}
                   >
                     <AdvisorQueueStageLabel text="Active job needs attention" />
                     <PipelineJobCardHeader
@@ -1448,6 +1463,9 @@ export default async function DashboardPage() {
                     detailHref={`/dashboard/work-orders/${w.id}`}
                     shellStyle={{ ...advisorQueueCardShell, border: pipelineCardBorder.completed }}
                     customerPhone={phone}
+                    smsCustomerName={cust}
+                    smsVehicleLine={veh}
+                    shopName={ctx.tenant.name}
                     isReadyPickup
                   >
                     <AdvisorQueueStageLabel text="Ready — notify customer" />
