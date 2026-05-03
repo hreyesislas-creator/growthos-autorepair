@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getDashboardTenant } from '@/lib/tenant'
 import { getCurrentAppRoleForTenant } from '@/lib/auth/roles'
 import Sidebar from '@/components/dashboard/Sidebar'
+import NoActiveShopAssigned from '@/components/dashboard/NoActiveShopAssigned'
 import './dashboard.css'
 
 export const metadata: Metadata = {
@@ -31,8 +32,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
   console.log('[dashboard layout] ctx:', ctx ? `tenant=${ctx.tenant.slug}` : 'null')
 
   if (!ctx) {
-    console.log('[dashboard layout] no ctx — redirecting to /auth/login')
-    redirect('/auth/login')
+    console.log(
+      '[dashboard layout] authenticated user has no active tenant mapping — showing no-shop UI (not redirecting to login)',
+    )
+    return (
+      <div className="dash-shell">
+        <main className="dash-main" style={{ marginLeft: 0 }}>
+          <NoActiveShopAssigned />
+        </main>
+      </div>
+    )
   }
 
   const tenantName = ctx!.profile?.business_name ?? ctx!.tenant.name ?? 'Your Shop'
