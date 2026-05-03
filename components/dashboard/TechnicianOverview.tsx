@@ -100,16 +100,8 @@ function QueueSection({
             <li key={r.key}>
               <Link
                 href={r.href}
-                style={{
-                  display: 'block',
-                  textDecoration: 'none',
-                  color: 'inherit',
-                  padding: 14,
-                  borderRadius: 10,
-                  border: '1px solid var(--border-2)',
-                  borderLeft: `4px solid ${accentColor}`,
-                  background: 'var(--surface-2)',
-                }}
+                className="technician-queue-card"
+                style={{ borderLeftColor: accentColor }}
               >
                 <div
                   style={{
@@ -120,10 +112,10 @@ function QueueSection({
                   }}
                 >
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>
+                    <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--text)' }}>
                       {r.primary}
                     </div>
-                    <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 4 }}>
+                    <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-2)', marginTop: 4 }}>
                       {r.secondary}
                     </div>
                     {r.meta ? (

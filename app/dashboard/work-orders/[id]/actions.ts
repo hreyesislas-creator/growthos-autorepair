@@ -11,6 +11,7 @@ import {
 } from '@/lib/auth/roles'
 import { getDashboardTenant } from '@/lib/tenant'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import type { WorkOrderOperationalStatus, WorkOrderStatus } from '@/lib/types'
 import type { ArchiveResult } from '@/app/dashboard/inspections/actions'
 
@@ -26,6 +27,57 @@ export interface WorkOrderTimeSnapshot {
   /** Elapsed hours written by completeWorkOrder. NULL for other transitions. */
   actual_hours: number | null
   updated_at:   string
+}
+
+/**
+ * Ensures a primary technician row exists in work_order_assignments for work_orders.technician_id.
+ * Does not delete other assignment rows. Idempotent for the same technician.
+ */
+async function ensurePrimaryTechnicianAssignmentForWorkOrder(
+  adminClient: SupabaseClient,
+  tenantId: string,
+  workOrderId: string,
+  technicianTenantUserId: string,
+): Promise<void> {
+  const now = new Date().toISOString()
+
+  const { data: techRow, error: selErr } = await adminClient
+    .from('work_order_assignments')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .eq('work_order_id', workOrderId)
+    .eq('tenant_user_id', technicianTenantUserId)
+    .eq('assignment_role', 'technician')
+    .limit(1)
+    .maybeSingle()
+
+  if (selErr) {
+    console.error('[ensurePrimaryTechnicianAssignmentForWorkOrder] select', selErr.message)
+    return
+  }
+
+  if (techRow?.id) {
+    const { error } = await adminClient
+      .from('work_order_assignments')
+      .update({
+        is_primary: true,
+        updated_at: now,
+      })
+      .eq('id', techRow.id)
+      .eq('tenant_id', tenantId)
+    if (error) console.error('[ensurePrimaryTechnicianAssignmentForWorkOrder] update', error.message)
+    return
+  }
+
+  const { error } = await adminClient.from('work_order_assignments').insert({
+    tenant_id: tenantId,
+    work_order_id: workOrderId,
+    tenant_user_id: technicianTenantUserId,
+    assignment_role: 'technician',
+    is_primary: true,
+    updated_at: now,
+  })
+  if (error) console.error('[ensurePrimaryTechnicianAssignmentForWorkOrder] insert', error.message)
 }
 
 // ── updateWorkOrderStatus ─────────────────────────────────────────────────────
@@ -1044,6 +1096,16 @@ export async function setWorkOrderTechnician(
     .eq('tenant_id', tenantId)
 
   if (error) return { error: error.message }
+
+  if (technicianTenantUserId) {
+    await ensurePrimaryTechnicianAssignmentForWorkOrder(
+      adminClient,
+      tenantId,
+      workOrderId,
+      technicianTenantUserId,
+    )
+  }
+
   return null
 }
 
@@ -1072,5 +1134,13 @@ export async function claimWorkOrderForCurrentTechnician(
 
   if (error) return { error: error.message }
   if (!data) return { error: 'Already assigned or not found. Refresh the page.' }
+
+  await ensurePrimaryTechnicianAssignmentForWorkOrder(
+    adminClient,
+    tenantId,
+    workOrderId,
+    du.tenantUserId,
+  )
+
   return null
 }

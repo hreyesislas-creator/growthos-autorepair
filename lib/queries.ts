@@ -42,6 +42,7 @@ import type {
   WorkOrder,
   WorkOrderItem,
   WorkOrderWithItems,
+  WorkOrderAssignmentRole,
   Invoice,
   InvoiceItem,
   InvoiceWithItems,
@@ -2085,7 +2086,8 @@ export async function getVehiclePipelineSummaries(
 /** Minimal tenant_users row for technician initials on job cards. */
 export type TenantUserPipelineSummary = {
   id: string
-  full_name: string | null
+  first_name: string | null
+  last_name: string | null
   email: string | null
 }
 
@@ -2105,7 +2107,7 @@ export async function getTenantUsersByIds(
 
   const { data, error } = await supabase
     .from('tenant_users')
-    .select('id, full_name, email')
+    .select('id, first_name, last_name, email')
     .eq('tenant_id', tenantId)
     .in('id', unique)
 
@@ -2115,6 +2117,100 @@ export async function getTenantUsersByIds(
   }
 
   return (data ?? []) as TenantUserPipelineSummary[]
+}
+
+const WORK_ORDER_ASSIGNMENT_ROLES = new Set<WorkOrderAssignmentRole>([
+  'advisor',
+  'technician',
+  'supervisor',
+  'qc',
+])
+
+/** One assignment row + tenant_users display fields for job board avatars (read-only). */
+export type WorkOrderAssignmentBoardRow = {
+  work_order_id: string
+  tenant_user_id: string
+  assignment_role: WorkOrderAssignmentRole
+  is_primary: boolean
+  first_name: string | null
+  last_name: string | null
+  email: string | null
+}
+
+/**
+ * Batch-load work_order_assignments for pipeline / advisor queue cards.
+ * Includes tenant_users display fields; does not modify data.
+ */
+export async function getWorkOrderAssignmentsForBoard(
+  tenantId: string,
+  workOrderIds: string[],
+): Promise<WorkOrderAssignmentBoardRow[]> {
+  if (!hasValue(tenantId)) return []
+
+  const uniqueWoIds = [...new Set(workOrderIds.filter(id => hasValue(id)))]
+  if (uniqueWoIds.length === 0) return []
+
+  console.log('[Assignments Fetch]', {
+    workOrderIds: uniqueWoIds,
+    count: uniqueWoIds.length,
+  })
+
+  const admin = await createAdminClient()
+
+  const { data: rows, error } = await admin
+    .from('work_order_assignments')
+    .select('work_order_id, tenant_user_id, assignment_role, is_primary')
+    .eq('tenant_id', tenantId)
+    .in('work_order_id', uniqueWoIds)
+
+  if (error) {
+    console.error('[getWorkOrderAssignmentsForBoard]', error.message)
+    return []
+  }
+
+  const raw = rows ?? []
+  const userIds = [...new Set(raw.map(r => r.tenant_user_id as string).filter(hasValue))]
+  if (userIds.length === 0) return []
+
+  const { data: users, error: userErr } = await admin
+    .from('tenant_users')
+    .select('id, first_name, last_name, email')
+    .eq('tenant_id', tenantId)
+    .in('id', userIds)
+
+  if (userErr) {
+    console.error('[getWorkOrderAssignmentsForBoard] tenant_users', userErr.message)
+    return []
+  }
+
+  const userMap = new Map<
+    string,
+    { first_name: string | null; last_name: string | null; email: string | null }
+  >()
+  for (const u of users ?? []) {
+    userMap.set(u.id as string, {
+      first_name: (u.first_name as string | null) ?? null,
+      last_name: (u.last_name as string | null) ?? null,
+      email: (u.email as string | null) ?? null,
+    })
+  }
+
+  const out: WorkOrderAssignmentBoardRow[] = []
+  for (const r of raw) {
+    const role = r.assignment_role as string
+    if (!WORK_ORDER_ASSIGNMENT_ROLES.has(role as WorkOrderAssignmentRole)) continue
+    const tu = userMap.get(r.tenant_user_id as string)
+    out.push({
+      work_order_id: r.work_order_id as string,
+      tenant_user_id: r.tenant_user_id as string,
+      assignment_role: role as WorkOrderAssignmentRole,
+      is_primary: Boolean(r.is_primary),
+      first_name: tu?.first_name ?? null,
+      last_name: tu?.last_name ?? null,
+      email: tu?.email ?? null,
+    })
+  }
+  return out
 }
 
 // ── Vehicle service history (for detail page) ──────────────────

@@ -12,19 +12,6 @@ function normalizeTelHref(phone: string): string {
   return phone.replace(/[^\d+]/g, '')
 }
 
-const actionStyle: CSSProperties = {
-  fontSize: 11,
-  fontWeight: 600,
-  padding: 0,
-  border: 'none',
-  background: 'none',
-  color: 'var(--text-2)',
-  cursor: 'pointer',
-  fontFamily: 'inherit',
-  textDecoration: 'underline',
-  textUnderlineOffset: 2,
-}
-
 export type PipelineJobBoardCardProps = {
   detailHref: string
   shellStyle: CSSProperties
@@ -95,6 +82,7 @@ export default function PipelineJobBoardCard({
   return (
     <>
       <div
+        className="pipeline-job-card"
         role="button"
         tabIndex={0}
         onClick={openDetail}
@@ -116,27 +104,27 @@ export default function PipelineJobBoardCard({
           {canCall ? (
             <a
               href={`tel:${telHref}`}
+              className="pipeline-action"
               onClick={swallowCardClick}
-              style={{ ...actionStyle, textDecoration: 'underline' }}
             >
               Call
             </a>
           ) : null}
-          <button type="button" style={actionStyle} onClick={() => router.push(detailHref)}>
+          <button type="button" className="pipeline-action" onClick={() => router.push(detailHref)}>
             Open
           </button>
-          <button type="button" style={actionStyle} onClick={() => router.push('/dashboard/communications')}>
+          <button type="button" className="pipeline-action" onClick={() => router.push('/dashboard/communications')}>
             Log
           </button>
           {isEstimate ? (
-            <button type="button" style={actionStyle} onClick={() => openSmsPreview('estimate_followup')}>
+            <button type="button" className="pipeline-action" onClick={() => openSmsPreview('estimate_followup')}>
               Follow up
             </button>
           ) : null}
           {isReadyPickup ? (
             <button
               type="button"
-              style={actionStyle}
+              className="pipeline-action"
               aria-label="Notify customer"
               onClick={() => openSmsPreview('ready_for_pickup')}
             >

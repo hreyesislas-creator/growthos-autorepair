@@ -845,6 +845,24 @@ export type WorkOrderOperationalStatus =
   | 'on_hold'
   | 'need_to_order_parts'
 
+/** Work order team assignment row (see migration 20240028_work_order_assignments). */
+export type WorkOrderAssignmentRole =
+  | 'advisor'
+  | 'technician'
+  | 'supervisor'
+  | 'qc'
+
+export interface WorkOrderAssignment {
+  id:               string
+  tenant_id:        string
+  work_order_id:    string
+  tenant_user_id:   string
+  assignment_role:  WorkOrderAssignmentRole
+  is_primary:       boolean
+  created_at:       string
+  updated_at:       string
+}
+
 export interface WorkOrder {
   id:                   string
   tenant_id:            string

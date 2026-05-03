@@ -35,31 +35,14 @@ export default function AdvisorSmsPreviewModal({
   const phoneLine = phoneDisplay?.trim() || '—'
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="advisor-sms-preview-title"
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 2000,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 16,
-        background: 'rgba(15, 23, 42, 0.45)',
-      }}
-      onClick={onClose}
-    >
+    <div className="advisor-sms-modal-root">
+      <button type="button" className="advisor-sms-modal-backdrop" aria-label="Close" onClick={onClose} />
       <div
-        className="card"
-        style={{
-          width: 'min(420px, 100%)',
-          maxHeight: '90vh',
-          overflow: 'auto',
-          padding: '18px 18px 16px',
-          boxShadow: 'var(--shadow-sm, 0 8px 24px rgba(15,23,42,.12))',
-        }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="advisor-sms-preview-title"
+        className="card advisor-sms-modal-panel"
+        style={{ padding: '18px 18px 16px' }}
         onClick={e => e.stopPropagation()}
       >
         <div id="advisor-sms-preview-title" style={{ fontSize: 15, fontWeight: 700, color: 'var(--navy)' }}>

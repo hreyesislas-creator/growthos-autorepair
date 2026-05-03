@@ -20,6 +20,8 @@ import {
   getInspections,
   getTechnicianWeekWorkOrderMetrics,
   getShopAnnouncementsForTenant,
+  getWorkOrderAssignmentsForBoard,
+  type WorkOrderAssignmentBoardRow,
 } from '@/lib/queries'
 import { getFinancialDashboardData } from '@/lib/financial-queries'
 import { canEditDashboardModule, getCurrentAppRoleForTenant } from '@/lib/auth/roles'
@@ -31,7 +33,7 @@ import PipelineJobBoardCard from '@/components/dashboard/PipelineJobBoardCard'
 import WorkOrderOperationalStatusPicker from '@/components/dashboard/WorkOrderOperationalStatusPicker'
 import Link from 'next/link'
 import { differenceInCalendarDays, differenceInMinutes, format, parseISO, startOfDay } from 'date-fns'
-import type { Estimate, WorkOrder } from '@/lib/types'
+import type { Estimate, WorkOrder, WorkOrderAssignmentRole } from '@/lib/types'
 
 export const metadata = { title: 'Overview' }
 
@@ -209,7 +211,7 @@ function pipelineTechnicianInitials(
   row: TenantUserPipelineSummary | undefined,
 ): { initials: string; displayName: string } | null {
   if (!row) return null
-  const name = row.full_name?.trim()
+  const name = [row.first_name, row.last_name].filter(Boolean).join(' ').trim()
   if (name) {
     const parts = name.split(/\s+/).filter(Boolean)
     let initials: string
@@ -236,14 +238,79 @@ function pipelineTechnicianInitials(
   return null
 }
 
+const PIPELINE_ASSIGNMENT_ROLE_ORDER: Record<WorkOrderAssignmentRole, number> = {
+  technician: 0,
+  advisor: 1,
+  supervisor: 2,
+  qc: 3,
+}
+
+function workOrderAssignmentRoleLabel(role: WorkOrderAssignmentRole): string {
+  switch (role) {
+    case 'technician':
+      return 'Technician'
+    case 'advisor':
+      return 'Advisor'
+    case 'supervisor':
+      return 'Supervisor'
+    case 'qc':
+      return 'QC'
+    default:
+      return role
+  }
+}
+
+type PipelineAssignmentAvatarItem = {
+  key: string
+  initials: string
+  title: string
+  role: WorkOrderAssignmentRole
+}
+
+function pipelineAssignmentAvatarItemsFromRows(rows: WorkOrderAssignmentBoardRow[]): PipelineAssignmentAvatarItem[] {
+  return rows.flatMap(r => {
+    const t = pipelineTechnicianInitials({
+      id: r.tenant_user_id,
+      first_name: r.first_name,
+      last_name: r.last_name,
+      email: r.email,
+    })
+    if (!t) return []
+    const primaryNote = r.is_primary && r.assignment_role === 'technician' ? ' (primary)' : ''
+    const title = `${t.displayName} · ${workOrderAssignmentRoleLabel(r.assignment_role)}${primaryNote}`
+    return [
+      {
+        key: `${r.work_order_id}:${r.tenant_user_id}:${r.assignment_role}`,
+        initials: t.initials,
+        title,
+        role: r.assignment_role,
+      },
+    ]
+  })
+}
+
 function PipelineJobCardHeader(props: {
   customerLabel: string
   customerPhone?: string | null
   docLabel: string
   techInitials?: string | null
   techTooltip?: string | null
+  /** From work_order_assignments; when non-empty, hides legacy single tech avatar. */
+  assignmentAvatars?: PipelineAssignmentAvatarItem[] | null
+  assignmentOverflowCount?: number
+  assignmentOverflowTitle?: string | null
 }) {
-  const { customerLabel, customerPhone, docLabel, techInitials, techTooltip } = props
+  const {
+    customerLabel,
+    customerPhone,
+    docLabel,
+    techInitials,
+    techTooltip,
+    assignmentAvatars,
+    assignmentOverflowCount,
+    assignmentOverflowTitle,
+  } = props
+  const showAssignmentStack = assignmentAvatars != null && assignmentAvatars.length > 0
   return (
     <div
       style={{
@@ -271,7 +338,30 @@ function PipelineJobCardHeader(props: {
         ) : null}
       </div>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, flexShrink: 0 }}>
-        {techInitials ? (
+        {showAssignmentStack ? (
+          <div className="pipeline-assignment-stack">
+            {assignmentAvatars!.map(a => (
+              <span
+                key={a.key}
+                className={`pipeline-assignment-avatar pipeline-assignment-avatar--${a.role}`}
+                title={a.title}
+                aria-label={a.title}
+                style={{ fontSize: a.initials.length > 1 ? 9 : 10 }}
+              >
+                {a.initials}
+              </span>
+            ))}
+            {assignmentOverflowCount != null && assignmentOverflowCount > 0 ? (
+              <span
+                className="pipeline-assignment-more"
+                title={assignmentOverflowTitle ?? undefined}
+                aria-label={assignmentOverflowTitle ?? `${assignmentOverflowCount} more team members`}
+              >
+                +{assignmentOverflowCount}
+              </span>
+            ) : null}
+          </div>
+        ) : techInitials ? (
           <span
             className="pipeline-tech-avatar"
             title={techTooltip ?? undefined}
@@ -468,15 +558,21 @@ export default async function DashboardPage() {
     if (w.customer_id) custIds.add(w.customer_id)
     if (w.vehicle_id) vehIds.add(w.vehicle_id)
   }
+  const boardWoIds = [...inProgressWO, ...completedWO].map(w => w.id)
+  console.log('[Board WO IDS]', boardWoIds)
+
   const techIds = new Set<string>()
   for (const w of [...inProgressWO, ...completedWO]) {
     if (w.technician_id) techIds.add(w.technician_id)
   }
-  const [customerRows, vehicleRows, tenantUserRows] = await Promise.all([
+  const [customerRows, vehicleRows, tenantUserRows, assignmentBoardRows] = await Promise.all([
     getCustomerPipelineSummaries([...custIds]),
     getVehiclePipelineSummaries([...vehIds]),
     getTenantUsersByIds(tenantId, [...techIds]),
+    getWorkOrderAssignmentsForBoard(tenantId, boardWoIds),
   ])
+  console.log('[Assignments Rows]', assignmentBoardRows.length)
+
   const customerPipelineMap = new Map<string, CustomerPipelineSummary>()
   for (const r of customerRows) customerPipelineMap.set(r.id, r)
   const vehiclePipelineMap = new Map<string, VehiclePipelineSummary>()
@@ -485,6 +581,49 @@ export default async function DashboardPage() {
   for (const r of tenantUserRows) {
     const t = pipelineTechnicianInitials(r)
     if (t) technicianPipelineMap.set(r.id, t)
+  }
+
+  const workOrderAssignmentBoardMap = new Map<string, WorkOrderAssignmentBoardRow[]>()
+  for (const r of assignmentBoardRows) {
+    const list = workOrderAssignmentBoardMap.get(r.work_order_id) ?? []
+    list.push(r)
+    workOrderAssignmentBoardMap.set(r.work_order_id, list)
+  }
+  for (const list of workOrderAssignmentBoardMap.values()) {
+    list.sort((a, b) => {
+      if (a.is_primary !== b.is_primary) return a.is_primary ? -1 : 1
+      const oa = PIPELINE_ASSIGNMENT_ROLE_ORDER[a.assignment_role]
+      const ob = PIPELINE_ASSIGNMENT_ROLE_ORDER[b.assignment_role]
+      if (oa !== ob) return oa - ob
+      return a.tenant_user_id.localeCompare(b.tenant_user_id)
+    })
+  }
+
+  function pipelineWoHeaderAssignmentProps(w: WorkOrder): {
+    techInitials?: string | null
+    techTooltip?: string | null
+    assignmentAvatars?: PipelineAssignmentAvatarItem[] | null
+    assignmentOverflowCount?: number
+    assignmentOverflowTitle?: string | null
+  } {
+    const rows = workOrderAssignmentBoardMap.get(w.id)
+    if (rows && rows.length > 0) {
+      const items = pipelineAssignmentAvatarItemsFromRows(rows)
+      if (items.length > 0) {
+        const visible = items.slice(0, 4)
+        const rest = items.slice(4)
+        return {
+          assignmentAvatars: visible,
+          assignmentOverflowCount: rest.length > 0 ? rest.length : undefined,
+          assignmentOverflowTitle: rest.length > 0 ? rest.map(x => x.title).join('\n') : null,
+        }
+      }
+    }
+    const tech = w.technician_id ? technicianPipelineMap.get(w.technician_id) : undefined
+    return {
+      techInitials: tech?.initials ?? null,
+      techTooltip: tech?.displayName ?? null,
+    }
   }
 
   const currentTenantUserIdForWo = dashboardDu?.tenantUserId ?? ''
@@ -842,7 +981,6 @@ export default async function DashboardPage() {
                 const phone = custRow?.phone?.trim() || null
                 const veh = w.vehicle_id ? pipelineVehicleLabelFromRow(vehRow) : '—'
                 const plate = vehRow?.license_plate?.trim() || null
-                const tech = w.technician_id ? technicianPipelineMap.get(w.technician_id) : undefined
                 return (
                   <li key={w.id}>
                     <PipelineJobBoardCard
@@ -857,8 +995,7 @@ export default async function DashboardPage() {
                         customerLabel={cust}
                         customerPhone={phone}
                         docLabel={pipelineWorkOrderDoc(w)}
-                        techInitials={tech?.initials}
-                        techTooltip={tech?.displayName}
+                        {...pipelineWoHeaderAssignmentProps(w)}
                       />
                       <div
                         style={{
@@ -961,7 +1098,6 @@ export default async function DashboardPage() {
                 const phone = custRow?.phone?.trim() || null
                 const veh = w.vehicle_id ? pipelineVehicleLabelFromRow(vehRow) : '—'
                 const plate = vehRow?.license_plate?.trim() || null
-                const tech = w.technician_id ? technicianPipelineMap.get(w.technician_id) : undefined
                 return (
                   <li key={w.id}>
                     <PipelineJobBoardCard
@@ -977,8 +1113,7 @@ export default async function DashboardPage() {
                         customerLabel={cust}
                         customerPhone={phone}
                         docLabel={pipelineWorkOrderDoc(w)}
-                        techInitials={tech?.initials}
-                        techTooltip={tech?.displayName}
+                        {...pipelineWoHeaderAssignmentProps(w)}
                       />
                       <div
                         style={{
@@ -1367,7 +1502,6 @@ export default async function DashboardPage() {
                 const phone = custRow?.phone?.trim() || null
                 const veh = w.vehicle_id ? pipelineVehicleLabelFromRow(vehRow) : '—'
                 const plate = vehRow?.license_plate?.trim() || null
-                const tech = w.technician_id ? technicianPipelineMap.get(w.technician_id) : undefined
                 return (
                   <PipelineJobBoardCard
                     key={`q-wo-${w.id}`}
@@ -1383,8 +1517,7 @@ export default async function DashboardPage() {
                       customerLabel={cust}
                       customerPhone={phone}
                       docLabel={pipelineWorkOrderDoc(w)}
-                      techInitials={tech?.initials}
-                      techTooltip={tech?.displayName}
+                      {...pipelineWoHeaderAssignmentProps(w)}
                     />
                     <div
                       style={{
@@ -1445,7 +1578,6 @@ export default async function DashboardPage() {
                 const phone = custRow?.phone?.trim() || null
                 const veh = w.vehicle_id ? pipelineVehicleLabelFromRow(vehRow) : '—'
                 const plate = vehRow?.license_plate?.trim() || null
-                const tech = w.technician_id ? technicianPipelineMap.get(w.technician_id) : undefined
                 return (
                   <PipelineJobBoardCard
                     key={`q-pu-${w.id}`}
@@ -1462,8 +1594,7 @@ export default async function DashboardPage() {
                       customerLabel={cust}
                       customerPhone={phone}
                       docLabel={pipelineWorkOrderDoc(w)}
-                      techInitials={tech?.initials}
-                      techTooltip={tech?.displayName}
+                      {...pipelineWoHeaderAssignmentProps(w)}
                     />
                     <div
                       style={{
