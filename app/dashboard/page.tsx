@@ -24,7 +24,8 @@ import Topbar from '@/components/dashboard/Topbar'
 import TechnicianOverview from '@/components/dashboard/TechnicianOverview'
 import StatusBadge from '@/components/dashboard/StatusBadge'
 import Link from 'next/link'
-import { differenceInCalendarDays, format, parseISO, startOfDay } from 'date-fns'
+import { differenceInCalendarDays, differenceInMinutes, format, parseISO, startOfDay } from 'date-fns'
+import type { Estimate, WorkOrder } from '@/lib/types'
 
 export const metadata = { title: 'Overview' }
 
@@ -145,6 +146,118 @@ const pipelineCardBorder = {
   workOrders: '1px solid rgba(59, 130, 246, 0.4)',
   completed: '1px solid rgba(34, 197, 94, 0.4)',
 } as const
+
+/** Shared shell for pipeline job links (typography / spacing handled in children). */
+const pipelineJobCardShell: React.CSSProperties = {
+  display: 'block',
+  textDecoration: 'none',
+  color: 'inherit',
+  padding: '14px 16px',
+  borderRadius: 10,
+  boxShadow: 'var(--shadow-sm)',
+  background: 'var(--surface)',
+}
+
+/** Slightly tighter padding for advisor queue rows (same visual hierarchy as pipeline cards). */
+const advisorQueueCardShell: React.CSSProperties = {
+  ...pipelineJobCardShell,
+  padding: '12px 14px',
+}
+
+const advisorQueueInspectionBorder = '1px solid rgba(124, 58, 237, 0.42)' as const
+const advisorQueueMessagesBorder = '1px solid rgba(59, 130, 246, 0.4)' as const
+
+const pipelineTechDotStyle: React.CSSProperties = {
+  width: 26,
+  height: 26,
+  borderRadius: '50%',
+  background: 'var(--blue-soft)',
+  border: '1px solid var(--blue-border)',
+  color: 'var(--blue)',
+  fontSize: 11,
+  fontWeight: 700,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  flexShrink: 0,
+}
+
+function pipelineEstimateDoc(e: Estimate): string {
+  return e.estimate_number?.trim() || 'EST'
+}
+
+function pipelineWorkOrderDoc(w: WorkOrder): string {
+  return w.work_order_number?.trim() || 'RO'
+}
+
+/** Uses only fields already on the work order row (no extra fetches). */
+function pipelineWorkOrderProgressHint(w: WorkOrder, phase: 'active' | 'completed'): string | null {
+  if (phase === 'completed' && w.actual_hours != null && w.actual_hours > 0) {
+    return `Shop time · ${w.actual_hours}h`
+  }
+  if (phase !== 'active' || !w.started_at) return null
+  const s = parseISO(w.started_at)
+  if (Number.isNaN(s.getTime())) return null
+  const mins = differenceInMinutes(new Date(), s)
+  if (mins < 0) return null
+  if (mins < 60) return `In shop · ${mins}m`
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return m > 0 ? `In shop · ${h}h ${m}m` : `In shop · ${h}h`
+}
+
+function PipelineJobCardHeader(props: { customerLabel: string; docLabel: string; techAssigned: boolean }) {
+  const { customerLabel, docLabel, techAssigned } = props
+  return (
+    <div
+      style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        gap: 10,
+        marginBottom: 8,
+      }}
+    >
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.3, color: 'var(--text)' }}>{customerLabel}</div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, flexShrink: 0 }}>
+        {techAssigned ? (
+          <span title="Technician assigned" aria-label="Technician assigned" style={pipelineTechDotStyle}>
+            T
+          </span>
+        ) : null}
+        <div
+          style={{
+            fontSize: 12,
+            fontWeight: 700,
+            fontFamily: 'var(--font-mono)',
+            color: 'var(--text-2)',
+            lineHeight: 1.25,
+            textAlign: 'right',
+            maxWidth: 128,
+            wordBreak: 'break-word',
+          }}
+        >
+          {docLabel}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const advisorQueueStageLabelStyle: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  letterSpacing: '0.04em',
+  textTransform: 'uppercase',
+  color: 'var(--text-2)',
+  marginBottom: 6,
+}
+
+function AdvisorQueueStageLabel({ text }: { text: string }) {
+  return <div style={advisorQueueStageLabelStyle}>{text}</div>
+}
 
 type PipelineAgingBucket = 'fresh' | 'recent' | 'stale' | 'urgent'
 
@@ -371,6 +484,15 @@ export default async function DashboardPage() {
 
   const overviewAll = [...overviewRow1, ...overviewRow2]
 
+  /** Owner / admin dashboard only: cash KPIs, revenue opportunities, billing summary, pipeline dollar amounts. */
+  const canViewFinancialOverview = role === 'admin'
+  const isServiceAdvisor = role === 'service_advisor'
+
+  const FINANCIAL_OVERVIEW_KPIS = new Set<string>(["Today's cash", 'Cash this week', 'Cash this month'])
+  const overviewDisplayed = canViewFinancialOverview
+    ? overviewAll
+    : overviewAll.filter(item => !FINANCIAL_OVERVIEW_KPIS.has(item.label))
+
   const secondaryKpis: {
     label: string
     value: number
@@ -383,6 +505,10 @@ export default async function DashboardPage() {
     { label: 'Inspections', value: pendingInsp, hint: 'Pending review', href: '/dashboard/inspections' },
     { label: 'Messages', value: msgCount, hint: 'This week', href: '/dashboard/communications', accent: 'blue' },
   ]
+
+  const secondaryKpisDisplayed = isServiceAdvisor
+    ? secondaryKpis.filter(k => k.label !== 'Messages')
+    : secondaryKpis
 
   const dashboardHeaderQuickLinks = [
     { label: 'New Appointment', href: '/dashboard/appointments' },
@@ -398,85 +524,492 @@ export default async function DashboardPage() {
     background: 'var(--bg-2)',
   }
 
+  const topbarTitle = canViewFinancialOverview ? 'Dashboard' : "Today's Operations"
+  const topbarSubtitle = canViewFinancialOverview
+    ? today
+    : isServiceAdvisor
+      ? 'Focus on appointments, active jobs, inspections, approvals, and vehicles ready for pickup.'
+      : `${today} · Focus on today's appointments, active jobs, inspections, and vehicles ready for pickup.`
+
+  const plMainTitle = isServiceAdvisor ? 'Daily pipeline' : 'Shop pipeline'
+  const plMainSub = isServiceAdvisor
+    ? 'Waiting on approval, in progress, and ready for pickup.'
+    : 'Estimates awaiting action, active work, and completed jobs'
+  const plEstTitle = isServiceAdvisor ? 'Waiting on approval' : 'Estimates'
+  const plEstSub = 'Pending customer approval or follow-up'
+  const plWoTitle = isServiceAdvisor ? 'In progress' : 'Work orders'
+  const plWoSub = 'Work currently in the shop'
+  const plDoneTitle = isServiceAdvisor ? 'Ready for pickup' : 'Completed / ready'
+  const plDoneSub = 'Completed — notify customer'
+
+  const pipelineColTitleStyle: React.CSSProperties = {
+    fontSize: 16,
+    fontWeight: 700,
+    letterSpacing: '-0.02em',
+    color: 'var(--navy)',
+  }
+  const pipelineColDescStyle: React.CSSProperties = {
+    fontSize: 13,
+    color: 'var(--text-2)',
+    lineHeight: 1.45,
+    marginBottom: 12,
+    marginTop: 2,
+  }
+
+  const scheduleEl = (
+    <div style={{ marginBottom: 24 }}>
+      <div className="card">
+        <div className="section-header">
+          <div>
+            <div className="section-title">Today&apos;s schedule</div>
+            <div className="section-subtitle">{today}</div>
+          </div>
+          <Link href="/dashboard/appointments" className="btn-ghost">
+            Calendar
+          </Link>
+        </div>
+        {todayAppts.length === 0 ? (
+          <div className="empty-state" style={{ padding: '24px 12px' }}>
+            <div className="empty-state-icon">📅</div>
+            <div className="empty-state-title">Clear calendar</div>
+            <div className="empty-state-body">No appointments on the books for today.</div>
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Customer</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {todayAppts.slice(0, 6).map(a => (
+                  <tr key={a.id}>
+                    <td
+                      style={{
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: 12,
+                        color: 'var(--text-3)',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {a.appointment_time
+                        ? format(new Date(`2000-01-01T${a.appointment_time}`), 'h:mm a')
+                        : '—'}
+                    </td>
+                    <td style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)' }}>
+                      {a.customer ? `${a.customer.first_name} ${a.customer.last_name}` : '—'}
+                    </td>
+                    <td>
+                      <StatusBadge status={a.status} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {todayAppts.length > 6 && (
+              <div style={{ fontSize: 12, color: 'var(--text-3)', padding: '10px 0 0', textAlign: 'center' }}>
+                +{todayAppts.length - 6} more —{' '}
+                <Link href="/dashboard/appointments" style={{ color: '#2563eb', fontWeight: 600 }}>
+                  view all
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+
+  const pipelineEl = (
+    <div className="card" style={{ marginBottom: 24, padding: '18px 18px 16px' }}>
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
+          gap: 12,
+          marginBottom: 16,
+        }}
+      >
+        <div>
+          <div style={sectionLabel}>{plMainTitle}</div>
+          <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: -4 }}>{plMainSub}</div>
+        </div>
+      </div>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+          gap: 16,
+        }}
+      >
+        {/* Column 1 — Estimates / waiting on approval */}
+        <div
+          style={{
+            borderRadius: 12,
+            border: '1px solid rgba(234, 179, 8, 0.35)',
+            background: 'linear-gradient(180deg, rgba(254, 252, 232, 0.35) 0%, var(--bg-2) 48%)',
+            borderTop: '3px solid #ca8a04',
+            padding: '14px 14px 12px',
+            minWidth: 0,
+            boxShadow: '0 1px 0 rgba(15, 23, 42, 0.04)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+            <div style={pipelineColTitleStyle}>{plEstTitle}</div>
+            <Link href="/dashboard/estimates" className="btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }}>
+              All
+            </Link>
+          </div>
+          <div style={pipelineColDescStyle}>{plEstSub}</div>
+          {pipelineEstimates.length === 0 ? (
+            <div style={{ fontSize: 13, color: 'var(--text-2)', padding: '12px 0' }}>None in this stage.</div>
+          ) : (
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {pipelineEstimates.map(e => {
+                const aging = estimatePipelineAging(e.updated_at)
+                const cust = e.customer_id ? (customerNames.get(e.customer_id) ?? '—') : '—'
+                const veh = e.vehicle_id ? (vehicleLabels.get(e.vehicle_id) ?? '—') : '—'
+                return (
+                  <li key={e.id}>
+                    <Link
+                      href={`/dashboard/estimates/${e.id}`}
+                      style={{ ...pipelineJobCardShell, border: pipelineCardBorder.estimates }}
+                    >
+                      <PipelineJobCardHeader
+                        customerLabel={cust}
+                        docLabel={pipelineEstimateDoc(e)}
+                        techAssigned={false}
+                      />
+                      <div
+                        style={{
+                          fontSize: 14,
+                          fontWeight: 600,
+                          color: 'var(--text-2)',
+                          lineHeight: 1.45,
+                          marginBottom: 2,
+                        }}
+                      >
+                        {veh}
+                      </div>
+                      <div className={`pipeline-aging pipeline-aging--${aging.bucket}`}>{aging.line}</div>
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: canViewFinancialOverview ? 'space-between' : 'flex-end',
+                          alignItems: 'center',
+                          gap: 10,
+                          marginTop: 12,
+                          flexWrap: 'wrap',
+                        }}
+                      >
+                        {canViewFinancialOverview && (
+                          <span
+                            style={{
+                              fontSize: 13,
+                              fontWeight: 700,
+                              fontFamily: 'var(--font-mono)',
+                              color: 'var(--text)',
+                            }}
+                          >
+                            {fmtMoney(e.total)}
+                          </span>
+                        )}
+                        <StatusBadge status={e.status} />
+                      </div>
+                    </Link>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+
+        {/* Column 2 — Work orders (active) */}
+        <div
+          style={{
+            borderRadius: 12,
+            border: '1px solid rgba(59, 130, 246, 0.35)',
+            background: 'linear-gradient(180deg, rgba(239, 246, 255, 0.25) 0%, var(--bg-2) 48%)',
+            borderTop: '3px solid #2563eb',
+            padding: '14px 14px 12px',
+            minWidth: 0,
+            boxShadow: '0 1px 0 rgba(15, 23, 42, 0.04)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+            <div style={pipelineColTitleStyle}>{plWoTitle}</div>
+            <Link href="/dashboard/work-orders" className="btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }}>
+              All
+            </Link>
+          </div>
+          <div style={pipelineColDescStyle}>{plWoSub}</div>
+          {inProgressWO.length === 0 ? (
+            <div style={{ fontSize: 13, color: 'var(--text-2)', padding: '12px 0' }}>Bay clear.</div>
+          ) : (
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {inProgressWO.map(w => {
+                const aging = activeWorkOrderPipelineAging(w.updated_at)
+                const prog = pipelineWorkOrderProgressHint(w, 'active')
+                const cust = w.customer_id ? (customerNames.get(w.customer_id) ?? '—') : '—'
+                const veh = w.vehicle_id ? (vehicleLabels.get(w.vehicle_id) ?? '—') : '—'
+                return (
+                  <li key={w.id}>
+                    <Link
+                      href={`/dashboard/work-orders/${w.id}`}
+                      style={{ ...pipelineJobCardShell, border: pipelineCardBorder.workOrders }}
+                    >
+                      <PipelineJobCardHeader
+                        customerLabel={cust}
+                        docLabel={pipelineWorkOrderDoc(w)}
+                        techAssigned={Boolean(w.technician_id)}
+                      />
+                      <div
+                        style={{
+                          fontSize: 14,
+                          fontWeight: 600,
+                          color: 'var(--text-2)',
+                          lineHeight: 1.45,
+                          marginBottom: 2,
+                        }}
+                      >
+                        {veh}
+                      </div>
+                      {prog ? (
+                        <div
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 600,
+                            color: 'var(--text-2)',
+                            marginTop: 4,
+                            lineHeight: 1.35,
+                          }}
+                        >
+                          {prog}
+                        </div>
+                      ) : null}
+                      <div className={`pipeline-aging pipeline-aging--${aging.bucket}`}>{aging.line}</div>
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: canViewFinancialOverview ? 'space-between' : 'flex-end',
+                          alignItems: 'center',
+                          gap: 10,
+                          marginTop: 12,
+                          flexWrap: 'wrap',
+                        }}
+                      >
+                        {canViewFinancialOverview && (
+                          <span
+                            style={{
+                              fontSize: 13,
+                              fontWeight: 700,
+                              fontFamily: 'var(--font-mono)',
+                              color: 'var(--text)',
+                            }}
+                          >
+                            {fmtMoney(w.total)}
+                          </span>
+                        )}
+                        <StatusBadge status={w.status} />
+                      </div>
+                    </Link>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+
+        {/* Column 3 — Completed / ready for pickup */}
+        <div
+          style={{
+            borderRadius: 12,
+            border: '1px solid rgba(34, 197, 94, 0.35)',
+            background: 'linear-gradient(180deg, rgba(240, 253, 244, 0.22) 0%, var(--bg-2) 48%)',
+            borderTop: '3px solid #16a34a',
+            padding: '14px 14px 12px',
+            minWidth: 0,
+            boxShadow: '0 1px 0 rgba(15, 23, 42, 0.04)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+            <div style={pipelineColTitleStyle}>{plDoneTitle}</div>
+            <Link href="/dashboard/work-orders" className="btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }}>
+              All
+            </Link>
+          </div>
+          <div style={pipelineColDescStyle}>{plDoneSub}</div>
+          {completedWO.length === 0 ? (
+            <div style={{ fontSize: 13, color: 'var(--text-2)', padding: '12px 0' }}>No completed jobs yet.</div>
+          ) : (
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {completedWO.map(w => {
+                const aging = completedWorkOrderPipelineAging(w.completed_at, w.updated_at)
+                const prog = pipelineWorkOrderProgressHint(w, 'completed')
+                const cust = w.customer_id ? (customerNames.get(w.customer_id) ?? '—') : '—'
+                const veh = w.vehicle_id ? (vehicleLabels.get(w.vehicle_id) ?? '—') : '—'
+                return (
+                  <li key={w.id}>
+                    <Link
+                      href={`/dashboard/work-orders/${w.id}`}
+                      style={{ ...pipelineJobCardShell, border: pipelineCardBorder.completed }}
+                    >
+                      <PipelineJobCardHeader
+                        customerLabel={cust}
+                        docLabel={pipelineWorkOrderDoc(w)}
+                        techAssigned={Boolean(w.technician_id)}
+                      />
+                      <div
+                        style={{
+                          fontSize: 14,
+                          fontWeight: 600,
+                          color: 'var(--text-2)',
+                          lineHeight: 1.45,
+                          marginBottom: 2,
+                        }}
+                      >
+                        {veh}
+                      </div>
+                      {prog ? (
+                        <div
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 600,
+                            color: 'var(--text-2)',
+                            marginTop: 4,
+                            lineHeight: 1.35,
+                          }}
+                        >
+                          {prog}
+                        </div>
+                      ) : null}
+                      <div className={`pipeline-aging pipeline-aging--${aging.bucket}`}>{aging.line}</div>
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: canViewFinancialOverview ? 'space-between' : 'flex-end',
+                          alignItems: 'center',
+                          gap: 10,
+                          marginTop: 12,
+                          flexWrap: 'wrap',
+                        }}
+                      >
+                        {canViewFinancialOverview && (
+                          <span
+                            style={{
+                              fontSize: 13,
+                              fontWeight: 700,
+                              fontFamily: 'var(--font-mono)',
+                              color: 'var(--text)',
+                            }}
+                          >
+                            {fmtMoney(w.total)}
+                          </span>
+                        )}
+                        <StatusBadge status="completed" label="Ready for Pickup" />
+                      </div>
+                    </Link>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+
   return (
     <>
-      <Topbar title="Dashboard" subtitle={today} quickLinks={dashboardHeaderQuickLinks} />
+      <Topbar title={topbarTitle} subtitle={topbarSubtitle} quickLinks={dashboardHeaderQuickLinks} />
       <div className="dash-content">
 
-        {/* ── Shop overview: cash + jobs (single KPI row) ────────────────── */}
-        <div className="shop-today-section" style={{ marginBottom: 16 }}>
-          <div style={{ ...sectionLabel, marginBottom: 8 }}>Shop overview</div>
+        {!isServiceAdvisor && (
+          <div className="shop-today-section" style={{ marginBottom: 16 }}>
+          <div style={{ ...sectionLabel, marginBottom: 8 }}>
+            {canViewFinancialOverview ? 'Shop overview' : 'Operations snapshot'}
+          </div>
           <div style={overviewKpiGridStyle}>
-            {overviewAll.map(item => (
+            {overviewDisplayed.map(item => (
               <OverviewKpi key={item.label} {...item} />
             ))}
           </div>
-          <div className="revenue-opportunities-module">
-            <div className="revenue-opportunities-module__head">
-              <div className="revenue-opportunities-module__title">Revenue Opportunities</div>
-              <p className="revenue-opportunities-module__sub">
-                Money that still needs action — follow up to move revenue today.
-              </p>
+          {canViewFinancialOverview && (
+            <div className="revenue-opportunities-module">
+              <div className="revenue-opportunities-module__head">
+                <div className="revenue-opportunities-module__title">Revenue Opportunities</div>
+                <p className="revenue-opportunities-module__sub">
+                  Money that still needs action — follow up to move revenue today.
+                </p>
+              </div>
+              <div className="revenue-opportunities-module__grid">
+                <Link href="/dashboard/estimates" className="revenue-opp-card revenue-opp-card--estimates">
+                  <div className="revenue-opp-card__label">Pending Estimates</div>
+                  <div className="revenue-opp-card__metrics">
+                    <span className="revenue-opp-card__count">{revenueOpportunities.pendingEstimatesCount}</span>
+                    <div className="revenue-opp-card__amount-block">
+                      <span className="revenue-opp-card__amount">
+                        {fmtMoney(revenueOpportunities.pendingEstimatesPotential)}
+                      </span>
+                      <span className="revenue-opp-card__amount-suffix">potential</span>
+                    </div>
+                  </div>
+                  <div className="revenue-opp-card__footer">
+                    <span className="revenue-opp-card__hint">Needs follow-up</span>
+                    <span className="revenue-opp-card__cta">View estimates →</span>
+                  </div>
+                </Link>
+                <Link href="/dashboard/work-orders" className="revenue-opp-card revenue-opp-card--pickup">
+                  <div className="revenue-opp-card__label">Ready for Pickup</div>
+                  <div className="revenue-opp-card__metrics">
+                    <span className="revenue-opp-card__count">{revenueOpportunities.readyPickupCount}</span>
+                    <div className="revenue-opp-card__amount-block">
+                      <span className="revenue-opp-card__amount">
+                        {fmtMoney(revenueOpportunities.readyPickupInvoiceTotal)}
+                      </span>
+                      <span className="revenue-opp-card__amount-suffix">waiting</span>
+                    </div>
+                  </div>
+                  <div className="revenue-opp-card__footer">
+                    <span className="revenue-opp-card__hint">Ready to collect</span>
+                    <span className="revenue-opp-card__cta">View active jobs →</span>
+                  </div>
+                </Link>
+                <Link href="/dashboard/invoices" className="revenue-opp-card revenue-opp-card--invoices">
+                  <div className="revenue-opp-card__label">Unpaid Invoices</div>
+                  <div className="revenue-opp-card__metrics">
+                    <span className="revenue-opp-card__count">{revenueOpportunities.unpaidInvoiceCount}</span>
+                    <div className="revenue-opp-card__amount-block">
+                      <span className="revenue-opp-card__amount">
+                        {fmtMoney(revenueOpportunities.unpaidOutstanding)}
+                      </span>
+                      <span className="revenue-opp-card__amount-suffix">outstanding</span>
+                    </div>
+                  </div>
+                  <div className="revenue-opp-card__footer">
+                    <span className="revenue-opp-card__hint">Payment follow-up needed</span>
+                    <span className="revenue-opp-card__cta">View invoices →</span>
+                  </div>
+                </Link>
+              </div>
             </div>
-            <div className="revenue-opportunities-module__grid">
-              <Link href="/dashboard/estimates" className="revenue-opp-card revenue-opp-card--estimates">
-                <div className="revenue-opp-card__label">Pending Estimates</div>
-                <div className="revenue-opp-card__metrics">
-                  <span className="revenue-opp-card__count">{revenueOpportunities.pendingEstimatesCount}</span>
-                  <div className="revenue-opp-card__amount-block">
-                    <span className="revenue-opp-card__amount">
-                      {fmtMoney(revenueOpportunities.pendingEstimatesPotential)}
-                    </span>
-                    <span className="revenue-opp-card__amount-suffix">potential</span>
-                  </div>
-                </div>
-                <div className="revenue-opp-card__footer">
-                  <span className="revenue-opp-card__hint">Needs follow-up</span>
-                  <span className="revenue-opp-card__cta">View estimates →</span>
-                </div>
-              </Link>
-              <Link href="/dashboard/work-orders" className="revenue-opp-card revenue-opp-card--pickup">
-                <div className="revenue-opp-card__label">Ready for Pickup</div>
-                <div className="revenue-opp-card__metrics">
-                  <span className="revenue-opp-card__count">{revenueOpportunities.readyPickupCount}</span>
-                  <div className="revenue-opp-card__amount-block">
-                    <span className="revenue-opp-card__amount">
-                      {fmtMoney(revenueOpportunities.readyPickupInvoiceTotal)}
-                    </span>
-                    <span className="revenue-opp-card__amount-suffix">waiting</span>
-                  </div>
-                </div>
-                <div className="revenue-opp-card__footer">
-                  <span className="revenue-opp-card__hint">Ready to collect</span>
-                  <span className="revenue-opp-card__cta">View active jobs →</span>
-                </div>
-              </Link>
-              <Link href="/dashboard/invoices" className="revenue-opp-card revenue-opp-card--invoices">
-                <div className="revenue-opp-card__label">Unpaid Invoices</div>
-                <div className="revenue-opp-card__metrics">
-                  <span className="revenue-opp-card__count">{revenueOpportunities.unpaidInvoiceCount}</span>
-                  <div className="revenue-opp-card__amount-block">
-                    <span className="revenue-opp-card__amount">
-                      {fmtMoney(revenueOpportunities.unpaidOutstanding)}
-                    </span>
-                    <span className="revenue-opp-card__amount-suffix">outstanding</span>
-                  </div>
-                </div>
-                <div className="revenue-opp-card__footer">
-                  <span className="revenue-opp-card__hint">Payment follow-up needed</span>
-                  <span className="revenue-opp-card__cta">View invoices →</span>
-                </div>
-              </Link>
-            </div>
-          </div>
+          )}
         </div>
+        )}
 
-        {/* ── Today's Priorities (shop-floor ops; uses data already loaded — not revenue duplicates) ─ */}
+        {!isServiceAdvisor && (
         <div className="todays-priorities-module">
           <div className="todays-priorities-module__head">
             <div className="todays-priorities-module__title">Today&apos;s Priorities</div>
             <p className="todays-priorities-module__sub">
-              Schedule and shop floor — use Revenue Opportunities for money still in play.
+              {canViewFinancialOverview
+                ? 'Schedule and shop floor — use Revenue Opportunities for money still in play.'
+                : 'Arrive, inspect, dispatch, and keep jobs moving — appointments, active work, inspections, and completed vehicles.'}
             </p>
           </div>
           <div className="todays-priorities-module__grid">
@@ -522,253 +1055,276 @@ export default async function DashboardPage() {
             </Link>
           </div>
         </div>
+        )}
 
-        {/* ── Operational pipeline (3 columns) ───────────────────────────── */}
-        <div className="card" style={{ marginBottom: 24, padding: '18px 18px 16px' }}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
-            <div>
-              <div style={sectionLabel}>Shop pipeline</div>
-              <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: -4 }}>
-                Estimates awaiting action, active work, and completed jobs
+        {isServiceAdvisor && (
+          <>
+            <div className="todays-priorities-module" style={{ marginBottom: 16 }}>
+              <div className="todays-priorities-module__head">
+                <div className="todays-priorities-module__title">Primary actions</div>
+                <p className="todays-priorities-module__sub">
+                  Counts only — open the calendar, jobs, inspections, estimates, and pickups.
+                </p>
+              </div>
+              <div className="todays-priorities-module__grid">
+                <Link href="/dashboard/appointments" className="today-priority-card today-priority-card--appts">
+                  <div className="today-priority-card__label">Today&apos;s Appointments</div>
+                  <div className="today-priority-card__metrics">
+                    <span className="today-priority-card__count">{todayAppts.length}</span>
+                  </div>
+                  <div className="today-priority-card__footer">
+                    <span className="today-priority-card__hint">Calendar &amp; arrivals</span>
+                    <span className="today-priority-card__cta">Open →</span>
+                  </div>
+                </Link>
+                <Link href="/dashboard/work-orders" className="today-priority-card today-priority-card--active-jobs">
+                  <div className="today-priority-card__label">Active Jobs</div>
+                  <div className="today-priority-card__metrics">
+                    <span className="today-priority-card__count">{activeJobCount}</span>
+                  </div>
+                  <div className="today-priority-card__footer">
+                    <span className="today-priority-card__hint">In progress + ready</span>
+                    <span className="today-priority-card__cta">Open →</span>
+                  </div>
+                </Link>
+                <Link href="/dashboard/inspections" className="today-priority-card today-priority-card--inspections">
+                  <div className="today-priority-card__label">Pending Inspections</div>
+                  <div className="today-priority-card__metrics">
+                    <span className="today-priority-card__count">{pendingInsp}</span>
+                  </div>
+                  <div className="today-priority-card__footer">
+                    <span className="today-priority-card__hint">Awaiting review</span>
+                    <span className="today-priority-card__cta">Open →</span>
+                  </div>
+                </Link>
+                <Link href="/dashboard/estimates" className="today-priority-card today-priority-card--appts">
+                  <div className="today-priority-card__label">Estimates needing follow-up</div>
+                  <div className="today-priority-card__metrics">
+                    <span className="today-priority-card__count">{revenueOpportunities.pendingEstimatesCount}</span>
+                  </div>
+                  <div className="today-priority-card__footer">
+                    <span className="today-priority-card__hint">Present &amp; follow up</span>
+                    <span className="today-priority-card__cta">Open →</span>
+                  </div>
+                </Link>
+                <Link href="/dashboard/work-orders" className="today-priority-card today-priority-card--completed-today">
+                  <div className="today-priority-card__label">Vehicles ready for pickup</div>
+                  <div className="today-priority-card__metrics">
+                    <span className="today-priority-card__count">{revenueOpportunities.readyPickupCount}</span>
+                  </div>
+                  <div className="today-priority-card__footer">
+                    <span className="today-priority-card__hint">Notify &amp; release</span>
+                    <span className="today-priority-card__cta">Open →</span>
+                  </div>
+                </Link>
               </div>
             </div>
-          </div>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-              gap: 14,
-            }}
-          >
-            {/* Column 1 — Estimates */}
+          </>
+        )}
+
+        {pipelineEl}
+        {scheduleEl}
+
+        {isServiceAdvisor && (
+          <div className="card" style={{ marginBottom: 24, padding: '16px 16px 14px' }}>
             <div
               style={{
-                borderRadius: 10,
-                border: '1px solid rgba(234, 179, 8, 0.35)',
-                background: 'linear-gradient(180deg, rgba(254, 252, 232, 0.35) 0%, var(--bg-2) 48%)',
-                borderTop: '3px solid #ca8a04',
-                padding: '12px 12px 10px',
-                minWidth: 0,
+                fontFamily: 'var(--font-display)',
+                fontSize: 17,
+                fontWeight: 700,
+                color: 'var(--navy)',
+                letterSpacing: '-0.02em',
+                marginBottom: 6,
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>Estimates</div>
-                <Link href="/dashboard/estimates" className="btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }}>All</Link>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 10 }}>Draft, presented, reopened</div>
-              {pipelineEstimates.length === 0 ? (
-                <div style={{ fontSize: 12, color: 'var(--text-3)', padding: '12px 0' }}>None in this stage.</div>
-              ) : (
-                <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {pipelineEstimates.map(e => {
-                    const aging = estimatePipelineAging(e.updated_at)
-                    return (
-                      <li key={e.id}>
-                        <Link
-                          href={`/dashboard/estimates/${e.id}`}
-                          style={{
-                            display: 'block',
-                            textDecoration: 'none',
-                            color: 'inherit',
-                            padding: '10px 10px',
-                            borderRadius: 8,
-                            border: pipelineCardBorder.estimates,
-                            background: 'var(--surface-2)',
-                          }}
-                        >
-                          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
-                            {e.customer_id ? (customerNames.get(e.customer_id) ?? '—') : '—'}
-                          </div>
-                          <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4, lineHeight: 1.35 }}>
-                            {e.vehicle_id ? (vehicleLabels.get(e.vehicle_id) ?? '—') : '—'}
-                          </div>
-                          <div className={`pipeline-aging pipeline-aging--${aging.bucket}`}>{aging.line}</div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 10 }}>
-                            <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>
-                              {fmtMoney(e.total)}
-                            </span>
-                            <StatusBadge status={e.status} />
-                          </div>
-                        </Link>
-                      </li>
-                    )
-                  })}
-                </ul>
+              Advisor Action Queue
+            </div>
+            <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 12, lineHeight: 1.5 }}>
+              Next items to touch — approvals, active work, pickups, and customer messages.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {pendingInsp > 0 && (
+                <Link
+                  href="/dashboard/inspections"
+                  style={{ ...advisorQueueCardShell, border: advisorQueueInspectionBorder }}
+                >
+                  <AdvisorQueueStageLabel text="Inspection awaiting review" />
+                  <div style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.3, color: 'var(--text)', marginBottom: 4 }}>
+                    {pendingInsp} {pendingInsp === 1 ? 'inspection' : 'inspections'}
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)', lineHeight: 1.45, marginBottom: 4 }}>
+                    Review findings and next steps
+                  </div>
+                  <div className="pipeline-aging pipeline-aging--fresh">
+                    {pendingInsp === 1 ? '1 pending on the board' : `${pendingInsp} pending on the board`}
+                  </div>
+                </Link>
               )}
-            </div>
-
-            {/* Column 2 — Work orders (active) */}
-            <div
-              style={{
-                borderRadius: 10,
-                border: '1px solid rgba(59, 130, 246, 0.35)',
-                background: 'linear-gradient(180deg, rgba(239, 246, 255, 0.25) 0%, var(--bg-2) 48%)',
-                borderTop: '3px solid #2563eb',
-                padding: '12px 12px 10px',
-                minWidth: 0,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>Work orders</div>
-                <Link href="/dashboard/work-orders" className="btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }}>All</Link>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 10 }}>In progress or ready for work</div>
-              {inProgressWO.length === 0 ? (
-                <div style={{ fontSize: 12, color: 'var(--text-3)', padding: '12px 0' }}>Bay clear.</div>
-              ) : (
-                <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {inProgressWO.map(w => {
-                    const aging = activeWorkOrderPipelineAging(w.updated_at)
-                    return (
-                      <li key={w.id}>
-                        <Link
-                          href={`/dashboard/work-orders/${w.id}`}
-                          style={{
-                            display: 'block',
-                            textDecoration: 'none',
-                            color: 'inherit',
-                            padding: '10px 10px',
-                            borderRadius: 8,
-                            border: pipelineCardBorder.workOrders,
-                            background: 'var(--surface-2)',
-                          }}
-                        >
-                          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
-                            {w.customer_id ? (customerNames.get(w.customer_id) ?? '—') : '—'}
-                          </div>
-                          <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4, lineHeight: 1.35 }}>
-                            {w.vehicle_id ? (vehicleLabels.get(w.vehicle_id) ?? '—') : '—'}
-                          </div>
-                          <div className={`pipeline-aging pipeline-aging--${aging.bucket}`}>{aging.line}</div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 10 }}>
-                            <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>
-                              {fmtMoney(w.total)}
-                            </span>
-                            <StatusBadge status={w.status} />
-                          </div>
-                        </Link>
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
-            </div>
-
-            {/* Column 3 — Completed / ready for pickup */}
-            <div
-              style={{
-                borderRadius: 10,
-                border: '1px solid rgba(34, 197, 94, 0.35)',
-                background: 'linear-gradient(180deg, rgba(240, 253, 244, 0.22) 0%, var(--bg-2) 48%)',
-                borderTop: '3px solid #16a34a',
-                padding: '12px 12px 10px',
-                minWidth: 0,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>Completed / ready</div>
-                <Link href="/dashboard/work-orders" className="btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }}>All</Link>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 10 }}>Work complete — customer pickup</div>
-              {completedWO.length === 0 ? (
-                <div style={{ fontSize: 12, color: 'var(--text-3)', padding: '12px 0' }}>No completed jobs yet.</div>
-              ) : (
-                <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {completedWO.map(w => {
-                    const aging = completedWorkOrderPipelineAging(w.completed_at, w.updated_at)
-                    return (
-                    <li key={w.id}>
-                      <Link
-                        href={`/dashboard/work-orders/${w.id}`}
+              {pipelineEstimates.slice(0, 3).map(e => {
+                const aging = estimatePipelineAging(e.updated_at)
+                const cust = e.customer_id ? (customerNames.get(e.customer_id) ?? '—') : '—'
+                const veh = e.vehicle_id ? (vehicleLabels.get(e.vehicle_id) ?? '—') : '—'
+                return (
+                  <Link
+                    key={`q-est-${e.id}`}
+                    href={`/dashboard/estimates/${e.id}`}
+                    style={{ ...advisorQueueCardShell, border: pipelineCardBorder.estimates }}
+                  >
+                    <AdvisorQueueStageLabel text="Needs customer approval" />
+                    <PipelineJobCardHeader
+                      customerLabel={cust}
+                      docLabel={pipelineEstimateDoc(e)}
+                      techAssigned={false}
+                    />
+                    <div
+                      style={{
+                        fontSize: 14,
+                        fontWeight: 600,
+                        color: 'var(--text-2)',
+                        lineHeight: 1.45,
+                        marginBottom: 2,
+                      }}
+                    >
+                      {veh}
+                    </div>
+                    <div className={`pipeline-aging pipeline-aging--${aging.bucket}`}>{aging.line}</div>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+                      <StatusBadge status={e.status} />
+                    </div>
+                  </Link>
+                )
+              })}
+              {inProgressWO.slice(0, 3).map(w => {
+                const aging = activeWorkOrderPipelineAging(w.updated_at)
+                const prog = pipelineWorkOrderProgressHint(w, 'active')
+                const cust = w.customer_id ? (customerNames.get(w.customer_id) ?? '—') : '—'
+                const veh = w.vehicle_id ? (vehicleLabels.get(w.vehicle_id) ?? '—') : '—'
+                return (
+                  <Link
+                    key={`q-wo-${w.id}`}
+                    href={`/dashboard/work-orders/${w.id}`}
+                    style={{ ...advisorQueueCardShell, border: pipelineCardBorder.workOrders }}
+                  >
+                    <AdvisorQueueStageLabel text="Active job needs attention" />
+                    <PipelineJobCardHeader
+                      customerLabel={cust}
+                      docLabel={pipelineWorkOrderDoc(w)}
+                      techAssigned={Boolean(w.technician_id)}
+                    />
+                    <div
+                      style={{
+                        fontSize: 14,
+                        fontWeight: 600,
+                        color: 'var(--text-2)',
+                        lineHeight: 1.45,
+                        marginBottom: 2,
+                      }}
+                    >
+                      {veh}
+                    </div>
+                    {prog ? (
+                      <div
                         style={{
-                          display: 'block',
-                          textDecoration: 'none',
-                          color: 'inherit',
-                          padding: '10px 10px',
-                          borderRadius: 8,
-                          border: pipelineCardBorder.completed,
-                          background: 'var(--surface-2)',
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: 'var(--text-2)',
+                          marginTop: 4,
+                          lineHeight: 1.35,
                         }}
                       >
-                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
-                          {w.customer_id ? (customerNames.get(w.customer_id) ?? '—') : '—'}
-                        </div>
-                        <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4, lineHeight: 1.35 }}>
-                          {w.vehicle_id ? (vehicleLabels.get(w.vehicle_id) ?? '—') : '—'}
-                        </div>
-                        <div className={`pipeline-aging pipeline-aging--${aging.bucket}`}>{aging.line}</div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 10 }}>
-                          <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>
-                            {fmtMoney(w.total)}
-                          </span>
-                          <StatusBadge status="completed" label="Ready for Pickup" />
-                        </div>
-                      </Link>
-                    </li>
-                    )
-                  })}
-                </ul>
+                        {prog}
+                      </div>
+                    ) : null}
+                    <div className={`pipeline-aging pipeline-aging--${aging.bucket}`}>{aging.line}</div>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+                      <StatusBadge status={w.status} />
+                    </div>
+                  </Link>
+                )
+              })}
+              {completedWO.slice(0, 3).map(w => {
+                const aging = completedWorkOrderPipelineAging(w.completed_at, w.updated_at)
+                const prog = pipelineWorkOrderProgressHint(w, 'completed')
+                const cust = w.customer_id ? (customerNames.get(w.customer_id) ?? '—') : '—'
+                const veh = w.vehicle_id ? (vehicleLabels.get(w.vehicle_id) ?? '—') : '—'
+                return (
+                  <Link
+                    key={`q-pu-${w.id}`}
+                    href={`/dashboard/work-orders/${w.id}`}
+                    style={{ ...advisorQueueCardShell, border: pipelineCardBorder.completed }}
+                  >
+                    <AdvisorQueueStageLabel text="Ready — notify customer" />
+                    <PipelineJobCardHeader
+                      customerLabel={cust}
+                      docLabel={pipelineWorkOrderDoc(w)}
+                      techAssigned={Boolean(w.technician_id)}
+                    />
+                    <div
+                      style={{
+                        fontSize: 14,
+                        fontWeight: 600,
+                        color: 'var(--text-2)',
+                        lineHeight: 1.45,
+                        marginBottom: 2,
+                      }}
+                    >
+                      {veh}
+                    </div>
+                    {prog ? (
+                      <div
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: 'var(--text-2)',
+                          marginTop: 4,
+                          lineHeight: 1.35,
+                        }}
+                      >
+                        {prog}
+                      </div>
+                    ) : null}
+                    <div className={`pipeline-aging pipeline-aging--${aging.bucket}`}>{aging.line}</div>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+                      <StatusBadge status="completed" label="Ready for Pickup" />
+                    </div>
+                  </Link>
+                )
+              })}
+              {msgCount > 0 && (
+                <Link
+                  href="/dashboard/communications"
+                  style={{
+                    ...advisorQueueCardShell,
+                    border: advisorQueueMessagesBorder,
+                    background: 'linear-gradient(90deg, rgba(37, 99, 235, 0.06) 0%, var(--surface) 50%)',
+                  }}
+                >
+                  <AdvisorQueueStageLabel text="Customer messages" />
+                  <div style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.3, color: 'var(--text)', marginBottom: 4 }}>
+                    {msgCount} this week
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)', lineHeight: 1.45, marginBottom: 4 }}>
+                    Review threads in communications
+                  </div>
+                  <div className="pipeline-aging pipeline-aging--fresh">Open messages →</div>
+                </Link>
               )}
-            </div>
-          </div>
-        </div>
-
-        {/* ── Today&apos;s schedule ───────────────────────────────────────── */}
-        <div style={{ marginBottom: 24 }}>
-          <div className="card">
-            <div className="section-header">
-              <div>
-                <div className="section-title">Today&apos;s schedule</div>
-                <div className="section-subtitle">{today}</div>
-              </div>
-              <Link href="/dashboard/appointments" className="btn-ghost">Calendar</Link>
-            </div>
-            {todayAppts.length === 0 ? (
-              <div className="empty-state" style={{ padding: '24px 12px' }}>
-                <div className="empty-state-icon">📅</div>
-                <div className="empty-state-title">Clear calendar</div>
-                <div className="empty-state-body">No appointments on the books for today.</div>
-              </div>
-            ) : (
-              <div className="table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Time</th>
-                      <th>Customer</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {todayAppts.slice(0, 6).map(a => (
-                      <tr key={a.id}>
-                        <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>
-                          {a.appointment_time
-                            ? format(new Date(`2000-01-01T${a.appointment_time}`), 'h:mm a')
-                            : '—'}
-                        </td>
-                        <td style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)' }}>
-                          {a.customer ? `${a.customer.first_name} ${a.customer.last_name}` : '—'}
-                        </td>
-                        <td><StatusBadge status={a.status} /></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {todayAppts.length > 6 && (
-                  <div style={{ fontSize: 12, color: 'var(--text-3)', padding: '10px 0 0', textAlign: 'center' }}>
-                    +{todayAppts.length - 6} more —{' '}
-                    <Link href="/dashboard/appointments" style={{ color: '#2563eb', fontWeight: 600 }}>view all</Link>
+              {pendingInsp === 0 &&
+                pipelineEstimates.length === 0 &&
+                inProgressWO.length === 0 &&
+                completedWO.length === 0 &&
+                msgCount === 0 && (
+                  <div style={{ fontSize: 13, color: 'var(--text-2)', padding: '6px 0' }}>
+                    Nothing queued here yet — you&apos;re caught up on these work types.
                   </div>
                 )}
-              </div>
-            )}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* ── Secondary pulse ───────────────────────────────────────────── */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10, marginBottom: 20 }}>
-          {secondaryKpis.map(k => (
+          {secondaryKpisDisplayed.map(k => (
             <Link key={k.label} href={k.href} style={{ textDecoration: 'none', color: 'inherit' }}>
               <div
                 style={{
@@ -793,7 +1349,7 @@ export default async function DashboardPage() {
               </div>
             </Link>
           ))}
-          {billing && (
+          {canViewFinancialOverview && billing && (
             <Link href="/dashboard/billing" style={{ textDecoration: 'none', color: 'inherit' }}>
               <div style={{ ...inset, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
                 <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Subscription</div>
